@@ -16,7 +16,8 @@ from collections import Counter
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent  # real location (symlinks resolved)
+BASE_DIR = Path.cwd()                         # In/ and Out/ are taken from the current folder
 IN_DIR = BASE_DIR / "In"
 OUT_DIR = BASE_DIR / "Out"
 UNKNOWN_AUTHOR = "Unknown Author"
@@ -199,6 +200,7 @@ def main() -> int:
     sys.stdout.reconfigure(line_buffering=True)
     if not IN_DIR.is_dir():
         print(f"❌ Folder not found: {IN_DIR}")
+        print("   Run the script from a folder that contains In/ with your .epub files.")
         return 1
     # Protect sources: Out must not be the same as In or nested inside it
     in_real, out_real = IN_DIR.resolve(), OUT_DIR.resolve()
@@ -257,7 +259,7 @@ def main() -> int:
     # Rebuild the catalog Out/index.html (make_index.py lives next to this script)
     print("\n🗂  Building catalog...")
     try:
-        sys.path.insert(0, str(BASE_DIR))
+        sys.path.insert(0, str(SCRIPT_DIR))
         from make_index import build_index
     except ImportError as e:
         print(f"⚠️  Catalog skipped: make_index.py not found next to this script ({e})")

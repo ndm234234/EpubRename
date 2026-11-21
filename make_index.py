@@ -2,7 +2,7 @@
 """Build index.html — a browsable catalog of all EPUB books in a folder.
 
 Usage:
-    python3 make_index.py [FOLDER]        (default: current folder)
+    python3 make_index.py [FOLDER]        (default: ./Out)
 
 The folder is scanned recursively. The catalog shows covers, authors, titles,
 descriptions, has search, sorting and grouping by author; clicking a book opens
@@ -372,7 +372,7 @@ def build_page(books: list[dict], title: str) -> str:
 def main() -> int:
     sys.stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(description="Create index.html catalog for EPUB books in a folder.")
-    parser.add_argument("folder", nargs="?", default=".", help="folder with books (default: current)")
+    parser.add_argument("folder", nargs="?", default="Out", help="folder with books (default: Out in the current folder)")
     parser.add_argument("--title", help="catalog title (default: Books)")
     args = parser.parse_args()
     return build_index(Path(args.folder), args.title)

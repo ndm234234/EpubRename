@@ -35,8 +35,8 @@ Works on Linux, macOS and Windows.
 python3 epub_rename.py
 ```
 
-The `In/` and `Out/` folders are looked up next to the script, so it can be run
-from any directory. `Out/` is created automatically.
+`In/` and `Out/` are taken from the **current folder**: run the script where your `In/`
+folder is. `Out/` is created automatically.
 
 ```
 In/                                  Out/
@@ -113,7 +113,7 @@ Constants at the top of `epub_rename.py`:
 python3 make_index.py [FOLDER] [--title "My Library"]
 ```
 
-Scans `FOLDER` (default: current folder) recursively and writes:
+Scans `FOLDER` (default: `Out` in the current folder) recursively and writes:
 
 - `FOLDER/index.html` — the catalog page;
 - `FOLDER/.index/covers/` — small cover copies (reused on the next run; covers of
