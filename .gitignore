@@ -1,0 +1,20 @@
+# Books — copyrighted, never commit them
+In/
+Out/
+*.epub
+
+# Generated catalog
+index.html
+.index/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
