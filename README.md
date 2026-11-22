@@ -5,7 +5,7 @@ Two small Python scripts to tidy up an EPUB collection:
 - **`epub_rename.py`** — copies books from `In/` into `Out/<Author>/<Author> - <Title>.epub`,
   using the author and title stored inside each book, and verifies every copy.
 - **`make_index.py`** — builds `index.html`, an offline catalog of a book folder
-  with covers, search and sorting. It runs automatically at the end of `epub_rename.py`
+  with covers, search, sorting and a built-in reader. It runs automatically at the end of `epub_rename.py`
   and can also be used on its own for any folder.
 
 No dependencies besides Python. [Pillow](https://pypi.org/project/pillow/) is optional
@@ -117,7 +117,9 @@ Scans `FOLDER` (default: `Out` in the current folder) recursively and writes:
 
 - `FOLDER/index.html` — the catalog page;
 - `FOLDER/.index/covers/` — small cover copies (reused on the next run; covers of
-  removed books are cleaned up).
+  removed books are cleaned up);
+- `FOLDER/.index/reader/` — the reader (copied from `reader/` next to the script);
+- `FOLDER/Open Library.bat`, `FOLDER/Open Library.sh` — launchers (from `launchers/`).
 
 EPUB files are only read. Keep `.index/` next to `index.html` when moving the catalog.
 
@@ -130,9 +132,39 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
 - Click an author to see all their books.
 - Sort by author, title, recently added or size; optional grouping by author.
   Settings are remembered.
-- Click a **title** to open the book, a **cover** to open its folder (as a file list in
-  the browser — browsers can't open the system file manager).
-- Light and dark theme; works offline from a local disk or USB stick.
+- Click a **cover** or a **title** to read the book in the browser.
+- **⬇ Save as…** under the cover saves the EPUB file: Chrome/Edge (via the launcher) show
+  a dialog to choose the folder; other browsers download it as usual.
+- **📂 Open file…** opens any EPUB from disk in the reader.
+
+### Reader
+
+A single offline page (`reader/reader.html`) built on [epub.js](https://github.com/futurepress/epub.js)
+and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). Nothing is uploaded.
+
+- Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows, swipe on touch screens.
+- Table of contents (`T`), current chapter, page in chapter and % of the book.
+- Progress slider at the bottom: shows how much is read; drag it to jump anywhere
+  (while dragging it shows the % and chapter you'll land on).
+- Remembers where you stopped in each book (in the browser's `localStorage`),
+  also when the same book is opened by picking the file by hand.
+- Font size (`+` / `−`) and light / sepia / dark theme, remembered.
+- Drag an EPUB onto the page to open it.
+
+### Open Library launchers
+
+Browsers don't let a page opened straight from disk (`file://`) read other files, so
+`index.html` opened by double-click can only ask you to pick each book file.
+For one-click reading, open the catalog with the launcher placed next to `index.html`:
+
+- **Windows:** double-click `Open Library.bat` (uses the built-in PowerShell, nothing to install).
+- **Linux:** run `Open Library.sh` (needs `python3`; in a file manager: right-click →
+  *Run as a Program*, or `sh "Open Library.sh"` in a terminal).
+
+The launcher starts a tiny web server on this computer only (`localhost:48765`; if another
+program uses that port, the next free one up to 48784) and opens the catalog in the browser. Close the window (or `Ctrl+C`) to stop it; the Linux one
+also stops after 3 hours without use. Running it again while it works just opens the browser.
+Reading places are stored per address, so keep using the launcher to keep them.
 
 ## Notes and limitations
 

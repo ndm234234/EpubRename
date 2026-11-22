@@ -5,10 +5,12 @@ Usage:
     python3 make_index.py [FOLDER]        (default: ./Out)
 
 The folder is scanned recursively. The catalog shows covers, authors, titles,
-descriptions, has search, sorting and grouping by author; clicking a book opens
-the file. Works offline; no internet or server needed.
+descriptions, has search, sorting and grouping by author; clicking a title
+opens the book in the built-in reader (epub.js, offline). Works offline; no internet or server needed.
 
-Written files:  FOLDER/index.html  and small cover copies in  FOLDER/.index/covers/
+Written files:  FOLDER/index.html, small cover copies in  FOLDER/.index/covers/
+the reader in  FOLDER/.index/reader/  and the "Open Library" launchers in  FOLDER/
+(they open the catalog through a tiny local web server, so books open with a click).
 EPUB files are only read, never modified.
 Pillow (optional) is used to shrink covers; without it covers are copied as is.
 """
@@ -20,6 +22,7 @@ import io
 import json
 import posixpath
 import re
+import shutil
 import sys
 import urllib.parse
 import zipfile
@@ -41,6 +44,9 @@ THUMB_SIZE = (300, 450)   # max cover size in the catalog, px
 THUMB_QUALITY = 82        # JPEG quality of cover copies
 INDEX_DIR = ".index"      # subfolder for catalog files (covers)
 COVERS_DIR = "covers"
+READER_DIR = "reader"     # reader page + epub.js, copied from next to this script
+READER_SRC = Path(__file__).resolve().parent / "reader"
+LAUNCHERS_SRC = Path(__file__).resolve().parent / "launchers"   # "Open Library" .bat / .sh
 DEFAULT_TITLE = "Books"    # catalog title shown on the page
 
 
@@ -197,6 +203,8 @@ PAGE = r"""<!DOCTYPE html>
          border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); }
   select, button { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
          background: var(--card); color: var(--text); cursor: pointer; }
+  .btn { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card);
+         color: var(--text); text-decoration: none; white-space: nowrap; }
   button[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
   main { max-width: 1400px; margin: 0 auto; padding: 20px 24px 60px; }
   h2 { font-size: 17px; margin: 28px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
@@ -207,7 +215,7 @@ PAGE = r"""<!DOCTYPE html>
   .cover { display: block; aspect-ratio: 2 / 3; background: var(--chip); overflow: hidden; }
   .cover { position: relative; }
   .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .cover::after { content: "📁"; position: absolute; right: 8px; bottom: 8px; font-size: 20px;
+  .cover::after { content: "📖"; position: absolute; right: 8px; bottom: 8px; font-size: 20px;
                   padding: 4px 6px; border-radius: 8px; background: rgba(0,0,0,.55);
                   opacity: 0; transition: opacity .15s; }
   .cover:hover::after { opacity: 1; }
@@ -221,11 +229,18 @@ PAGE = r"""<!DOCTYPE html>
   .authors a { color: inherit; text-decoration: none; cursor: pointer; }
   .authors a:hover { color: var(--accent); text-decoration: underline; }
   .meta { color: var(--muted); font-size: 12px; }
+  .save { display: block; padding: 7px 12px; text-align: center; font-size: 13px; text-decoration: none;
+          color: var(--accent); border-bottom: 1px solid var(--line); }
+  .save:hover { background: var(--chip); }
   .err { color: #d33; font-size: 12px; }
   details { margin-top: 4px; font-size: 13px; }
   summary { cursor: pointer; color: var(--accent); list-style: none; }
   summary::-webkit-details-marker { display: none; }
   details p { white-space: pre-line; margin: 6px 0 0; }
+  .note { max-width: 1400px; margin: 14px auto 0; padding: 10px 14px; border-radius: 8px;
+          border: 1px solid var(--line); background: var(--card); color: var(--muted); font-size: 14px; }
+  .note b { color: var(--text); }
+  @media (max-width: 1448px) { .note { margin: 14px 24px 0; } }
   .empty { color: var(--muted); text-align: center; padding: 60px 0; }
   footer { color: var(--muted); font-size: 12px; text-align: center; padding-bottom: 30px; }
 </style>
@@ -241,10 +256,14 @@ PAGE = r"""<!DOCTYPE html>
     <option value="added">Sort: recently added</option>
     <option value="size">Sort: file size</option>
   </select>
+  <a id="openFile" class="btn" href="__READER__" title="Open any EPUB file in the reader">📂 Open file…</a>
   <button id="group" aria-pressed="false" title="Group books by author">👤 Group by author</button>
 </div></header>
+<div id="fileNote" class="note" hidden>Opened directly from disk: books ask you to choose
+  the file. For one-click reading open the catalog with <b>Open Library</b>
+  (<code>Open Library.bat</code> on Windows, <code>Open Library.sh</code> on Linux) in this folder.</div>
 <main id="list"></main>
-<footer>Generated __DATE__ · click a cover to open its folder, a title to open the book</footer>
+<footer>Generated __DATE__ · click a cover or a title to read the book</footer>
 
 <script id="data" type="application/json">__DATA__</script>
 <script>
@@ -281,13 +300,34 @@ function placeholder(b) {
   return ph;
 }
 
+// Reader lives in .index/reader/, so book paths are given relative to it
+const readerUrl = b => "__READER__#book=" + encodeURIComponent("../../" + b.href);
+
+// "Save as": Chrome/Edge show a save dialog to choose the folder; other browsers
+// (and pages opened from disk) fall back to a normal download of the link.
+async function saveAs(e, href, fileName) {
+  if (!window.showSaveFilePicker || location.protocol === "file:") return;
+  e.preventDefault();
+  let handle;
+  try {
+    handle = await showSaveFilePicker({ suggestedName: fileName,
+      types: [{ description: "EPUB book", accept: { "application/epub+zip": [".epub"] } }] });
+  } catch (err) {
+    // Dialog not available here: plain download instead
+    if (err.name !== "AbortError") Object.assign(document.createElement("a"), { href, download: fileName }).click();
+    return;
+  }
+  try {
+    const r = await fetch(href);
+    if (!r.ok) throw new Error(r.status + " " + r.statusText);
+    const w = await handle.createWritable();
+    await r.body.pipeTo(w);
+  } catch (err) { alert("Can't save " + fileName + ": " + err.message); }
+}
+
 function card(b) {
-  // Cover opens the book's folder (as a file list in a new browser tab)
-  const slash = b.href.lastIndexOf("/");
-  const folder = slash >= 0 ? b.href.slice(0, slash + 1) : "./";
-  const folderName = slash >= 0 ? decodeURIComponent(folder) : "(catalog folder)";
-  const cover = el("a", { class: "cover", href: folder, target: "_blank",
-                          title: "📁 Open folder: " + folderName },
+  // Cover opens the book in the reader, like the title
+  const cover = el("a", { class: "cover", href: readerUrl(b), title: "📖 Read in the browser" },
                    b.cover ? el("img", { src: b.cover, alt: "", loading: "lazy" }) : placeholder(b));
   const authors = el("div", { class: "authors" });
   (b.authors.length ? b.authors : ["Unknown Author"]).forEach((a, i) => {
@@ -301,9 +341,13 @@ function card(b) {
   if (b.description) {
     desc = el("details", {}, el("summary", {}, "Description"), el("p", {}, b.description));
   }
-  return el("article", { class: "book" }, cover,
+  const fileName = b.file.split("/").pop();
+  const save = el("a", { class: "save", href: b.href, download: fileName,
+                         title: "Save the EPUB file: " + fileName }, "⬇ Save as…");
+  save.addEventListener("click", e => saveAs(e, b.href, fileName));
+  return el("article", { class: "book" }, cover, save,
     el("div", { class: "info" },
-      el("a", { class: "title", href: b.href }, b.title), authors,
+      el("a", { class: "title", href: readerUrl(b), title: "Read in the browser" }, b.title), authors,
       el("div", { class: "meta" }, meta),
       b.error ? el("div", { class: "err" }, "⚠ " + b.error) : null, desc));
 }
@@ -342,6 +386,7 @@ function render() {
   }
 }
 
+if (location.protocol === "file:") $("fileNote").hidden = false;
 $("q").addEventListener("input", render);
 $("sort").addEventListener("change", () => { save(); render(); });
 $("group").addEventListener("click", e => {
@@ -364,6 +409,7 @@ def build_page(books: list[dict], title: str) -> str:
     data = json.dumps(books, ensure_ascii=False).replace("<", "\\u003c")
     return (PAGE.replace("__TITLE__", html.escape(title))
                 .replace("__DATE__", datetime.now().strftime("%Y-%m-%d %H:%M"))
+                .replace("__READER__", f"{INDEX_DIR}/{READER_DIR}/reader.html")
                 .replace("__DATA__", data))
 
 
@@ -376,6 +422,29 @@ def main() -> int:
     parser.add_argument("--title", help="catalog title (default: Books)")
     args = parser.parse_args()
     return build_index(Path(args.folder), args.title)
+
+
+def install_reader(dest: Path) -> None:
+    """Copy the reader (reader.html + epub.js + JSZip) next to the catalog."""
+    if not READER_SRC.is_dir():
+        print(f"⚠️  Reader not found in {READER_SRC}: books will open as plain files")
+        return
+    dest.mkdir(parents=True, exist_ok=True)
+    names = {f.name for f in READER_SRC.iterdir() if f.is_file()}
+    for name in names:
+        shutil.copy2(READER_SRC / name, dest / name)
+    for f in dest.iterdir():
+        if f.is_file() and f.name not in names:
+            f.unlink()
+
+
+def install_launchers(root: Path) -> None:
+    """Put "Open Library.bat" (Windows) and "Open Library.sh" (Linux) next to index.html."""
+    if not LAUNCHERS_SRC.is_dir():
+        return
+    for f in LAUNCHERS_SRC.iterdir():
+        if f.is_file():
+            shutil.copy2(f, root / f.name)   # copy2 keeps the executable bit of .sh
 
 
 def build_index(folder: Path, title: str | None = None) -> int:
@@ -426,6 +495,9 @@ def build_index(folder: Path, title: str | None = None) -> int:
         if f.is_file() and f.name not in used_covers:
             f.unlink()
             removed += 1
+
+    install_reader(root / INDEX_DIR / READER_DIR)
+    install_launchers(root)
 
     out = root / "index.html"
     out.write_text(build_page(books, title or DEFAULT_TITLE), encoding="utf-8")

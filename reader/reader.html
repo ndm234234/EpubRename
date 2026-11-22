@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reader</title>
+<!-- Offline EPUB reader: epub.js + JSZip are local files next to this page. -->
+<script src="jszip.min.js"></script>
+<script src="epub.min.js"></script>
+<style>
+  :root { --bg: #fdfcf8; --text: #1d1d1f; --muted: #6e6e73; --line: #e3e1dc;
+          --panel: #ffffff; --accent: #2f6fde; --hover: rgba(0,0,0,.05); }
+  :root[data-theme=sepia] { --bg: #f4ecd8; --text: #3b2f1e; --muted: #7a6a52; --line: #dfd3b8;
+          --panel: #f9f3e3; --accent: #a0522d; }
+  :root[data-theme=dark]  { --bg: #161618; --text: #d8d8dc; --muted: #8e8e94; --line: #2e2e33;
+          --panel: #1f1f22; --accent: #6ea0ff; --hover: rgba(255,255,255,.06); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); display: flex; flex-direction: column; overflow: hidden; }
+  button, .btn { font: inherit; color: var(--text); background: none; border: 1px solid transparent;
+         border-radius: 8px; padding: 6px 10px; cursor: pointer; text-decoration: none; white-space: nowrap; }
+  button:hover, .btn:hover { background: var(--hover); }
+  button:disabled { opacity: .35; cursor: default; background: none; }
+  header, footer { display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+         border-color: var(--line); border-style: solid; border-width: 0; flex: none; }
+  header { border-bottom-width: 1px; }
+  footer { border-top-width: 1px; justify-content: space-between; color: var(--muted); font-size: 13px;
+           flex-wrap: wrap; row-gap: 2px; padding-top: 4px; }
+  #chapter, #pct { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #pct { text-align: right; }
+  /* Progress slider: the filled part is what has been read */
+  #seek { flex: 0 0 100%; margin: 4px 0; height: 22px; cursor: pointer; background: transparent;
+          -webkit-appearance: none; appearance: none; --p: 0%; }
+  #seek:disabled { cursor: default; opacity: .4; }
+  #seek::-webkit-slider-runnable-track { height: 6px; border-radius: 3px;
+          background: linear-gradient(to right, var(--accent) var(--p), var(--line) var(--p)); }
+  #seek::-moz-range-track { height: 6px; border-radius: 3px;
+          background: linear-gradient(to right, var(--accent) var(--p), var(--line) var(--p)); }
+  #seek::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -5px;
+          border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); }
+  #seek::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--accent);
+          border: 2px solid var(--bg); }
+  #title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+           font-weight: 600; text-align: center; }
+  #where { flex: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #stage { flex: 1; position: relative; display: flex; min-height: 0; }
+  #viewer { flex: 1; min-width: 0; margin: 16px 0; }
+  .side { flex: none; width: 56px; border: 0; border-radius: 0; font-size: 28px; color: var(--muted); }
+  #toc { position: absolute; z-index: 10; top: 0; left: 0; bottom: 0; width: min(360px, 90vw);
+         background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto;
+         padding: 10px 0 30px; box-shadow: 4px 0 16px rgba(0,0,0,.12); transform: translateX(-105%);
+         transition: transform .2s; }
+  #toc.open { transform: none; }
+  #toc a { display: block; padding: 7px 18px; color: var(--text); text-decoration: none; }
+  #toc a:hover { background: var(--hover); }
+  #toc a.current { color: var(--accent); font-weight: 600; }
+  #toc ul { list-style: none; margin: 0; padding: 0; }
+  #toc ul ul a { padding-left: 34px; } #toc ul ul ul a { padding-left: 50px; }
+  #start { position: absolute; inset: 0; z-index: 20; background: var(--bg); display: flex;
+           flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+           padding: 24px; text-align: center; }
+  #start.drag { outline: 3px dashed var(--accent); outline-offset: -16px; }
+  #start h2 { margin: 0; font-size: 22px; }
+  #start p { margin: 0; color: var(--muted); max-width: 560px; }
+  #start .pick { background: var(--accent); color: #fff; padding: 10px 20px; font-size: 16px; }
+  #start code { background: var(--hover); padding: 1px 5px; border-radius: 4px; }
+  .hidden { display: none !important; }
+  @media (max-width: 600px) { .side { display: none; } #viewer { margin: 8px 12px; } .wide { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <a id="back" class="btn hidden" href="../../index.html" title="Back to catalog">← <span class="wide">Catalog</span></a>
+  <button id="tocBtn" title="Contents (T)" disabled>☰ <span class="wide">Contents</span></button>
+  <div id="title"></div>
+  <button id="smaller" title="Smaller text (−)" disabled>A−</button>
+  <button id="bigger" title="Bigger text (+)" disabled>A+</button>
+  <button id="themeBtn" title="Theme: light / sepia / dark">🌓</button>
+  <button id="openBtn" title="Open another EPUB file">📂</button>
+</header>
+<div id="stage">
+  <button id="prev" class="side" title="Previous page (←)" disabled>‹</button>
+  <div id="viewer"></div>
+  <button id="next" class="side" title="Next page (→)" disabled>›</button>
+  <nav id="toc"></nav>
+  <div id="start">
+    <h2 id="startTitle">📖 EPUB reader</h2>
+    <p id="startText">Choose an EPUB file or drop it here. The book is opened right in the browser:
+      nothing is uploaded anywhere, no internet needed.</p>
+    <button class="pick" id="pickBtn">Choose EPUB file…</button>
+    <p id="startHint"></p>
+  </div>
+</div>
+<footer>
+  <input id="seek" type="range" min="0" max="1000" step="1" value="0" disabled
+         title="Progress: drag to go to any place in the book" aria-label="Position in the book">
+  <span id="chapter" class="wide"></span>
+  <span id="where"></span>
+  <span id="pct"></span>
+</footer>
+<input id="file" type="file" accept=".epub,application/epub+zip" hidden>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const store = {   // localStorage may be unavailable (private mode, blocked site data)
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+const THEMES = ["light", "sepia", "dark"];
+const THEME_CSS = {
+  light: { body: { color: "#1d1d1f", background: "#fdfcf8" } },
+  sepia: { body: { color: "#3b2f1e !important", background: "#f4ecd8 !important" },
+           "body *": { color: "inherit !important", "background-color": "transparent !important" } },
+  dark:  { body: { color: "#d8d8dc !important", background: "#161618 !important" },
+           "body *": { color: "inherit !important", "background-color": "transparent !important" },
+           "a, a *": { color: "#6ea0ff !important" } },
+};
+const prefs = Object.assign({ theme: "light", font: 100 }, store.get("epubReader:prefs"));
+const savePrefs = () => store.set("epubReader:prefs", prefs);
+document.documentElement.dataset.theme = prefs.theme;
+
+let book = null, rendition = null, bookKey = "", tocItems = [];
+
+// ------------------------------------------------------------ opening a book
+
+// From the catalog: reader.html#book=<epub url relative to this page>
+const params = new URLSearchParams(location.hash.slice(1));
+const src = params.get("book");
+if (src) {
+  $("back").classList.remove("hidden");
+  openFromUrl(src);
+}
+
+async function openFromUrl(url) {
+  const name = decodeURIComponent(url.split("/").pop());
+  $("startTitle").textContent = "⏳ " + name;
+  $("startText").textContent = "Opening…";
+  $("pickBtn").classList.add("hidden");
+  const bookUrl = new URL(url, location.href);
+  let error = "";
+  if (bookUrl.protocol !== "file:") {
+    try {
+      const r = await fetch(bookUrl);
+      if (!r.ok) throw new Error(r.status + " " + r.statusText);
+      return openBook(await r.arrayBuffer(), name);
+    } catch (e) { error = e.message; }
+  }
+  // Opened from disk (file://): the browser doesn't let a page read files by itself
+  $("startTitle").textContent = "📖 " + name;
+  $("startText").textContent = "Can't open the book automatically" + (error ? ` (${error})` : "") +
+    ". Choose the file (or drop it here).";
+  if (bookUrl.protocol === "file:") {
+    $("startText").textContent = "The browser doesn't let a page opened from disk open books by itself. " +
+      "Choose the file (or drop it here).";
+    $("startHint").innerHTML = "For one-click reading open the catalog with <b>Open Library</b> " +
+      "(<code>Open Library.bat</code> on Windows, <code>Open Library.sh</code> on Linux) " +
+      "in the folder with index.html.";
+  }
+  $("pickBtn").textContent = "Choose “" + name + "”…";
+  $("pickBtn").classList.remove("hidden");
+}
+
+function openFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => openBook(reader.result, file.name);
+  reader.readAsArrayBuffer(file);
+}
+
+async function openBook(data, fileName) {
+  if (book) { book.destroy(); $("viewer").replaceChildren(); }
+  $("startTitle").textContent = "⏳ " + fileName;
+  $("startText").textContent = "Opening…";
+  $("pickBtn").classList.add("hidden");
+  $("startHint").textContent = "";
+  try {
+    book = ePub(data);
+    await book.ready;
+  } catch (e) {
+    $("startTitle").textContent = "❌ Can't open " + fileName;
+    $("startText").textContent = String(e && e.message || e);
+    $("pickBtn").textContent = "Choose another file…";
+    $("pickBtn").classList.remove("hidden");
+    return;
+  }
+  const md = book.packaging.metadata;
+  // The same book gets the same key whether opened from the catalog or picked by hand
+  bookKey = "epubReader:book:" + (md.identifier || md.title || fileName);
+  document.title = md.title || fileName;
+  $("title").textContent = [md.title || fileName, md.creator].filter(Boolean).join(" — ");
+
+  rendition = book.renderTo("viewer", { width: "100%", height: "100%", spread: "auto",
+                                        allowScriptedContent: false });
+  for (const t of THEMES) rendition.themes.register(t, THEME_CSS[t]);
+  rendition.themes.select(prefs.theme);
+  rendition.themes.fontSize(prefs.font + "%");
+  rendition.on("relocated", onRelocated);
+  rendition.on("keydown", onKey);
+  rendition.on("touchstart", e => touchX = e.changedTouches[0].screenX);
+  rendition.on("touchend", e => {
+    const dx = e.changedTouches[0].screenX - touchX;
+    if (Math.abs(dx) > 50) dx < 0 ? rendition.next() : rendition.prev();
+  });
+
+  const saved = store.get(bookKey);
+  try { await rendition.display(saved && saved.cfi || undefined); }
+  catch { await rendition.display(); }   // saved place is no longer valid
+  $("start").classList.add("hidden");
+  for (const id of ["prev", "next", "smaller", "bigger"]) $(id).disabled = false;
+
+  book.loaded.navigation.then(nav => {
+    tocItems = [];
+    $("toc").replaceChildren(buildToc(nav.toc));
+    $("tocBtn").disabled = !tocItems.length;
+    markCurrent();
+  });
+  // Page numbers across the whole book: computed in the background
+  book.locations.generate(1600).then(() => onRelocated(rendition.currentLocation()));
+}
+
+// ------------------------------------------------------------ table of contents
+
+function buildToc(items) {
+  const ul = document.createElement("ul");
+  for (const item of items) {
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.textContent = item.label.trim();
+    a.href = "#";
+    a.onclick = e => {
+      e.preventDefault();
+      toggleToc(false);
+      rendition.display(item.href).catch(() => rendition.display(item.href.split("#")[0]));
+    };
+    tocItems.push({ a, href: item.href.split("#")[0] });
+    li.append(a);
+    if (item.subitems && item.subitems.length) li.append(buildToc(item.subitems));
+    ul.append(li);
+  }
+  return ul;
+}
+
+const sameFile = (a, b) => a && b && (a === b || a.endsWith("/" + b) || b.endsWith("/" + a));
+
+function markCurrent() {
+  const loc = rendition && rendition.currentLocation();
+  const href = loc && loc.start && loc.start.href;
+  let current = null;
+  for (const t of tocItems) {
+    t.a.classList.remove("current");
+    if (!current && sameFile(t.href, href)) current = t;
+  }
+  if (current) current.a.classList.add("current");
+  $("chapter").textContent = current ? current.a.textContent : "";
+}
+
+function toggleToc(open = !$("toc").classList.contains("open")) {
+  $("toc").classList.toggle("open", open);
+  if (open) {
+    const cur = $("toc").querySelector(".current");
+    if (cur) cur.scrollIntoView({ block: "center" });
+  }
+}
+
+// ------------------------------------------------------------ position & progress
+
+function onRelocated(loc) {
+  if (!loc || !loc.start) return;
+  const pct = book.locations.length() ? book.locations.percentageFromCfi(loc.start.cfi) : null;
+  store.set(bookKey, { cfi: loc.start.cfi, pct, title: document.title, time: Date.now() });
+  const d = loc.start.displayed;
+  $("where").textContent = d && d.total ? `page ${d.page} of ${d.total} in chapter` : "";
+  $("pct").textContent = pct != null ? Math.round(pct * 100) + "%" : "";
+  if (pct != null && !seeking) setSeek(pct);
+  $("seek").disabled = pct == null;   // enabled once page positions are computed
+  $("prev").disabled = !!loc.atStart;
+  $("next").disabled = !!loc.atEnd;
+  markCurrent();
+}
+
+// Slider: drag to preview where you'll land, release to go there
+let seeking = false;
+function setSeek(frac) {
+  $("seek").value = Math.round(frac * 1000);
+  $("seek").style.setProperty("--p", (frac * 100).toFixed(1) + "%");
+}
+function chapterAt(cfi) {
+  const item = book.spine.get(cfi);
+  const t = item && tocItems.find(t => sameFile(t.href, item.href));
+  return t ? t.a.textContent : "";
+}
+$("seek").addEventListener("input", () => {
+  seeking = true;
+  const frac = $("seek").value / 1000;
+  setSeek(frac);
+  const ch = chapterAt(book.locations.cfiFromPercentage(frac));
+  $("where").textContent = "→ " + Math.round(frac * 100) + "%" + (ch ? " · " + ch : "");
+});
+$("seek").addEventListener("change", () => {
+  const frac = $("seek").value / 1000;
+  rendition.display(book.locations.cfiFromPercentage(frac)).finally(() => { seeking = false; });
+});
+
+// ------------------------------------------------------------ controls
+
+let touchX = 0;
+function onKey(e) {
+  if (!rendition || e.target.tagName === "INPUT") return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key;
+  if (k === "ArrowRight" || k === "PageDown" || (k === " " && !e.shiftKey)) { e.preventDefault(); rendition.next(); }
+  else if (k === "ArrowLeft" || k === "PageUp" || (k === " " && e.shiftKey)) { e.preventDefault(); rendition.prev(); }
+  else if (k === "t" || k === "T" || k === "е" || k === "Е") toggleToc();
+  else if (k === "Escape") toggleToc(false);
+  else if (k === "+" || k === "=") setFont(10);
+  else if (k === "-") setFont(-10);
+}
+document.addEventListener("keydown", onKey);
+
+function setFont(delta) {
+  prefs.font = Math.min(200, Math.max(60, prefs.font + delta));
+  savePrefs();
+  if (rendition) rendition.themes.fontSize(prefs.font + "%");
+}
+
+$("prev").onclick = () => rendition.prev();
+$("next").onclick = () => rendition.next();
+$("tocBtn").onclick = () => toggleToc();
+$("smaller").onclick = () => setFont(-10);
+$("bigger").onclick = () => setFont(10);
+$("themeBtn").onclick = () => {
+  prefs.theme = THEMES[(THEMES.indexOf(prefs.theme) + 1) % THEMES.length];
+  savePrefs();
+  document.documentElement.dataset.theme = prefs.theme;
+  if (rendition) rendition.themes.select(prefs.theme);
+};
+$("pickBtn").onclick = $("openBtn").onclick = () => $("file").click();
+$("file").onchange = e => { openFile(e.target.files[0]); e.target.value = ""; };
+$("stage").addEventListener("click", e => {
+  if ($("toc").classList.contains("open") && !$("toc").contains(e.target) ) toggleToc(false);
+});
+
+// Drag & drop a file anywhere on the page
+document.addEventListener("dragover", e => { e.preventDefault(); $("start").classList.add("drag"); });
+document.addEventListener("dragleave", e => { if (!e.relatedTarget) $("start").classList.remove("drag"); });
+document.addEventListener("drop", e => {
+  e.preventDefault();
+  $("start").classList.remove("drag");
+  openFile(e.dataTransfer.files[0]);
+});
+</script>
+</body>
+</html>
