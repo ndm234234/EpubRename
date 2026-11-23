@@ -65,6 +65,33 @@
   #start p { margin: 0; color: var(--muted); max-width: 560px; }
   #start .pick { background: var(--accent); color: #fff; padding: 10px 20px; font-size: 16px; }
   #start code { background: var(--hover); padding: 1px 5px; border-radius: 4px; }
+  /* Search panel (right side) */
+  #search { position: absolute; z-index: 10; top: 0; right: 0; bottom: 0; width: min(380px, 92vw);
+            background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column;
+            box-shadow: -4px 0 16px rgba(0,0,0,.12); transform: translateX(105%); transition: transform .2s; }
+  #search.open { transform: none; }
+  #searchBar { display: flex; gap: 4px; padding: 10px; align-items: center; border-bottom: 1px solid var(--line); }
+  #q { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg);
+       border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  #q:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  #searchBar button { padding: 6px 8px; }
+  #searchInfo { padding: 6px 12px; color: var(--muted); font-size: 13px; display: flex; gap: 8px;
+                align-items: center; justify-content: space-between; min-height: 30px; }
+  #results { flex: 1; overflow-y: auto; padding-bottom: 30px; position: relative; }
+  #results h4 { margin: 0; padding: 10px 12px 4px; font-size: 12px; color: var(--muted); font-weight: 600;
+                text-transform: uppercase; letter-spacing: .03em; position: sticky; top: 0; background: var(--panel); }
+  #results a { display: block; padding: 6px 12px; color: var(--text); text-decoration: none; font-size: 14px;
+               border-left: 3px solid transparent; }
+  #results a:hover { background: var(--hover); }
+  #results a.current { border-left-color: var(--accent); background: var(--hover); }
+  #results a small { color: var(--muted); margin-right: 6px; font-variant-numeric: tabular-nums; }
+  #results mark { background: #ffd54a; color: #000; border-radius: 2px; padding: 0 1px; }
+  /* Compact navigation over the page while the panel is closed */
+  #searchPill { position: absolute; z-index: 9; bottom: 10px; left: 50%; transform: translateX(-50%);
+                display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 20px;
+                background: var(--panel); border: 1px solid var(--line); box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+  #searchPill button { border-radius: 18px; padding: 4px 10px; }
+  #pillCount { font-variant-numeric: tabular-nums; }
   .hidden { display: none !important; }
   @media (max-width: 600px) { .side { display: none; } #viewer { margin: 8px 12px; } .wide { display: none; } }
 </style>
@@ -76,6 +103,7 @@
   <div id="title"></div>
   <button id="smaller" title="Smaller text (−)" disabled>A−</button>
   <button id="bigger" title="Bigger text (+)" disabled>A+</button>
+  <button id="searchBtn" title="Search in the book (Ctrl+F)" disabled>🔍</button>
   <button id="themeBtn" title="Theme: light / sepia / dark">🌓</button>
   <button id="openBtn" title="Open another EPUB file">📂</button>
 </header>
@@ -84,6 +112,22 @@
   <div id="viewer"></div>
   <button id="next" class="side" title="Next page (→)" disabled>›</button>
   <nav id="toc"></nav>
+  <aside id="search">
+    <form id="searchBar">
+      <input id="q" type="search" placeholder="Search in the book" autocomplete="off" aria-label="Search text">
+      <button type="button" id="hitPrev" title="Previous match (Shift+Enter, Shift+F3)" disabled>▲</button>
+      <button type="button" id="hitNext" title="Next match (Enter, F3)" disabled>▼</button>
+      <button type="button" id="searchClose" title="Close (Esc)">✕</button>
+    </form>
+    <div id="searchInfo"><span id="searchStatus">Type a word or phrase and press Enter</span><span id="hitCount"></span></div>
+    <div id="results"></div>
+  </aside>
+  <div id="searchPill" class="hidden">
+    <button id="pillPrev" title="Previous match (Shift+F3)">‹</button>
+    <button id="pillCount" title="Show all matches"></button>
+    <button id="pillNext" title="Next match (F3)">›</button>
+    <button id="pillClear" title="Clear search">✕</button>
+  </div>
   <div id="start">
     <h2 id="startTitle">📖 EPUB reader</h2>
     <p id="startText">Choose an EPUB file or drop it here. The book is opened right in the browser:
@@ -170,7 +214,7 @@ function openFile(file) {
 }
 
 async function openBook(data, fileName) {
-  if (book) { book.destroy(); $("viewer").replaceChildren(); }
+  if (book) { clearSearch(); toggleSearch(false); book.destroy(); $("viewer").replaceChildren(); }
   $("startTitle").textContent = "⏳ " + fileName;
   $("startText").textContent = "Opening…";
   $("pickBtn").classList.add("hidden");
@@ -208,7 +252,7 @@ async function openBook(data, fileName) {
   try { await rendition.display(saved && saved.cfi || undefined); }
   catch { await rendition.display(); }   // saved place is no longer valid
   $("start").classList.add("hidden");
-  for (const id of ["prev", "next", "smaller", "bigger"]) $(id).disabled = false;
+  for (const id of ["prev", "next", "smaller", "bigger", "searchBtn"]) $(id).disabled = false;
 
   book.loaded.navigation.then(nav => {
     tocItems = [];
@@ -303,17 +347,238 @@ $("seek").addEventListener("change", () => {
   rendition.display(book.locations.cfiFromPercentage(frac)).finally(() => { seeking = false; });
 });
 
+// ------------------------------------------------------------ search in the book
+
+// Matching ignores case, treats ё as е and any run of whitespace as one space.
+// Text is searched across tags (a phrase may span <i>, <b>, …); a paragraph break counts as a space.
+const BLOCK_TAGS = new Set(["P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "DT", "DD", "TD", "TH",
+  "BLOCKQUOTE", "PRE", "SECTION", "ARTICLE", "ASIDE", "HEADER", "FOOTER", "FIGCAPTION", "TR", "BODY",
+  "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "dt", "dd", "td", "th",
+  "blockquote", "pre", "section", "article", "aside", "header", "footer", "figcaption", "tr", "body"]);
+const MAX_HITS = 2000;
+const HL_STYLE = { fill: "#ffd54a", "fill-opacity": "0.45", "mix-blend-mode": "multiply" };
+const HL_CURRENT = { fill: "#ff8a00", "fill-opacity": "0.55", "mix-blend-mode": "multiply" };
+
+function normChar(c) {
+  if (/\s/.test(c)) return " ";
+  const l = c.toLowerCase();
+  if (l.length !== 1) return c;
+  return l === "ё" ? "е" : l;
+}
+const normQuery = s => Array.from(s.trim(), normChar).join("").replace(/ +/g, " ");
+
+function blockOf(node) {
+  for (let n = node.parentNode; n; n = n.parentNode) if (BLOCK_TAGS.has(n.nodeName)) return n;
+  return null;
+}
+
+// Flatten a chapter into one normalized string (+ the same text as written, for snippets);
+// pos[i] = [text node, offset] of each character
+function flatten(doc) {
+  const body = doc.body || doc.getElementsByTagName("body")[0] || doc.documentElement;
+  const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+  let text = "", orig = "", lastBlock = null;
+  const pos = [];
+  for (let node; (node = walker.nextNode()); ) {
+    const p = node.parentNode && node.parentNode.nodeName.toLowerCase();
+    if (p === "script" || p === "style") continue;
+    const block = blockOf(node);
+    if (block !== lastBlock && text && !text.endsWith(" ")) {   // paragraph break = a space
+      text += " "; orig += " ";
+      pos.push(pos[pos.length - 1]);
+    }
+    lastBlock = block;
+    const s = node.nodeValue;
+    for (let i = 0; i < s.length; i++) {
+      const c = normChar(s[i]);
+      if (c === " " && (text.endsWith(" ") || !text)) continue;
+      text += c; orig += c === " " ? " " : s[i];
+      pos.push([node, i]);
+    }
+  }
+  return { text, orig, pos };
+}
+
+function snippet(text, at, len) {
+  const R = 45;
+  let a = Math.max(0, at - R), b = Math.min(text.length, at + len + R);
+  if (a > 0) a = text.indexOf(" ", a) + 1 || a;             // don't cut words
+  if (b < text.length) b = text.lastIndexOf(" ", b) > at + len ? text.lastIndexOf(" ", b) : b;
+  return [(a > 0 ? "…" : "") + text.slice(a, at), text.slice(at, at + len),
+          text.slice(at + len, b) + (b < text.length ? "…" : "")];
+}
+
+let hits = [], hitIdx = -1, searchRun = 0, lastQuery = "";
+
+function sectionLabel(section) {
+  const t = tocItems.find(t => sameFile(t.href, section.href));
+  return t ? t.a.textContent : "Section " + (section.index + 1);
+}
+
+async function runSearch(raw) {
+  const query = normQuery(raw);
+  if (!book || query === lastQuery && hits.length) return;
+  clearSearch(false);
+  lastQuery = query;
+  if (!query) return;
+  const run = ++searchRun;
+  const sections = book.spine.spineItems.filter(s => s.linear !== false);
+  let truncated = false;
+  for (let si = 0; si < sections.length && !truncated; si++) {
+    if (run !== searchRun) return;   // a newer search has started
+    $("searchStatus").textContent = `Searching… ${Math.round(si / sections.length * 100)}%`;
+    const section = sections[si];
+    let found = [];
+    try {
+      await section.load(book.load.bind(book));
+      const { text, orig, pos } = flatten(section.document);
+      for (let at = text.indexOf(query); at !== -1; at = text.indexOf(query, at + query.length)) {
+        const [sn, so] = pos[at], [en, eo] = pos[at + query.length - 1];
+        const range = section.document.createRange();
+        range.setStart(sn, so);
+        range.setEnd(en, eo + 1);
+        found.push({ cfi: section.cfiFromRange(range), section, parts: snippet(orig, at, query.length) });
+        if (hits.length + found.length >= MAX_HITS) { truncated = true; break; }
+      }
+    } catch (e) {
+      console.warn("search: can't read", section.href, e);
+    } finally {
+      section.unload();
+    }
+    if (run !== searchRun) return;
+    if (found.length) addHits(found);
+    if (si % 5 === 4) await new Promise(r => setTimeout(r));   // keep the page responsive
+  }
+  $("searchStatus").textContent = hits.length
+    ? (truncated ? `Showing the first ${MAX_HITS} matches` : "Done")
+    : "Nothing found";
+  // Start from the first match at or after the current page
+  if (hits.length && hitIdx < 0) goToHit(firstHitFromHere());
+}
+
+function firstHitFromHere() {
+  const loc = rendition.currentLocation();
+  const here = loc && loc.start && loc.start.cfi;
+  if (!here) return 0;
+  const i = hits.findIndex(h => new ePub.CFI().compare(h.cfi, here) >= 0);
+  return i < 0 ? 0 : i;
+}
+
+function addHits(found) {
+  const frag = document.createDocumentFragment();
+  const h4 = document.createElement("h4");
+  h4.textContent = sectionLabel(found[0].section);
+  frag.append(h4);
+  for (const hit of found) {
+    const i = hits.length;
+    hits.push(hit);
+    const a = document.createElement("a");
+    a.href = "#";
+    a.onclick = e => { e.preventDefault(); goToHit(i); if (innerWidth < 900) toggleSearch(false); };
+    const small = document.createElement("small");
+    const pct = book.locations.length() ? book.locations.percentageFromCfi(hit.cfi) : null;
+    small.textContent = pct != null ? Math.round(pct * 100) + "%" : "";
+    const mark = document.createElement("mark");
+    mark.textContent = hit.parts[1];
+    a.append(small, hit.parts[0], mark, hit.parts[2]);
+    hit.a = a;
+    frag.append(a);
+    try { rendition.annotations.highlight(hit.cfi, {}, () => goToHit(i), "search-hit", HL_STYLE); } catch {}
+  }
+  $("results").append(frag);
+  updateHitUi();
+}
+
+function setHighlight(hit, style) {
+  try {
+    rendition.annotations.remove(hit.cfi, "highlight");
+    rendition.annotations.highlight(hit.cfi, {}, () => goToHit(hits.indexOf(hit)), "search-hit", style);
+  } catch {}
+}
+
+function goToHit(i) {
+  if (!hits.length) return;
+  i = (i + hits.length) % hits.length;   // wrap around at the ends
+  if (hitIdx >= 0 && hits[hitIdx]) { setHighlight(hits[hitIdx], HL_STYLE); hits[hitIdx].a.classList.remove("current"); }
+  hitIdx = i;
+  const hit = hits[i];
+  setHighlight(hit, HL_CURRENT);
+  hit.a.classList.add("current");
+  scrollToCurrent();
+  rendition.display(hit.cfi);
+  updateHitUi();
+}
+
+// Scroll only the results list (scrollIntoView would also scroll the page under a closed panel)
+function scrollToCurrent() {
+  const a = hits[hitIdx] && hits[hitIdx].a, box = $("results");
+  if (!a || !$("search").classList.contains("open")) return;
+  if (a.offsetTop < box.scrollTop + 30 || a.offsetTop + a.offsetHeight > box.scrollTop + box.clientHeight)
+    box.scrollTop = a.offsetTop - box.clientHeight / 3;
+}
+
+function updateHitUi() {
+  const n = hits.length;
+  const count = n ? (hitIdx >= 0 ? `${hitIdx + 1} / ${n}` : `${n}`) : "";
+  $("hitCount").textContent = n ? count + (n === 1 ? " match" : " matches") : "";
+  $("pillCount").textContent = count;
+  $("hitPrev").disabled = $("hitNext").disabled = n === 0;
+  $("searchPill").classList.toggle("hidden", n === 0 || $("search").classList.contains("open"));
+}
+
+function clearSearch(resetInput = true) {
+  searchRun++;
+  for (const h of hits) try { rendition.annotations.remove(h.cfi, "highlight"); } catch {}
+  hits = []; hitIdx = -1; lastQuery = "";
+  $("results").replaceChildren();
+  $("searchStatus").textContent = "Type a word or phrase and press Enter";
+  if (resetInput) $("q").value = "";
+  updateHitUi();
+}
+
+function toggleSearch(open = !$("search").classList.contains("open")) {
+  if (open && !book) return;
+  $("search").classList.toggle("open", open);
+  if (open) { toggleToc(false); $("q").focus({ preventScroll: true }); $("q").select(); scrollToCurrent(); }
+  else $("q").blur();
+  updateHitUi();
+}
+
+$("searchBtn").onclick = () => toggleSearch();
+$("searchClose").onclick = () => toggleSearch(false);
+$("searchBar").onsubmit = e => {
+  e.preventDefault();
+  const q = normQuery($("q").value);
+  if (q && q === lastQuery && hits.length) goToHit(hitIdx + 1);   // Enter again = next match
+  else runSearch($("q").value);
+};
+$("q").addEventListener("keydown", e => {
+  if (e.key === "Escape") { e.preventDefault(); toggleSearch(false); }
+  else if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); goToHit(hitIdx - 1); }
+});
+$("q").addEventListener("input", () => { if (!$("q").value) clearSearch(); });
+$("hitPrev").onclick = $("pillPrev").onclick = () => goToHit(hitIdx - 1);
+$("hitNext").onclick = $("pillNext").onclick = () => goToHit(hitIdx + 1);
+$("pillCount").onclick = () => toggleSearch(true);
+$("pillClear").onclick = () => clearSearch();
+
 // ------------------------------------------------------------ controls
 
 let touchX = 0;
 function onKey(e) {
-  if (!rendition || e.target.tagName === "INPUT") return;
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (!rendition) return;
   const k = e.key;
+  if ((e.ctrlKey || e.metaKey) && (k === "f" || k === "F" || k === "а" || k === "А")) {
+    e.preventDefault(); toggleSearch(true); return;
+  }
+  if (k === "F3") { e.preventDefault(); goToHit(hitIdx + (e.shiftKey ? -1 : 1)); return; }
+  if (e.target.tagName === "INPUT") return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (k === "ArrowRight" || k === "PageDown" || (k === " " && !e.shiftKey)) { e.preventDefault(); rendition.next(); }
   else if (k === "ArrowLeft" || k === "PageUp" || (k === " " && e.shiftKey)) { e.preventDefault(); rendition.prev(); }
   else if (k === "t" || k === "T" || k === "е" || k === "Е") toggleToc();
-  else if (k === "Escape") toggleToc(false);
+  else if (k === "Escape") { toggleToc(false); toggleSearch(false); }
+  else if (k === "/") { e.preventDefault(); toggleSearch(true); }
   else if (k === "+" || k === "=") setFont(10);
   else if (k === "-") setFont(-10);
 }

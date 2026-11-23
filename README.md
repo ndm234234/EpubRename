@@ -148,6 +148,11 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
   (while dragging it shows the % and chapter you'll land on).
 - Remembers where you stopped in each book (in the browser's `localStorage`),
   also when the same book is opened by picking the file by hand.
+- Search in the book (🔍, `Ctrl+F` or `/`): lists every match grouped by chapter, with the
+  % of the book and the text around it; click a match to go there. All matches are highlighted
+  on the page, the current one in orange. `Enter` / `F3` — next match, `Shift+Enter` /
+  `Shift+F3` — previous; while the panel is closed a small `‹ 3 / 42 ›` bar stays at the bottom.
+  Search ignores case, treats ё as е and finds phrases split by formatting (e.g. half in italics).
 - Font size (`+` / `−`) and light / sepia / dark theme, remembered.
 - Drag an EPUB onto the page to open it.
 
