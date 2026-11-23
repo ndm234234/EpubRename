@@ -25,7 +25,9 @@ function Send($res, [byte[]]$bytes, $type) {
 function Serve($ctx) {
   $res = $ctx.Response
   try {
-    $rel = [Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath).TrimStart('/')
+    # RawUrl, not Url: Url is built from an already decoded path, so a '#' in a file name
+    # (sent as %23) would cut the path there and the book would not be found
+    $rel = [Uri]::UnescapeDataString($ctx.Request.RawUrl.Split('?')[0]).TrimStart('/')
     if ($rel -eq '__library_root') {
       # lets a launcher check that this port serves this very library
       Send $res ([Text.Encoding]::UTF8.GetBytes($root)) 'text/plain; charset=utf-8'
