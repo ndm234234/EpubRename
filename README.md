@@ -150,6 +150,10 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
   (the **Catalog** button does the same).
 - Progress slider at the bottom: shows how much is read; drag it to jump anywhere
   (while dragging it shows the % and chapter you'll land on).
+  To place it, the reader first counts pages across the whole book: a big book (hundreds of
+  chapters) can take a minute or more the first time, shown as *Preparing navigation… N%*.
+  The result is cached in `localStorage` (about 2 MB for all books, oldest dropped first),
+  so the next time the book opens the slider is ready at once.
 - Remembers where you stopped in each book (in the browser's `localStorage`),
   also when the same book is opened by picking the file by hand.
 - Search in the book (search icon, `Ctrl+F` or `/`): lists every match grouped by chapter, with the

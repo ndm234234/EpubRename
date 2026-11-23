@@ -51,6 +51,25 @@
   #seek { flex: 0 0 100%; margin: 4px 0; height: 22px; cursor: pointer; background: transparent;
           -webkit-appearance: none; appearance: none; --p: 0%; }
   #seek:disabled { cursor: default; opacity: .4; }
+  /* While page positions are being computed: a progress bar in place of the slider */
+  #navLoad { flex: 0 0 100%; display: grid; gap: 8px; margin: 6px 0 6px; }
+  .navHead { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 500;
+             color: var(--text); white-space: nowrap; }
+  .navHead small { color: var(--muted); font-weight: 400; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .navHead b { margin-left: auto; color: var(--accent); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .spin { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid var(--accent-soft);
+          border-top-color: var(--accent); animation: spin .75s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #navTrack { height: 4px; border-radius: 4px; background: var(--line); --p: 2%; }
+  #navFill { position: relative; height: 100%; width: var(--p); border-radius: 4px; overflow: hidden;
+             background: var(--accent);
+             background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 35%, transparent), var(--accent));
+             box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
+             transition: width .6s cubic-bezier(.2,.8,.2,1); }
+  #navFill::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+             background: linear-gradient(90deg, transparent, rgba(255,255,255,.7), transparent);
+             animation: shimmer 1.4s ease-in-out infinite; }
+  @keyframes shimmer { to { transform: translateX(100%); } }
   #seek::-webkit-slider-runnable-track { height: 6px; border-radius: 3px;
           background: linear-gradient(to right, var(--accent) var(--p), var(--line) var(--p)); }
   #seek::-moz-range-track { height: 6px; border-radius: 3px;
@@ -230,6 +249,12 @@
 <footer>
   <input id="seek" type="range" min="0" max="1000" step="1" value="0" disabled
          title="Progress: drag to go to any place in the book" aria-label="Position in the book">
+  <div id="navLoad" class="hidden" role="progressbar" aria-label="Preparing navigation" aria-valuemin="0" aria-valuemax="100"
+       title="Counting pages across the whole book; the slider appears when it is done">
+    <div class="navHead"><span class="spin"></span><span>Preparing navigation</span>
+      <small class="wide">· counting pages, only the first time</small><b id="navPct">0%</b></div>
+    <div id="navTrack"><div id="navFill"></div></div>
+  </div>
   <span id="chapter" class="wide"></span>
   <span id="where"></span>
   <span id="pct"></span>
@@ -269,6 +294,7 @@ const savePrefs = () => store.set("epubReader:prefs", prefs);
 document.documentElement.dataset.theme = prefs.theme;
 
 let book = null, rendition = null, bookKey = "", tocItems = [];
+let locationsReady = false;   // positions for the whole book are computed (see prepareLocations)
 let marksKey = "", marks = [];   // bookmarks of the open book: [{cfi, text, name, time}]
 
 // ------------------------------------------------------------ opening a book
@@ -318,6 +344,7 @@ function openFile(file) {
 }
 
 async function openBook(data, fileName) {
+  locationsReady = false;
   if (book) { clearSearch(); toggleSearch(false); toggleMarks(false); book.destroy(); $("viewer").replaceChildren(); }
   $("startTitle").textContent = fileName;
   $("startText").textContent = "Opening…";
@@ -368,8 +395,98 @@ async function openBook(data, fileName) {
     markCurrent();
     renderMarks();   // chapter names are known now
   });
-  // Page numbers across the whole book: computed in the background
-  book.locations.generate(1600).then(() => { onRelocated(rendition.currentLocation()); renderMarks(); });
+  prepareLocations(book, md.identifier || md.title || fileName);
+}
+
+// ------------------------------------------------------------ positions across the book
+
+// The slider and all % need positions for the WHOLE book. epub.js fills them in gradually
+// (a big book takes a minute or more), so until generate() finishes they must not be used:
+// a half-filled list gives wrong % and sends the slider to wrong places.
+// Finished positions are cached, so the next opening of the book is instant.
+const LOC_CHARS = 1600;
+const LOC_PREFIX = "epubReader:loc:";
+const LOC_CACHE_MAX = 2_000_000;   // characters in localStorage for all cached books together
+
+function locKey(id) { return LOC_PREFIX + LOC_CHARS + ":" + book.spine.spineItems.length + ":" + id; }
+
+function loadCachedLocations(key) {
+  try {
+    const json = localStorage.getItem(key);
+    if (!json) return false;
+    book.locations.load(json);
+    if (!book.locations.length()) return false;
+    store.set(LOC_PREFIX + "used:" + key, Date.now());   // for "least recently used" cleanup
+    return true;
+  } catch { return false; }
+}
+
+function saveLocations(key) {
+  try {
+    const json = book.locations.save();
+    if (json.length > LOC_CACHE_MAX) return;
+    // Drop the least recently used cached books until this one fits
+    const cached = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k.startsWith(LOC_PREFIX) && !k.startsWith(LOC_PREFIX + "used:") && k !== key)
+        cached.push({ k, size: (localStorage.getItem(k) || "").length, used: store.get(LOC_PREFIX + "used:" + k) || 0 });
+    }
+    cached.sort((a, b) => a.used - b.used);
+    let total = cached.reduce((n, c) => n + c.size, 0) + json.length;
+    while (total > LOC_CACHE_MAX && cached.length) {
+      const c = cached.shift();
+      localStorage.removeItem(c.k); localStorage.removeItem(LOC_PREFIX + "used:" + c.k);
+      total -= c.size;
+    }
+    localStorage.setItem(key, json);
+    store.set(LOC_PREFIX + "used:" + key, Date.now());
+  } catch {}   // storage full or blocked: it will just be computed again next time
+}
+
+function showNavLoading(on, frac = 0) {
+  $("seek").classList.toggle("hidden", on);
+  $("navLoad").classList.toggle("hidden", !on);
+  if (!on) return;
+  const p = Math.max(2, Math.min(99, Math.round(frac * 100)));
+  $("navTrack").style.setProperty("--p", p + "%");
+  $("navLoad").setAttribute("aria-valuenow", p);
+  $("navPct").textContent = p + "%";
+  $("pct").textContent = "";
+}
+
+// How far generate() has got: the section of the last position found so far
+function locationsProgress(b) {
+  const list = b.locations._locations || [];
+  if (!list.length) return 0;
+  try { return (new ePub.CFI(list[list.length - 1]).spinePos + 1) / b.spine.spineItems.length; }
+  catch { return 0; }
+}
+
+function prepareLocations(b, id) {
+  locationsReady = false;
+  const key = locKey(id);
+  const done = () => {
+    if (b !== book) return;   // another book was opened meanwhile
+    locationsReady = true;
+    showNavLoading(false);
+    onRelocated(rendition.currentLocation());
+    renderMarks();
+    if (hits.length) for (const h of hits) h.a.querySelector("small").textContent =
+      Math.round(book.locations.percentageFromCfi(h.cfi) * 100) + "%";
+  };
+  if (loadCachedLocations(key)) return done();
+  showNavLoading(true, 0);
+  const timer = setInterval(() => {
+    if (b !== book || locationsReady) return clearInterval(timer);
+    showNavLoading(true, locationsProgress(b));
+  }, 500);
+  b.locations.generate(LOC_CHARS).then(() => {
+    clearInterval(timer);
+    if (b !== book) return;
+    saveLocations(key);
+    done();
+  });
 }
 
 // ------------------------------------------------------------ table of contents
@@ -421,11 +538,11 @@ function toggleToc(open = !$("toc").classList.contains("open")) {
 
 function onRelocated(loc) {
   if (!loc || !loc.start) return;
-  const pct = book.locations.length() ? book.locations.percentageFromCfi(loc.start.cfi) : null;
+  const pct = locationsReady ? book.locations.percentageFromCfi(loc.start.cfi) : null;
   store.set(bookKey, { cfi: loc.start.cfi, pct, title: document.title, time: Date.now() });
   const d = loc.start.displayed;
   $("where").textContent = d && d.total ? `page ${d.page} of ${d.total} in chapter` : "";
-  $("pct").textContent = pct != null ? Math.round(pct * 100) + "%" : "";
+  if (locationsReady) $("pct").textContent = Math.round(pct * 100) + "%";   // else: progress text
   if (pct != null && !seeking) setSeek(pct);
   $("seek").disabled = pct == null;   // enabled once page positions are computed
   $("prev").disabled = !!loc.atStart;
@@ -586,7 +703,7 @@ function addHits(found) {
     a.href = "#";
     a.onclick = e => { e.preventDefault(); goToHit(i); if (innerWidth < 900) toggleSearch(false); };
     const small = document.createElement("small");
-    const pct = book.locations.length() ? book.locations.percentageFromCfi(hit.cfi) : null;
+    const pct = locationsReady ? book.locations.percentageFromCfi(hit.cfi) : null;
     small.textContent = pct != null ? Math.round(pct * 100) + "%" : "";
     const mark = document.createElement("mark");
     mark.textContent = hit.parts[1];
@@ -733,7 +850,7 @@ function stepMark(dir) {
 }
 
 function markInfo(m) {
-  const pct = book.locations.length() ? book.locations.percentageFromCfi(m.cfi) : null;
+  const pct = locationsReady ? book.locations.percentageFromCfi(m.cfi) : null;
   return [pct != null ? Math.round(pct * 100) + "%" : "", chapterAt(m.cfi)].filter(Boolean).join(" · ");
 }
 
@@ -858,7 +975,10 @@ function onKey(e) {
     e.preventDefault(); toggleSearch(true); return;
   }
   if (k === "F3") { e.preventDefault(); goToHit(hitIdx + (e.shiftKey ? -1 : 1)); return; }
-  if (e.target.tagName === "INPUT") return;
+  // Let text fields (search, bookmark name) have their keys; the slider is not one of them,
+  // otherwise after a click on it Esc and the arrows stop working for the book
+  const t = e.target;
+  if ((t.tagName === "INPUT" && t.type !== "range") || t.tagName === "TEXTAREA") return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (k === "ArrowRight" || k === "PageDown" || (k === " " && !e.shiftKey)) { e.preventDefault(); rendition.next(); }
   else if (k === "ArrowLeft" || k === "PageUp" || (k === " " && e.shiftKey)) { e.preventDefault(); rendition.prev(); }
