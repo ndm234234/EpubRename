@@ -100,8 +100,8 @@ def find_cover(zf: zipfile.ZipFile, opf, opf_dir: str) -> bytes | None:
 def save_cover(raw: bytes | None, covers_dir: Path, used: set[str]) -> str:
     """Save a small copy of the cover into covers_dir; return its file name ("" if none).
 
-    The name is a hash of the original image, so an existing copy is reused
-    on the next run instead of being generated again.
+    The name is a hash of the original image, so books sharing a cover
+    share one copy.
     """
     if not raw:
         return ""
@@ -462,8 +462,14 @@ def build_index(folder: Path, title: str | None = None) -> int:
     if Image is None:
         print("ℹ️  Pillow not installed: covers are copied at full size (pip install pillow)")
 
-    covers_dir = root / INDEX_DIR / COVERS_DIR
-    covers_dir.mkdir(parents=True, exist_ok=True)
+    # Start from a clean .index so no leftovers from earlier runs survive
+    index_dir = root / INDEX_DIR
+    if index_dir.is_symlink() or index_dir.is_file():
+        index_dir.unlink()
+    elif index_dir.exists():
+        shutil.rmtree(index_dir)
+    covers_dir = index_dir / COVERS_DIR
+    covers_dir.mkdir(parents=True)
     used_covers: set[str] = set()
 
     books, errors, no_cover = [], [], 0
@@ -488,14 +494,6 @@ def build_index(folder: Path, title: str | None = None) -> int:
     if show_progress:
         print("\r\033[K", end="")
 
-    # Remove cover copies of books that are no longer in the folder
-    # (only our own files inside .index/covers are touched)
-    removed = 0
-    for f in covers_dir.iterdir():
-        if f.is_file() and f.name not in used_covers:
-            f.unlink()
-            removed += 1
-
     install_reader(root / INDEX_DIR / READER_DIR)
     install_launchers(root)
 
@@ -510,8 +508,7 @@ def build_index(folder: Path, title: str | None = None) -> int:
           f"  ·  ❌ errors {len(errors)}")
     covers_kb = sum(f.stat().st_size for f in covers_dir.iterdir()) / 1024
     print(f"📄 {out}  ({out.stat().st_size / 1024:.0f} KB)")
-    print(f"🖼  {covers_dir}  ({len(used_covers)} covers, {covers_kb:.0f} KB"
-          + (f", {removed} old removed" if removed else "") + ")")
+    print(f"🖼  {covers_dir}  ({len(used_covers)} covers, {covers_kb:.0f} KB)")
     return 0 if not errors else 2
 
 
