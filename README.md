@@ -126,16 +126,17 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
 ### Catalog features
 
 - Cover grid; books without a cover get a generated placeholder.
-- Title, authors, series, year, publisher, file size; expandable description.
+- Title, authors, series, year, publisher, file size; description opens with **About**.
+- Follows the system light / dark theme.
 - Instant search across title, authors, series, description and file path
   (case-insensitive, `ё` = `е`, all words must match). `/` focuses search, `Esc` clears it.
 - Click an author to see all their books.
 - Sort by author, title, recently added or size; optional grouping by author.
   Settings are remembered.
 - Click a **cover** or a **title** to read the book in the browser.
-- **⬇ Save as…** under the cover saves the EPUB file: Chrome/Edge (via the launcher) show
+- The **download** icon under the book saves the EPUB file: Chrome/Edge (via the launcher) show
   a dialog to choose the folder; other browsers download it as usual.
-- **📂 Open file…** opens any EPUB from disk in the reader.
+- **Open file** opens any EPUB from disk in the reader.
 
 ### Reader
 
@@ -144,19 +145,23 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
 
 - Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows, swipe on touch screens.
 - Table of contents (`T`), current chapter, page in chapter and % of the book.
+- `Esc` closes an open panel (contents, search, bookmarks), then clears search highlights,
+  then closes the book and returns to the catalog, scrolled to where you left it
+  (the **Catalog** button does the same).
 - Progress slider at the bottom: shows how much is read; drag it to jump anywhere
   (while dragging it shows the % and chapter you'll land on).
 - Remembers where you stopped in each book (in the browser's `localStorage`),
   also when the same book is opened by picking the file by hand.
-- Search in the book (🔍, `Ctrl+F` or `/`): lists every match grouped by chapter, with the
+- Search in the book (search icon, `Ctrl+F` or `/`): lists every match grouped by chapter, with the
   % of the book and the text around it; click a match to go there. All matches are highlighted
   on the page, the current one in orange. `Enter` / `F3` — next match, `Shift+Enter` /
   `Shift+F3` — previous; while the panel is closed a small `‹ 3 / 42 ›` bar stays at the bottom.
   Search ignores case, treats ё as е and finds phrases split by formatting (e.g. half in italics).
-- Bookmarks, separate for each book: ☆ (or `M`) bookmarks the page you are reading (★ — the page
-  already has one; press again to remove it). 🔖 (or `B`, available once the book has a bookmark)
-  lists the book's bookmarks in reading order with the %, chapter and first words of the page; rename (✎), delete (✕) or click to go
-  there. ▲ ▼ in the list or `[` / `]` jump to the previous / next bookmark. Kept in the browser's
+- Bookmarks, separate for each book: the bookmark icon (or `M`) bookmarks the page you are reading
+  (filled — the page already has one; press again to remove it). The bookmarks icon next to it
+  (or `B`, available once the book has a bookmark) lists the book's bookmarks in reading order
+  with the %, chapter and first words of the page; rename (pencil), delete (bin) or click to go
+  there. The up / down arrows in the list or `[` / `]` jump to the previous / next bookmark. Kept in the browser's
   `localStorage`, like the reading place.
 - Font size (`+` / `−`) and light / sepia / dark theme, remembered.
 - Drag an EPUB onto the page to open it.

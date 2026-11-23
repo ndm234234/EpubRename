@@ -184,84 +184,186 @@ PAGE = r"""<!DOCTYPE html>
 <title>__TITLE__</title>
 <style>
   :root {
-    --bg: #f6f5f2; --card: #ffffff; --text: #1d1d1f; --muted: #6e6e73;
-    --line: #e3e1dc; --accent: #2f6fde; --chip: #eeece7; --shadow: 0 1px 3px rgba(0,0,0,.08);
+    --bg: #f7f7f5; --surface: #ffffff; --surface-2: #efeeeb; --text: #18181b; --muted: #6b6b74;
+    --line: rgba(0,0,0,.09); --accent: #3563e9; --accent-soft: rgba(53,99,233,.1); --ring: rgba(53,99,233,.35);
+    --header: rgba(247,247,245,.78); --danger: #d93636;
+    --shadow-cover: 0 1px 2px rgba(0,0,0,.08), 0 8px 18px -8px rgba(0,0,0,.28);
+    --shadow-hover: 0 2px 4px rgba(0,0,0,.08), 0 18px 34px -12px rgba(0,0,0,.4);
+    color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #161618; --card: #222225; --text: #ececee; --muted: #9a9aa0;
-            --line: #333338; --accent: #6ea0ff; --chip: #2d2d31; --shadow: none; }
+    :root { --bg: #111113; --surface: #1b1b1e; --surface-2: #26262a; --text: #f2f2f4; --muted: #a0a0a8;
+            --line: rgba(255,255,255,.09); --accent: #7ea2ff; --accent-soft: rgba(126,162,255,.15);
+            --ring: rgba(126,162,255,.4); --header: rgba(17,17,19,.75); --danger: #ff6b6b;
+            --shadow-cover: 0 1px 2px rgba(0,0,0,.5), 0 8px 18px -8px rgba(0,0,0,.8);
+            --shadow-hover: 0 2px 4px rgba(0,0,0,.5), 0 18px 34px -12px rgba(0,0,0,.9);
+            color-scheme: dark; }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-         background: var(--bg); color: var(--text); }
-  header { position: sticky; top: 0; z-index: 5; background: var(--bg);
-           border-bottom: 1px solid var(--line); padding: 14px 24px; }
-  .bar { max-width: 1400px; margin: 0 auto; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-  h1 { font-size: 20px; margin: 0 12px 0 0; white-space: nowrap; }
-  #count { color: var(--muted); font-size: 14px; white-space: nowrap; }
-  input[type=search] { flex: 1 1 260px; min-width: 200px; padding: 9px 12px; font: inherit;
-         border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); }
-  select, button { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
-         background: var(--card); color: var(--text); cursor: pointer; }
-  .btn { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card);
-         color: var(--text); text-decoration: none; white-space: nowrap; }
-  button[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
-  main { max-width: 1400px; margin: 0 auto; padding: 20px 24px 60px; }
-  h2 { font-size: 17px; margin: 28px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
-  h2 small { color: var(--muted); font-weight: normal; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px; }
-  .book { background: var(--card); border-radius: 10px; box-shadow: var(--shadow);
-          border: 1px solid var(--line); overflow: hidden; display: flex; flex-direction: column; }
-  .cover { display: block; aspect-ratio: 2 / 3; background: var(--chip); overflow: hidden; }
-  .cover { position: relative; }
+         background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
+  .ic { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8;
+        stroke-linecap: round; stroke-linejoin: round; }
+  :focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
+
+  /* Header: translucent, stays on top */
+  header { position: sticky; top: 0; z-index: 5; background: var(--header);
+           -webkit-backdrop-filter: saturate(1.6) blur(16px); backdrop-filter: saturate(1.6) blur(16px);
+           border-bottom: 1px solid var(--line); padding: 12px 28px; }
+  .bar { max-width: 1400px; margin: 0 auto; display: flex; gap: 10px 14px; flex-wrap: wrap; align-items: center; }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; margin-right: 6px; }
+  .logo { width: 34px; height: 34px; padding: 7px; border-radius: 10px; color: #fff; stroke-width: 2;
+          background: linear-gradient(135deg, #5b8cff, #3563e9); box-shadow: 0 4px 12px -4px rgba(53,99,233,.6); }
+  h1 { font-size: 19px; font-weight: 700; letter-spacing: -.01em; margin: 0; white-space: nowrap;
+       overflow: hidden; text-overflow: ellipsis; }
+  .badge { font-size: 12px; font-weight: 600; color: var(--muted); background: var(--surface-2);
+           padding: 2px 8px; border-radius: 999px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .search { flex: 1 1 280px; position: relative; display: flex; align-items: center; min-width: 200px; }
+  .search .ic { position: absolute; left: 12px; color: var(--muted); pointer-events: none; }
+  .search input { width: 100%; height: 40px; padding: 0 40px 0 38px; font: inherit; color: var(--text);
+                  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+                  transition: border-color .15s, box-shadow .15s; }
+  .search input::placeholder { color: var(--muted); opacity: .8; }
+  .search input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+  .search kbd { position: absolute; right: 10px; font: 12px/1 ui-monospace, monospace; color: var(--muted);
+                border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 3px 6px;
+                pointer-events: none; transition: opacity .15s; }
+  .search:focus-within kbd, .search.filled kbd { opacity: 0; }
+  .tools { display: flex; gap: 8px; align-items: center; }
+  .chip, .select select { height: 40px; display: inline-flex; align-items: center; gap: 7px; padding: 0 14px;
+          font: inherit; font-size: 14px; font-weight: 500; color: var(--text); background: var(--surface);
+          border: 1px solid var(--line); border-radius: 12px; cursor: pointer; text-decoration: none;
+          white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
+  .chip:hover, .select select:hover { background: var(--surface-2); }
+  .chip[aria-pressed=true] { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .select { position: relative; display: flex; align-items: center; }
+  .select .ic { position: absolute; left: 12px; color: var(--muted); pointer-events: none; }
+  .select select { -webkit-appearance: none; appearance: none; padding: 0 34px 0 36px;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8a93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+          background-repeat: no-repeat; background-position: right 10px center; background-size: 16px; }
+
+  main { max-width: 1400px; margin: 0 auto; padding: 28px 28px 64px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 34px 26px; }
+
+  /* Group by author: heading with a count and a rule */
+  h2 { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: -.01em;
+       margin: 40px 0 18px; }
+  h2:first-child { margin-top: 4px; }
+  h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+  /* A book: cover on a shelf, text below */
+  .book { display: flex; flex-direction: column; min-width: 0; }
+  .cover { position: relative; display: block; aspect-ratio: 2 / 3; border-radius: 6px 10px 10px 6px;
+           overflow: hidden; background: var(--surface-2); box-shadow: var(--shadow-cover);
+           color: #fff; text-decoration: none; transition: transform .2s ease, box-shadow .2s ease; }
+  .cover::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;   /* spine */
+           background: linear-gradient(90deg, rgba(0,0,0,.22) 0, rgba(255,255,255,.18) 2.5%,
+                       rgba(0,0,0,.08) 4.5%, transparent 9%); }
   .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .cover::after { content: "📖"; position: absolute; right: 8px; bottom: 8px; font-size: 20px;
-                  padding: 4px 6px; border-radius: 8px; background: rgba(0,0,0,.55);
-                  opacity: 0; transition: opacity .15s; }
-  .cover:hover::after { opacity: 1; }
+  .book:hover .cover, .cover:focus-visible { transform: translateY(-4px); box-shadow: var(--shadow-hover); }
+  .read { position: absolute; z-index: 2; left: 50%; bottom: 12px; transform: translate(-50%, 6px);
+          display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px;
+          font-size: 13px; font-weight: 600; color: #fff; background: rgba(20,20,24,.72);
+          -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); opacity: 0;
+          transition: opacity .18s, transform .18s; white-space: nowrap; }
+  .read .ic { width: 16px; height: 16px; }
+  .book:hover .read, .cover:focus-visible .read { opacity: 1; transform: translate(-50%, 0); }
+  @media (hover: none) and (pointer: coarse) { .read { display: none; } }   /* touch screens: tap opens anyway */
   .ph { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center;
-        padding: 14px; color: #fff; font-weight: 600; text-align: center; gap: 8px; }
-  .ph .a { font-weight: 400; font-size: 13px; opacity: .9; }
-  .info { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 3px; flex: 1; }
-  .title { font-weight: 600; color: var(--text); text-decoration: none; }
+        padding: 16px 14px 16px 20px; font-weight: 700; text-align: center; gap: 10px; line-height: 1.25;
+        text-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .ph .a { font-weight: 500; font-size: 13px; opacity: .85; }
+  .info { padding: 12px 2px 0; display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+  .title { font-weight: 650; font-size: 15px; line-height: 1.3; color: var(--text); text-decoration: none;
+           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .title:hover { color: var(--accent); }
-  .authors { color: var(--muted); font-size: 14px; }
+  .authors { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .authors a { color: inherit; text-decoration: none; cursor: pointer; }
-  .authors a:hover { color: var(--accent); text-decoration: underline; }
-  .meta { color: var(--muted); font-size: 12px; }
-  .save { display: block; padding: 7px 12px; text-align: center; font-size: 13px; text-decoration: none;
-          color: var(--accent); border-bottom: 1px solid var(--line); }
-  .save:hover { background: var(--chip); }
-  .err { color: #d33; font-size: 12px; }
-  details { margin-top: 4px; font-size: 13px; }
-  summary { cursor: pointer; color: var(--accent); list-style: none; }
-  summary::-webkit-details-marker { display: none; }
-  details p { white-space: pre-line; margin: 6px 0 0; }
-  .note { max-width: 1400px; margin: 14px auto 0; padding: 10px 14px; border-radius: 8px;
-          border: 1px solid var(--line); background: var(--card); color: var(--muted); font-size: 14px; }
-  .note b { color: var(--text); }
-  @media (max-width: 1448px) { .note { margin: 14px 24px 0; } }
-  .empty { color: var(--muted); text-align: center; padding: 60px 0; }
-  footer { color: var(--muted); font-size: 12px; text-align: center; padding-bottom: 30px; }
+  .authors a:hover { color: var(--accent); }
+  .meta { color: var(--muted); font-size: 12px; opacity: .85; }
+  .actions { display: flex; align-items: center; gap: 2px; margin: 6px 0 0 -8px; }
+  .act { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 8px; border: 0;
+         border-radius: 8px; background: none; font: inherit; font-size: 13px; font-weight: 500;
+         color: var(--muted); cursor: pointer; text-decoration: none; }
+  .act .ic { width: 16px; height: 16px; }
+  .act:hover { background: var(--surface-2); color: var(--text); }
+  .act[aria-expanded=true] { color: var(--accent); }
+  .act[aria-expanded=true] .ic { transform: rotate(180deg); }
+  .act.save { margin-left: auto; }
+  .desc { margin: 4px 0 0; font-size: 13px; color: var(--muted); white-space: pre-line; }
+  .err { color: var(--danger); font-size: 12px; }
+
+  .note { max-width: 1400px; margin: 16px auto 0; padding: 12px 16px; border-radius: 12px; display: flex;
+          gap: 10px; align-items: flex-start; border: 1px solid var(--line); background: var(--accent-soft);
+          color: var(--text); font-size: 14px; }
+  .note .ic { color: var(--accent); margin-top: 1px; }
+  .note code { background: var(--surface); padding: 1px 6px; border-radius: 6px; font-size: 13px; }
+  @media (max-width: 1456px) { .note { margin: 16px 28px 0; } }
+  .empty { color: var(--muted); text-align: center; padding: 80px 0; display: flex; flex-direction: column;
+           align-items: center; gap: 12px; }
+  .empty .ic { width: 40px; height: 40px; stroke-width: 1.5; opacity: .6; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 20px 32px; opacity: .8; }
+
+  @media (max-width: 640px) {
+    header { padding: 10px 16px; }
+    main { padding: 20px 16px 48px; }
+    .note { margin: 12px 16px 0; }
+    .search { order: 3; flex-basis: 100%; }
+    .brand { flex: 1; }
+    .chip span { display: none; }
+    .chip { padding: 0 11px; }
+    /* sort becomes an icon button; the phone's own picker still lists the options */
+    .select select { width: 40px; padding: 0; color: transparent; background-image: none; }
+    .select select option { color: var(--text); }
+    .select .ic { left: 11px; color: var(--text); }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 26px 16px; }
+  }
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="m3 16 4 4 4-4M7 20V4M21 8l-4-4-4 4M17 4v16"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-read" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
+</svg>
 <header><div class="bar">
-  <h1>📚 __TITLE__</h1>
-  <span id="count"></span>
-  <input id="q" type="search" placeholder="Search by title, author, description…" autofocus>
-  <select id="sort" title="Sort">
-    <option value="author">Sort: author</option>
-    <option value="title">Sort: title</option>
-    <option value="added">Sort: recently added</option>
-    <option value="size">Sort: file size</option>
-  </select>
-  <a id="openFile" class="btn" href="__READER__" title="Open any EPUB file in the reader">📂 Open file…</a>
-  <button id="group" aria-pressed="false" title="Group books by author">👤 Group by author</button>
+  <div class="brand">
+    <svg class="ic logo" aria-hidden="true"><use href="#i-library"/></svg>
+    <h1>__TITLE__</h1>
+    <span id="count" class="badge"></span>
+  </div>
+  <label class="search" id="searchBox">
+    <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+    <input id="q" type="search" placeholder="Search by title, author, description…" aria-label="Search books" autofocus>
+    <kbd>/</kbd>
+  </label>
+  <div class="tools">
+    <div class="select" title="Sort">
+      <svg class="ic" aria-hidden="true"><use href="#i-sort"/></svg>
+      <select id="sort" aria-label="Sort">
+        <option value="author">Author</option>
+        <option value="title">Title</option>
+        <option value="added">Recently added</option>
+        <option value="size">File size</option>
+      </select>
+    </div>
+    <button id="group" class="chip" aria-pressed="false" title="Group books by author">
+      <svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><span>Group by author</span></button>
+    <a id="openFile" class="chip" href="__READER__" title="Open any EPUB file in the reader">
+      <svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span>Open file</span></a>
+  </div>
 </div></header>
-<div id="fileNote" class="note" hidden>Opened directly from disk: books ask you to choose
-  the file. For one-click reading open the catalog with <b>Open Library</b>
-  (<code>Open Library.bat</code> on Windows, <code>Open Library.sh</code> on Linux) in this folder.</div>
+<div id="fileNote" class="note" hidden><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>
+  <div>Opened directly from disk: books ask you to choose the file. For one-click reading open
+  the catalog with <b>Open Library</b> (<code>Open Library.bat</code> on Windows,
+  <code>Open Library.sh</code> on Linux) in this folder.</div></div>
 <main id="list"></main>
 <footer>Generated __DATE__ · click a cover or a title to read the book</footer>
 
@@ -282,6 +384,16 @@ if (saved.sort) $("sort").value = saved.sort;
 if (saved.group === true) $("group").setAttribute("aria-pressed", "true");
 const save = () => localStorage.setItem("epubIndex", JSON.stringify(
   { sort: $("sort").value, group: $("group").getAttribute("aria-pressed") === "true" }));
+
+const NS = "http://www.w3.org/2000/svg";
+function icon(name) {
+  const svg = document.createElementNS(NS, "svg"), use = document.createElementNS(NS, "use");
+  svg.setAttribute("class", "ic");
+  svg.setAttribute("aria-hidden", "true");
+  use.setAttribute("href", "#i-" + name);
+  svg.append(use);
+  return svg;
+}
 
 function el(tag, props = {}, ...children) {
   const e = document.createElement(tag);
@@ -327,8 +439,9 @@ async function saveAs(e, href, fileName) {
 
 function card(b) {
   // Cover opens the book in the reader, like the title
-  const cover = el("a", { class: "cover", href: readerUrl(b), title: "📖 Read in the browser" },
-                   b.cover ? el("img", { src: b.cover, alt: "", loading: "lazy" }) : placeholder(b));
+  const cover = el("a", { class: "cover", href: readerUrl(b), title: "Read in the browser" },
+                   b.cover ? el("img", { src: b.cover, alt: "", loading: "lazy" }) : placeholder(b),
+                   el("span", { class: "read" }, icon("read"), "Read"));
   const authors = el("div", { class: "authors" });
   (b.authors.length ? b.authors : ["Unknown Author"]).forEach((a, i) => {
     if (i) authors.append(", ");
@@ -337,19 +450,27 @@ function card(b) {
   });
   const meta = [b.series && `${b.series}${b.seriesIndex ? " #" + b.seriesIndex : ""}`,
                 b.year, b.publisher, fmtSize(b.size)].filter(Boolean).join(" · ");
+  const actions = el("div", { class: "actions" });
   let desc = null;
   if (b.description) {
-    desc = el("details", {}, el("summary", {}, "Description"), el("p", {}, b.description));
+    desc = el("p", { class: "desc", hidden: "" }, b.description);
+    const about = el("button", { class: "act", type: "button", "aria-expanded": "false" }, "About", icon("chevron"));
+    about.addEventListener("click", () => {
+      desc.hidden = !desc.hidden;
+      about.setAttribute("aria-expanded", String(!desc.hidden));
+    });
+    actions.append(about);
   }
   const fileName = b.file.split("/").pop();
-  const save = el("a", { class: "save", href: b.href, download: fileName,
-                         title: "Save the EPUB file: " + fileName }, "⬇ Save as…");
+  const save = el("a", { class: "act save", href: b.href, download: fileName, "aria-label": "Save as…",
+                         title: "Save the EPUB file: " + fileName }, icon("download"));
   save.addEventListener("click", e => saveAs(e, b.href, fileName));
-  return el("article", { class: "book" }, cover, save,
+  actions.append(save);
+  return el("article", { class: "book" }, cover,
     el("div", { class: "info" },
-      el("a", { class: "title", href: readerUrl(b), title: "Read in the browser" }, b.title), authors,
+      el("a", { class: "title", href: readerUrl(b), title: b.title }, b.title), authors,
       el("div", { class: "meta" }, meta),
-      b.error ? el("div", { class: "err" }, "⚠ " + b.error) : null, desc));
+      b.error ? el("div", { class: "err" }, "⚠ " + b.error) : null, actions, desc));
 }
 
 const sorters = {
@@ -360,12 +481,13 @@ const sorters = {
 };
 
 function render() {
+  $("searchBox").classList.toggle("filled", !!$("q").value);   // hides the "/" hint
   const words = norm($("q").value).split(/\s+/).filter(Boolean);
   const shown = books.filter(b => words.every(w => b._search.includes(w))).sort(sorters[$("sort").value]);
   $("count").textContent = shown.length === books.length
     ? `${books.length} books` : `${shown.length} of ${books.length} books`;
   const list = $("list"); list.replaceChildren();
-  if (!shown.length) { list.append(el("div", { class: "empty" }, "Nothing found")); return; }
+  if (!shown.length) { list.append(el("div", { class: "empty" }, icon("search"), "Nothing found")); return; }
 
   if ($("group").getAttribute("aria-pressed") === "true") {
     const groups = new Map();
@@ -378,7 +500,7 @@ function render() {
     if ($("sort").value === "author") keys.sort(coll.compare);
     for (const k of keys) {
       const g = groups.get(k);
-      list.append(el("h2", {}, k + " ", el("small", {}, `(${g.length})`)),
+      list.append(el("h2", {}, k, el("span", { class: "badge" }, g.length)),
                   el("div", { class: "grid" }, ...g.map(card)));
     }
   } else {
