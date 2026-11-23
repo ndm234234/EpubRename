@@ -153,6 +153,11 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
   on the page, the current one in orange. `Enter` / `F3` — next match, `Shift+Enter` /
   `Shift+F3` — previous; while the panel is closed a small `‹ 3 / 42 ›` bar stays at the bottom.
   Search ignores case, treats ё as е and finds phrases split by formatting (e.g. half in italics).
+- Bookmarks, separate for each book: ☆ (or `M`) bookmarks the page you are reading (★ — the page
+  already has one; press again to remove it). 🔖 (or `B`, available once the book has a bookmark)
+  lists the book's bookmarks in reading order with the %, chapter and first words of the page; rename (✎), delete (✕) or click to go
+  there. ▲ ▼ in the list or `[` / `]` jump to the previous / next bookmark. Kept in the browser's
+  `localStorage`, like the reading place.
 - Font size (`+` / `−`) and light / sepia / dark theme, remembered.
 - Drag an EPUB onto the page to open it.
 
