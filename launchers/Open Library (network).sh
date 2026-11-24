@@ -20,7 +20,7 @@ SILENT, BYE_GRACE = 180, 10   # going from the catalog to a book closes one page
 devices, refused, lock = {}, set(), threading.Lock()
 
 def say(line):
-    print(f"  {time.strftime('%H:%M:%S')}  {line}", flush=True)
+    print(f"  {time.strftime('%Y-%m-%d %H:%M:%S')}  {line}", flush=True)
 
 def device_kind(ua):
     ua = ua or ""

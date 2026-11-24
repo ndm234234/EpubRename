@@ -195,6 +195,12 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
   don't matter; `Esc` clears it). The book search (`Ctrl+F`) also lists matching bookmarks and notes,
   in a separate group above the matches in the text.
 - Light / sepia / dark theme, remembered.
+- **Print** (computer; also `Ctrl+P`) prints the open pages and nothing else: two pages side by
+  side on an A4 landscape sheet, or one page on A4 portrait when one is shown. Black text on white
+  whatever the theme, with the chosen font and pictures, and no browser header or footer. The text
+  size (up to 14 pt) is picked so the pages fit on the sheet. When two open pages hold more text than
+  one sheet can take at 8 pt (a big monitor with small text), each page is printed on its own A4
+  portrait sheet instead. The browser's own Print menu prints a note pointing to the button.
 - **Aa** — text settings, remembered for all books:
   - size (also `+` / `−`);
   - font: *As in book*, or one of the reading fonts that come with the reader — Literata,
@@ -245,9 +251,9 @@ address to type on the phone, e.g. `http://192.168.1.64:48865/`.
   connected devices:
 
   ```
-  15:57:09  + 192.168.1.64 (laptop) · Linux · Chrome — connected    [devices: 1]
-  15:57:11  📖 192.168.1.64 (laptop) · Linux · Chrome — «Book title»
-  15:57:17  − 192.168.1.64 (laptop) · Linux · Chrome — closed the page; was here 2 s, …    [devices: 0]
+  2026-11-24 15:57:09  + 192.168.1.64 (laptop) · Linux · Chrome — connected    [devices: 1]
+  2026-11-24 15:57:11  📖 192.168.1.64 (laptop) · Linux · Chrome — «Book title»
+  2026-11-24 15:57:17  − 192.168.1.64 (laptop) · Linux · Chrome — closed the page; was here 2 s, …    [devices: 0]
   ```
 
   Open pages report in once a minute; a device that goes quiet for 3 minutes (screen off,

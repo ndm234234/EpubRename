@@ -36,7 +36,7 @@ function IsHomeAddress([Net.IPAddress]$ip) {
 $silent = 180; $byeGrace = 10   # going from the catalog to a book closes one page and opens another
 $devices = @{}; $refused = @{}
 
-function Say($line) { Write-Host ("  " + (Get-Date -Format 'HH:mm:ss') + "  " + $line) }
+function Say($line) { Write-Host ("  " + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + "  " + $line) }
 
 function DeviceKind($ua) {
   if (-not $ua) { $ua = '' }

@@ -240,6 +240,14 @@
              font-variant-numeric: tabular-nums; }
   @media (hover: none) and (pointer: coarse) { .seg button { height: 42px; } }
   .hidden { display: none !important; }
+  /* Printing is for computers; phones print badly anyway */
+  @media (hover: none) and (pointer: coarse), (max-width: 600px) { #printBtn { display: none; } }
+  /* The browser's own Print prints this page, not the book: say how to print the book */
+  #printNote { display: none; }
+  @media print {
+    body > *:not(#printNote) { display: none !important; }
+    #printNote { display: block; font: 14pt/1.5 system-ui, sans-serif; color: #000; padding: 20mm; }
+  }
   @media (max-width: 600px) { .side { display: none; } #viewer { margin: 8px 12px; } .wide { display: none; }
                               .sep { display: none; } header { padding: 6px 4px; } .ib { min-width: 34px; padding: 0 5px; } }
   @media (max-width: 480px) { #openBtn { display: none; } }   /* the start screen has its own "Choose file" */
@@ -251,6 +259,7 @@
   <symbol id="i-toc" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></symbol>
   <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M18 21l-6-4-6 4V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/></symbol>
   <symbol id="i-bookmarks" viewBox="0 0 24 24"><path d="M15 21l-5-3.5L5 21V8a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2z"/><path d="M9 3h8a2 2 0 0 1 2 2v13"/></symbol>
+  <symbol id="i-print" viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6z"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
   <symbol id="i-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
@@ -274,9 +283,11 @@
   <button id="marksBtn" class="ib" title="Bookmarks (B)" aria-label="Bookmarks" disabled><svg class="ic" aria-hidden="true"><use href="#i-bookmarks"/></svg></button>
   <button id="searchBtn" class="ib" title="Search in the book (Ctrl+F)" aria-label="Search" disabled><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg></button>
   <span class="sep"></span>
+  <button id="printBtn" class="ib" title="Print the open pages (Ctrl+P)" aria-label="Print" disabled><svg class="ic" aria-hidden="true"><use href="#i-print"/></svg></button>
   <button id="themeBtn" class="ib" title="Theme: light / sepia / dark" aria-label="Theme"><svg class="ic" aria-hidden="true"><use href="#i-theme"/></svg></button>
   <button id="openBtn" class="ib" title="Open another EPUB file" aria-label="Open file"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg></button>
 </header>
+<div id="printNote">To print the open pages of the book, use the reader's Print button or Ctrl+P.</div>
 <div id="stage">
   <button id="prev" class="side" title="Previous page (←)" aria-label="Previous page" disabled><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg></button>
   <div id="viewer"></div>
@@ -505,7 +516,7 @@ async function openBook(data, fileName) {
   try { await rendition.display(saved && saved.cfi || undefined); }
   catch { await rendition.display(); }   // saved place is no longer valid
   $("start").classList.add("hidden");
-  for (const id of ["prev", "next", "smaller", "bigger", "typoBtn", "searchBtn", "markBtn"]) $(id).disabled = false;
+  for (const id of ["prev", "next", "smaller", "bigger", "typoBtn", "searchBtn", "markBtn", "printBtn"]) $(id).disabled = false;
   showTypo();
 
   book.loaded.navigation.then(nav => {
@@ -715,6 +726,165 @@ function keepOldPageUntilNewIsReady(r) {
       .then(() => frames(6)).then(drop);
   });
 }
+
+// ------------------------------------------------------------ print
+
+// Print what is on the screen: the open pages (two on a wide screen), and nothing else. The text of
+// those pages is copied, with the book's styles and the chosen font, into a hidden page set up for
+// paper. Two open pages go side by side on one A4 landscape sheet, one page on A4 portrait; the text
+// size is the largest (up to 14 pt) at which they fit on that sheet. When two pages hold more text
+// than one sheet can take at 8 pt (a big monitor, small text), each page gets its own portrait sheet.
+let printing = false;
+
+// The text of the open pages, as CFI ranges: [both] and, for two pages, also [left, right]
+function screenPages() {
+  const mgr = rendition.manager, loc = rendition.location;
+  const whole = [{ start: loc.start.cfi, end: loc.end.cfi }];
+  if (mgr.layout.divisor < 2 || !mgr.mapping) return { whole, pages: whole };
+  const view = mgr.views.first(), box = mgr.container.getBoundingClientRect(), pos = view.position();
+  const left = box.left - pos.left, width = Math.min(pos.right - box.left, mgr.layout.width), mid = left + width / 2;
+  // Where the left page ends. The right one starts right there: epub.js may count a short word at
+  // the turn on neither page, and on paper it would go missing.
+  const first = mgr.mapping.page(view.contents, view.section.cfiBase, left, mid);
+  const second = mgr.mapping.page(view.contents, view.section.cfiBase, mid, left + width);
+  if (!first || !first.end || !second || !second.start) return { whole, pages: whole };
+  return { whole, pages: [{ start: loc.start.cfi, end: first.end }, { start: first.end, end: loc.end.cfi }] };
+}
+
+// A copy of the text between two CFIs, with the elements around it
+function copyText(contents, from, to) {
+  const doc = contents.document, a = contents.range(from), b = contents.range(to);
+  const range = doc.createRange();
+  range.setStart(a.startContainer, a.startOffset);
+  range.setEnd(b.endContainer, b.endOffset);
+  // A paragraph that began on the previous page goes on without an indent
+  const block = n => (n.nodeType === 1 ? n : n.parentElement).closest("p, div, li, blockquote, dd, h1, h2, h3, h4, h5, h6");
+  const first = block(range.startContainer);
+  let cont = false;
+  if (first) {
+    const before = doc.createRange();
+    before.setStart(first, 0);
+    before.setEnd(range.startContainer, range.startOffset);
+    cont = before.toString().trim() !== "";
+  }
+  if (cont) first.setAttribute("data-print-cont", "");
+  let part = range.cloneContents();
+  if (cont) first.removeAttribute("data-print-cont");
+  // Keep the wrappers around the text, so the book's styles (".chapter p" etc.) still apply
+  for (let n = range.commonAncestorContainer; n && n !== doc.body && n !== doc.documentElement; n = n.parentNode) {
+    if (n.nodeType !== 1) continue;
+    const wrap = n.cloneNode(false);
+    wrap.append(part);
+    part = wrap;
+  }
+  return part;
+}
+
+async function printPages() {
+  if (printing || !rendition || !rendition.location) return;
+  const contents = rendition.getContents()[0];
+  if (!contents) return;
+  printing = true;
+  const frame = document.createElement("iframe");
+  let done = () => { frame.remove(); printing = false; done = () => {}; };
+  try {
+    const doc = contents.document, { whole, pages } = screenPages();
+    const twoPages = pages.length > 1;
+
+    // Off screen, as big as the sheet, so the text size can be fitted to it
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.cssText = "position: fixed; left: -10000px; top: 0; border: 0;";
+    document.body.append(frame);
+    const out = frame.contentDocument;
+    out.open(); out.write("<!DOCTYPE html><html><head><meta charset='utf-8'></head><body></body></html>"); out.close();
+    out.title = document.title;
+    for (const a of doc.documentElement.attributes) if (a.name !== "style") out.documentElement.setAttribute(a.name, a.value);
+    for (const a of doc.body.attributes) if (a.name !== "style") out.body.setAttribute(a.name, a.value);
+    // The book's styles and the reader's font settings; not the screen theme (colours, dark background)
+    for (const el of doc.head.querySelectorAll("link[rel~=stylesheet], style"))
+      if (!/^epubjs-inserted-css/.test(el.id)) out.head.append(out.importNode(el, true));
+    const paper = out.createElement("style");
+    out.head.append(paper);
+
+    // Lay the text out on sheets: one landscape sheet with two columns, or a portrait sheet per page
+    const layOut = (sheets, landscape) => {
+      const W = landscape ? 297 : 210, H = landscape ? 210 : 297;   // A4, mm
+      frame.style.width = W + "mm";
+      frame.style.height = H + "mm";
+      paper.textContent = `
+        /* No page margins: the browser then has no room for its header and footer (date, address);
+           the margins are each sheet's own padding instead */
+        @page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 0; }
+        html { font-size: var(--fs, 11pt) !important; padding: 0 !important; margin: 0 !important; }
+        html, body { background: #fff !important; color: #000 !important; }
+        body { margin: 0 !important; padding: 0 !important; font-size: var(--fs, 11pt) !important; }
+        .print-sheet { box-sizing: border-box; padding: 12mm 14mm; column-gap: 14mm; column-fill: balance;
+                       column-count: ${landscape ? 2 : 1}; }
+        /* For fitting: a bit shorter than on paper, so small differences of the print layout can't
+           push the last line onto another sheet */
+        @media screen { .print-sheet { height: ${H - 4}mm; column-fill: auto; overflow: hidden; } }
+        body * { color: #000 !important; background-color: transparent !important; }
+        a { text-decoration: none !important; }
+        * { break-before: auto !important; break-after: auto !important;
+            page-break-before: auto !important; page-break-after: auto !important; }
+        .print-sheet + .print-sheet { break-before: page !important; page-break-before: always !important; }
+        h1, h2, h3, h4, h5, h6 { break-after: avoid !important; }
+        img, svg, figure { max-width: 100% !important; max-height: ${H - 40}mm !important; break-inside: avoid; }
+        [data-print-cont] { text-indent: 0 !important; }`;
+      out.body.replaceChildren(...sheets.map(p => {
+        const sheet = out.createElement("div");
+        sheet.className = "print-sheet";
+        sheet.append(out.importNode(copyText(contents, p.start, p.end), true));
+        return sheet;
+      }));
+    };
+    // Fonts and pictures first, or they would be missing on paper and the fitting would be off.
+    // A browser only starts loading a font once text is laid out in it, so lay out first.
+    const loaded = async () => {
+      for (let i = 0; i < 3; i++) {
+        void out.body.offsetHeight;
+        await Promise.race([
+          Promise.all([out.fonts.ready, ...[...out.images].map(i => i.decode ? i.decode().catch(() => {}) : 0)]),
+          new Promise(ok => setTimeout(ok, 3000)),
+        ]);
+        if (out.fonts.status === "loaded") return;
+      }
+    };
+    const fits = pt => {   // more text than fits makes more columns
+      out.documentElement.style.setProperty("--fs", pt + "pt");
+      return [...out.querySelectorAll(".print-sheet")].every(s => s.scrollWidth <= s.clientWidth + 1);
+    };
+    // The largest size from min to 14 pt at which everything fits; null if not even min does
+    const fit = async min => {
+      await loaded();
+      let lo = min, hi = 14;
+      if (!fits(lo)) return null;
+      if (fits(hi)) lo = hi;
+      else for (let i = 0; i < 7; i++) { const mid = (lo + hi) / 2; if (fits(mid)) lo = mid; else hi = mid; }
+      let pt = Math.floor(lo * 4) / 4;
+      fits(pt);
+      await loaded();   // the new size may need more of the font (bold, italics)
+      while (pt > min && !fits(pt)) pt -= 0.25;
+      return fits(pt) ? pt : null;
+    };
+
+    layOut(whole, twoPages);
+    if (twoPages && await fit(8) === null) {   // too much for one sheet: a sheet per page
+      layOut(pages, false);
+      if (await fit(7) === null) fits(7);
+    } else if (!twoPages && await fit(7) === null) fits(7);   // still too much: smallest size, onto more sheets
+
+    // Chrome returns from print() when the dialog is closed, Firefox at once: clean up after printing
+    frame.contentWindow.addEventListener("afterprint", () => setTimeout(done, 100));
+    setTimeout(() => done(), 120000);
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+  } catch (err) {
+    console.error("Print failed", err);
+    done();
+  }
+}
+$("printBtn").onclick = () => printPages();
 
 function onRelocated(loc) {
   if (!loc || !loc.start) return;
@@ -1330,6 +1500,9 @@ $("stage").addEventListener("wheel", e => { if (!$("start").contains(e.target)) 
 function onKey(e) {
   if (!rendition) return;
   const k = e.key;
+  if ((e.ctrlKey || e.metaKey) && (k === "p" || k === "P" || k === "з" || k === "З")) {
+    e.preventDefault(); printPages(); return;
+  }
   if ((e.ctrlKey || e.metaKey) && (k === "f" || k === "F" || k === "а" || k === "А")) {
     e.preventDefault(); toggleSearch(true); return;
   }
