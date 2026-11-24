@@ -16,7 +16,7 @@ $root = [IO.Path]::GetFullPath($env:LIB_ROOT)
 $types = @{ '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8';
             '.css' = 'text/css'; '.json' = 'application/json'; '.jpg' = 'image/jpeg';
             '.jpeg' = 'image/jpeg'; '.png' = 'image/png'; '.gif' = 'image/gif';
-            '.epub' = 'application/epub+zip' }
+            '.epub' = 'application/epub+zip'; '.woff2' = 'font/woff2' }
 
 # This computer and home-network addresses only (no answer to anything from the internet)
 function IsHomeAddress([Net.IPAddress]$ip) {

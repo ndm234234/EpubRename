@@ -862,17 +862,24 @@ def main() -> int:
 
 
 def install_reader(dest: Path) -> None:
-    """Copy the reader (reader.html + epub.js + JSZip) next to the catalog."""
+    """Copy the reader (reader.html + epub.js + JSZip + fonts/) next to the catalog."""
     if not READER_SRC.is_dir():
         print(f"⚠️  Reader not found in {READER_SRC}: books will open as plain files")
         return
     dest.mkdir(parents=True, exist_ok=True)
-    names = {f.name for f in READER_SRC.iterdir() if f.is_file()}
+    names = {f.relative_to(READER_SRC) for f in READER_SRC.rglob("*") if f.is_file()}
     for name in names:
-        shutil.copy2(READER_SRC / name, dest / name)
-    for f in dest.iterdir():
-        if f.is_file() and f.name not in names:
+        target = dest / name
+        src = READER_SRC / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not (target.is_file() and target.stat().st_size == src.stat().st_size
+                and target.stat().st_mtime >= src.stat().st_mtime):
+            shutil.copy2(src, target)
+    for f in sorted(dest.rglob("*"), reverse=True):   # files left from an older reader; then empty folders
+        if f.is_file() and f.relative_to(dest) not in names:
             f.unlink()
+        elif f.is_dir() and not any(f.iterdir()):
+            f.rmdir()
 
 
 def install_launchers(root: Path) -> None:

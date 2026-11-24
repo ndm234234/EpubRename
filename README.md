@@ -159,7 +159,7 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
 A single offline page (`reader/reader.html`) built on [epub.js](https://github.com/futurepress/epub.js)
 and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). Nothing is uploaded.
 
-- Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows. On touch screens: swipe, or tap
+- Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows, mouse wheel / touchpad (one page per notch or swipe). On touch screens: swipe, or tap
   the lower half of the page (from the middle down to the slider) — right side for the next page,
   left side for the previous one. Taps in the upper half, on links or while selecting text don't turn pages.
 - Table of contents (`T`), current chapter, page in chapter and % of the book.
@@ -194,7 +194,19 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
   type (by name, the page's first words, chapter and note; all words must match, case and ё/е
   don't matter; `Esc` clears it). The book search (`Ctrl+F`) also lists matching bookmarks and notes,
   in a separate group above the matches in the text.
-- Font size (`+` / `−`) and light / sepia / dark theme, remembered.
+- Light / sepia / dark theme, remembered.
+- **Aa** — text settings, remembered for all books:
+  - size (also `+` / `−`);
+  - font: *As in book*, or one of the reading fonts that come with the reader — Literata,
+    PT Serif, Lora, Merriweather, PT Sans, Inter. Books come with their own fonts (embedded,
+    or named like Times New Roman / Arial), and books that name none get the device's
+    default, so they all look different. A chosen font shows every book the same way, on
+    every device and without internet; bold, italics and monospaced code are kept.
+    The fonts are in `reader/fonts/` (SIL Open Font License, Cyrillic and Latin, 2.3 MB);
+    a browser downloads only the font in use;
+  - layout: *Same in all books* gives plain paragraphs the same line spacing, indent and
+    justified text with hyphenation. Titles, epigraphs and other styled parts keep the book's
+    look.
 - Drag an EPUB onto the page to open it.
 
 ### Open Library launchers

@@ -7,6 +7,7 @@
 <!-- Offline EPUB reader: epub.js + JSZip are local files next to this page. -->
 <script src="jszip.min.js"></script>
 <script src="epub.min.js"></script>
+<link rel="stylesheet" href="fonts/fonts.css">
 <style>
   :root { --bg: #fdfcf8; --text: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.09);
           --panel: #ffffff; --accent: #3563e9; --accent-soft: rgba(53,99,233,.1); --hover: rgba(0,0,0,.05);
@@ -216,6 +217,28 @@
   #toast button { border-radius: 999px; height: 32px; padding: 0 12px; color: var(--accent); font-weight: 600; gap: 6px; }
   #toast .ic { width: 16px; height: 16px; }
   .mark:hover button, .mark button:focus { opacity: 1; }
+  /* Text settings ("Aa"): size, font, layout */
+  #typoBtn .aa { font-size: 17px; }
+  #typo { position: absolute; z-index: 11; top: 8px; right: 8px; width: min(330px, calc(100vw - 16px));
+          padding: 12px; display: grid; gap: 12px; background: var(--panel); border: 1px solid var(--line);
+          border-radius: 14px; box-shadow: var(--shadow); opacity: 0; visibility: hidden; transform: translateY(-6px);
+          transition: opacity .15s, transform .15s, visibility .15s; max-height: calc(100% - 16px); overflow-y: auto; }
+  #typo.open { opacity: 1; visibility: visible; transform: none; }
+  #typo h5 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  #typo p { margin: 6px 2px 0; font-size: 12px; color: var(--muted); line-height: 1.35; }
+  .seg { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--hover); }
+  .seg button { flex: 1; height: 34px; padding: 0 8px; border-radius: 8px; font-size: 14px; }
+  .seg button.on { background: var(--bg); color: var(--accent); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+  .seg button:disabled { opacity: .35; }
+  .seg.faces { display: grid; grid-template-columns: 1fr 1fr; }
+  .seg.faces button { height: auto; min-height: 50px; padding: 6px 8px; display: grid; gap: 1px; line-height: 1.2; }
+  .seg.faces .wide2 { grid-column: 1 / -1; min-height: 36px; }
+  .seg.faces b { font-size: 15px; font-weight: 400; }
+  .seg.faces button.on b { font-weight: 700; }
+  .seg.faces small { font-size: 13px; color: var(--muted); }
+  #fontPct { flex: 1.3; display: grid; place-items: center; font-size: 14px; font-weight: 600;
+             font-variant-numeric: tabular-nums; }
+  @media (hover: none) and (pointer: coarse) { .seg button { height: 42px; } }
   .hidden { display: none !important; }
   @media (max-width: 600px) { .side { display: none; } #viewer { margin: 8px 12px; } .wide { display: none; }
                               .sep { display: none; } header { padding: 6px 4px; } .ib { min-width: 34px; padding: 0 5px; } }
@@ -245,8 +268,7 @@
   <a id="back" class="btn ib hidden" href="../../index.html" title="Back to catalog (Esc)"><svg class="ic" aria-hidden="true"><use href="#i-back"/></svg><span class="wide">Catalog</span></a>
   <button id="tocBtn" class="ib" title="Contents (T)" disabled><svg class="ic" aria-hidden="true"><use href="#i-toc"/></svg><span class="wide">Contents</span></button>
   <div id="title"></div>
-  <button id="smaller" class="ib" title="Smaller text (−)" aria-label="Smaller text" disabled><span class="aa s">A</span></button>
-  <button id="bigger" class="ib" title="Bigger text (+)" aria-label="Bigger text" disabled><span class="aa l">A</span></button>
+  <button id="typoBtn" class="ib" title="Text: size, font, layout" aria-label="Text settings" aria-expanded="false" disabled><span class="aa">Aa</span></button>
   <span class="sep"></span>
   <button id="markBtn" class="ib" title="Bookmark this page (M)" aria-label="Bookmark this page" disabled><svg class="ic" aria-hidden="true"><use href="#i-bookmark"/></svg></button>
   <button id="marksBtn" class="ib" title="Bookmarks (B)" aria-label="Bookmarks" disabled><svg class="ic" aria-hidden="true"><use href="#i-bookmarks"/></svg></button>
@@ -281,6 +303,24 @@
          autocomplete="off" aria-label="Search bookmarks and notes"></div>
     <div id="markList"></div>
   </aside>
+  <div id="typo" role="dialog" aria-label="Text settings">
+    <div><h5>Size</h5>
+      <div class="seg">
+        <button id="smaller" title="Smaller text (−)" aria-label="Smaller text" disabled><span class="aa s">A</span></button>
+        <span id="fontPct">100%</span>
+        <button id="bigger" title="Bigger text (+)" aria-label="Bigger text" disabled><span class="aa l">A</span></button>
+      </div></div>
+    <div><h5>Font</h5>
+      <div class="seg faces" id="faceSeg">
+        <button data-v="book" class="wide2">As in book</button>
+      </div></div>
+    <div><h5>Layout</h5>
+      <div class="seg" id="layoutSeg">
+        <button data-v="book">As in book</button>
+        <button data-v="even">Same in all books</button>
+      </div>
+      <p>Same line spacing, paragraph indents and justified text in every book.</p></div>
+  </div>
   <div id="toast" role="status"><span id="toastText"></span>
     <button id="toastAct" class="ib"><svg class="ic" aria-hidden="true"><use href="#i-note"/></svg>Add note</button></div>
   <div id="searchPill" class="hidden">
@@ -363,7 +403,7 @@ const THEME_CSS = {
            "body.dark *": { color: "inherit !important", "background-color": "transparent !important" },
            "body.dark a, body.dark a *": { color: "#6ea0ff !important" } },
 };
-const prefs = Object.assign({ theme: "light", font: 100 }, store.get("epubReader:prefs"));
+const prefs = Object.assign({ theme: "light", font: 100, face: "book", layout: "book" }, store.get("epubReader:prefs"));
 const savePrefs = () => store.set("epubReader:prefs", prefs);
 document.documentElement.dataset.theme = prefs.theme;
 
@@ -450,7 +490,13 @@ async function openBook(data, fileName) {
   for (const t of THEMES) rendition.themes.register(t, THEME_CSS[t]);
   rendition.themes.select(prefs.theme);
   rendition.themes.fontSize(prefs.font + "%");
+  rendition.hooks.content.register(contents => {
+    applyTypo(contents.document);
+    contents.document.addEventListener("wheel", onWheel, { passive: false });
+  });
+  rendition.started.then(() => keepOldPageUntilNewIsReady(rendition));
   rendition.on("relocated", onRelocated);
+  rendition.on("click", () => toggleTypo(false));
   rendition.on("keydown", onKey);
   rendition.on("touchstart", touchStart);
   rendition.on("touchend", touchEnd);
@@ -459,7 +505,8 @@ async function openBook(data, fileName) {
   try { await rendition.display(saved && saved.cfi || undefined); }
   catch { await rendition.display(); }   // saved place is no longer valid
   $("start").classList.add("hidden");
-  for (const id of ["prev", "next", "smaller", "bigger", "searchBtn", "markBtn"]) $(id).disabled = false;
+  for (const id of ["prev", "next", "smaller", "bigger", "typoBtn", "searchBtn", "markBtn"]) $(id).disabled = false;
+  showTypo();
 
   book.loaded.navigation.then(nav => {
     tocItems = [];
@@ -602,12 +649,49 @@ function toggleToc(open = !$("toc").classList.contains("open")) {
   $("toc").classList.toggle("open", open);
   $("tocBtn").classList.toggle("active", open);
   if (open) {
+    toggleTypo(false);
     const cur = $("toc").querySelector(".current");
     if (cur) cur.scrollIntoView({ block: "center" });
   }
 }
 
 // ------------------------------------------------------------ position & progress
+
+// Going to the next / previous chapter, epub.js removes the old chapter first and shows the new one
+// once it is laid out: the page goes blank for a moment, and the text jumps when its font arrives.
+// Instead the old page stays on screen, frozen in place, until the new one is ready.
+function keepOldPageUntilNewIsReady(r) {
+  const mgr = r.manager, clear = mgr && mgr.clear;
+  if (!clear) return;
+  let frozen = [], timer = 0;
+  const drop = () => { clearTimeout(timer); for (const v of frozen) { try { v.destroy(); } catch {} v.element.remove(); } frozen = []; };
+  mgr.clear = function () {
+    drop();
+    if (!this.views || !Array.isArray(this.views._views)) return clear.call(this);   // other epub.js version: as is
+    const box = this.container && this.container.getBoundingClientRect();
+    const old = this.views._views.filter(v => v.displayed && v.element);
+    if (!box || !old.length) return clear.call(this);
+    for (const v of old) {
+      const e = v.element.getBoundingClientRect();
+      Object.assign(v.element.style, {
+        position: "fixed", zIndex: 5, pointerEvents: "none", margin: 0,
+        left: e.left + "px", top: e.top + "px", width: e.width + "px", height: e.height + "px",
+        clipPath: `inset(${box.top - e.top}px ${e.right - box.right}px ${e.bottom - box.bottom}px ${box.left - e.left}px)`,
+      });
+    }
+    this.views._views = this.views._views.filter(v => !old.includes(v));   // the manager forgets them...
+    this.views.length = this.views._views.length;
+    frozen = old;                                                            // ...they go when the new page is up
+    timer = setTimeout(drop, 1500);
+    return clear.call(this);
+  };
+  r.on("relocated", () => {
+    if (!frozen.length) return;
+    const docs = r.getContents().map(c => c.document && c.document.fonts && c.document.fonts.ready);
+    Promise.race([Promise.all(docs), new Promise(ok => setTimeout(ok, 400))])
+      .then(() => requestAnimationFrame(() => requestAnimationFrame(drop)));
+  });
+}
 
 function onRelocated(loc) {
   if (!loc || !loc.start) return;
@@ -861,7 +945,7 @@ function toggleSearch(open = !$("search").classList.contains("open")) {
   if (open && !book) return;
   $("search").classList.toggle("open", open);
   $("searchBtn").classList.toggle("active", open);
-  if (open) { toggleToc(false); toggleMarks(false); $("q").focus({ preventScroll: true }); $("q").select(); scrollToCurrent(); }
+  if (open) { toggleToc(false); toggleMarks(false); toggleTypo(false); $("q").focus({ preventScroll: true }); $("q").select(); scrollToCurrent(); }
   else $("q").blur();
   updateHitUi();
 }
@@ -1098,7 +1182,7 @@ function toggleMarks(open = !$("marks").classList.contains("open")) {
   $("marks").classList.toggle("open", open);
   $("marksBtn").classList.toggle("active", open);
   if (open) {
-    toggleToc(false); toggleSearch(false);
+    toggleToc(false); toggleSearch(false); toggleTypo(false);
     const cur = $("markList").querySelector(".current");
     if (cur) $("markList").scrollTop = cur.offsetTop - $("markList").clientHeight / 3;
   }
@@ -1146,8 +1230,8 @@ $("markNext").onclick = () => stepMark(1);
 
 // Esc peels one layer at a time: an open panel, then search highlights, then the book itself
 function escape() {
-  if (["toc", "search", "marks"].some(id => $(id).classList.contains("open"))) {
-    toggleToc(false); toggleSearch(false); toggleMarks(false);
+  if (["toc", "search", "marks", "typo"].some(id => $(id).classList.contains("open"))) {
+    toggleToc(false); toggleSearch(false); toggleMarks(false); toggleTypo(false);
   } else if (hits.length) {
     clearSearch();
   } else if (!$("back").classList.contains("hidden")) {
@@ -1183,6 +1267,7 @@ function touchEnd(e) {
   if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) { dx < 0 ? rendition.next() : rendition.prev(); return; }
   if (!quick || Math.abs(dx) > 10 || Math.abs(dy) > 10) return;   // a long press or a drag, not a tap
   if (e.target.closest && e.target.closest("a[href], button, input, select, textarea, label")) return;   // links work as usual
+  if ($("typo").classList.contains("open")) { e.preventDefault(); toggleTypo(false); return; }   // a tap on the page closes it
   if (["toc", "search", "marks"].some(id => $(id).classList.contains("open"))) return;
   const sel = e.view && e.view.getSelection && e.view.getSelection();
   if (sel && !sel.isCollapsed) return;   // finishing a text selection
@@ -1197,6 +1282,27 @@ function touchEnd(e) {
 // Taps on the page margins (outside the book's iframe) count too
 $("stage").addEventListener("touchstart", e => { if (!e.target.closest("iframe")) touchStart(e); }, { passive: true });
 $("stage").addEventListener("touchend", e => { if (!e.target.closest("iframe") && $("viewer").contains(e.target)) touchEnd(e); });
+
+// Mouse wheel / touchpad: down or right — next page, up or left — previous. One page per
+// wheel notch; a touchpad swipe (and its inertia) is a single burst, so it turns one page:
+// after a turn the wheel is ignored until it has been still for a moment.
+let wheelSum = 0, wheelQuiet = 0, wheelBusy = false;
+function onWheel(e) {
+  if (!rendition || e.ctrlKey) return;   // Ctrl+wheel is the browser's zoom
+  if (["toc", "search", "marks", "typo"].some(id => $(id).classList.contains("open"))) return;
+  e.preventDefault();
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;   // lines / pages → pixels
+  const d = (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) * unit;
+  clearTimeout(wheelQuiet);
+  wheelQuiet = setTimeout(() => { wheelBusy = false; wheelSum = 0; }, 200);
+  if (wheelBusy) return;
+  wheelSum += d;
+  if (Math.abs(wheelSum) < 40) return;
+  wheelBusy = true;
+  wheelSum > 0 ? rendition.next() : rendition.prev();
+  wheelSum = 0;
+}
+$("stage").addEventListener("wheel", e => { if (!$("start").contains(e.target)) onWheel(e); }, { passive: false });   // margins and arrows
 
 function onKey(e) {
   if (!rendition) return;
@@ -1228,7 +1334,88 @@ function setFont(delta) {
   prefs.font = Math.min(200, Math.max(60, prefs.font + delta));
   savePrefs();
   if (rendition) rendition.themes.fontSize(prefs.font + "%");
+  showTypo();
 }
+
+// One font and one layout for every book. Books bring their own fonts (embedded or named) and
+// paragraph styles; these rules go last in the page, so they win over the book's.
+// Reading fonts come with the reader (fonts/fonts.css), so a book looks the same on every device
+const SERIF = ', Georgia, "Noto Serif", serif', SANS = ', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+const FACES = {
+  literata: { name: "Literata", stack: '"Reader Literata"' + SERIF },
+  ptserif: { name: "PT Serif", stack: '"Reader PT Serif"' + SERIF },
+  lora: { name: "Lora", stack: '"Reader Lora"' + SERIF },
+  merriweather: { name: "Merriweather", stack: '"Reader Merriweather"' + SERIF },
+  ptsans: { name: "PT Sans", stack: '"Reader PT Sans"' + SANS },
+  inter: { name: "Inter", stack: '"Reader Inter"' + SANS },
+};
+const FONTS_CSS = new URL("fonts/fonts.css", location.href).href;
+for (const [v, f] of Object.entries(FACES)) {   // a button per font, written in that font
+  const b = document.createElement("button");
+  b.dataset.v = v;
+  b.style.fontFamily = f.stack;
+  b.append(Object.assign(document.createElement("b"), { textContent: f.name }),
+           Object.assign(document.createElement("small"), { textContent: "Съешь же ещё" }));
+  $("faceSeg").append(b);
+}
+if (!FACES[prefs.face]) prefs.face = "book";
+function typoCss() {
+  let css = "";
+  if (FACES[prefs.face])   // code and other monospaced text keeps its font
+    css += `body, body *:not(pre, code, kbd, samp, tt, pre *, code *) { font-family: ${FACES[prefs.face].stack} !important; }\n`;
+  // Plain paragraphs only, and weaker than any class rule: centred titles, epigraphs etc. keep the
+  // book's style. Some books make paragraphs of text-only <div>s; that rule needs :has(), so it is
+  // separate (a browser without :has() drops just it).
+  const para = "{ margin: 0; text-indent: 1.5em; text-align: justify; line-height: 1.5; -webkit-hyphens: auto; hyphens: auto; }";
+  if (prefs.layout === "even")
+    css += `body { line-height: 1.5; }
+p:where(:not([align])) ${para}
+div:where(:not([align]):not(:has(div, p, h1, h2, h3, h4, h5, h6, table, ul, ol, dl, blockquote, pre, img, svg, hr))) ${para}\n`;
+  return css;
+}
+function applyTypo(doc) {
+  if (!doc || !doc.head) return;
+  // Hyphenation needs to know the language; many books only say it in their metadata
+  const root = doc.documentElement, lang = book && book.packaging && book.packaging.metadata.language;
+  if (lang && !root.getAttribute("lang") && !root.getAttributeNS("http://www.w3.org/XML/1998/namespace", "lang"))
+    root.setAttribute("lang", lang);
+  if (FACES[prefs.face] && !doc.getElementById("readerFonts")) {
+    const link = doc.createElement("link");
+    Object.assign(link, { id: "readerFonts", rel: "stylesheet", href: FONTS_CSS });
+    doc.head.appendChild(link);
+  }
+  let st = doc.getElementById("readerTypo");
+  if (!st) { st = doc.createElement("style"); st.id = "readerTypo"; }
+  st.textContent = typoCss();
+  doc.head.appendChild(st);   // (re)append: must stay after the book's own styles
+}
+function showTypo() {
+  $("fontPct").textContent = prefs.font + "%";
+  $("smaller").disabled = !rendition || prefs.font <= 60;
+  $("bigger").disabled = !rendition || prefs.font >= 200;
+  for (const [seg, key] of [["faceSeg", "face"], ["layoutSeg", "layout"]])
+    for (const b of $(seg).children) b.classList.toggle("on", b.dataset.v === prefs[key]);
+}
+function setTypo(key, value) {
+  prefs[key] = value;
+  savePrefs();
+  showTypo();
+  if (rendition) for (const c of rendition.getContents()) applyTypo(c.document);
+}
+for (const [seg, key] of [["faceSeg", "face"], ["layoutSeg", "layout"]])
+  $(seg).addEventListener("click", e => { const b = e.target.closest("button"); if (b) setTypo(key, b.dataset.v); });
+function toggleTypo(open = !$("typo").classList.contains("open")) {
+  if (open && !book) return;
+  $("typo").classList.toggle("open", open);
+  $("typoBtn").classList.toggle("active", open);
+  $("typoBtn").setAttribute("aria-expanded", open);
+  if (open) { toggleToc(false); toggleSearch(false); toggleMarks(false); showTypo(); }
+}
+$("typoBtn").onclick = e => { e.stopPropagation(); toggleTypo(); };
+document.addEventListener("click", e => {   // a click anywhere else closes it
+  if ($("typo").classList.contains("open") && !$("typo").contains(e.target)) toggleTypo(false);
+});
+showTypo();
 
 $("prev").onclick = () => rendition.prev();
 $("next").onclick = () => rendition.next();
