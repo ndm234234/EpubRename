@@ -586,13 +586,15 @@ def anchor_tocs(blocks: list, tocs: list[Toc], offset: int) -> None:
 
 @dataclass
 class Block:
-    kind: str           # p | h | img | page | toc
+    kind: str           # p | h | img | page | toc | list | table
     html: str = ""
     text: str = ""
     level: int = 0
     src: str = ""
     page: int = 0       # PDF page it starts on
     anchor: str = ""    # id, when the contents link here
+    items: list = field(default_factory=list)   # list: html of each item
+    rows: list = field(default_factory=list)    # table: html of each cell, row by row
 
 
 def runs_html(runs: list) -> str:
