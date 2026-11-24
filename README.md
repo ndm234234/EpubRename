@@ -122,7 +122,8 @@ Scans `FOLDER` (default: `Out` in the current folder) recursively and writes:
 - `FOLDER/.index/covers/` — small cover copies (reused on the next run; covers of
   removed books are cleaned up);
 - `FOLDER/.index/reader/` — the reader (copied from `reader/` next to the script);
-- `FOLDER/Open Library.bat`, `FOLDER/Open Library.sh` — launchers (from `launchers/`).
+- `FOLDER/Open Library.bat`, `FOLDER/Open Library.sh` and their `(network)` versions —
+  launchers (from `launchers/`).
 
 EPUB files are only read. Keep `.index/` next to `index.html` when moving the catalog.
 
@@ -133,16 +134,24 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
   EPUB 2 `<meta name="cover">`), the guide's cover page, a picture named "cover", or the
   picture on the first page (many converted books have only that). Marks that point to
   files missing from the book are skipped. Transparent PNG covers are put on white.
-- Title, authors, series, year, publisher, file size; description opens with **About**.
+  Many books mark a tiny cover (e.g. 126×200) and keep the same picture full size elsewhere
+  (usually on the first page): then the big copy is used, so covers stay sharp on the book's page.
+- Title, authors, series, year, publisher, file size.
 - Follows the system light / dark theme.
 - Instant search across title, authors, series, description and file path
   (case-insensitive, `ё` = `е`, all words must match). `/` focuses search, `Esc` clears it.
 - Click an author to see all their books.
 - Sort by author, title, recently added or size; optional grouping by author.
   Settings are remembered.
-- Click a **cover** or a **title** to read the book in the browser.
-- The **download** icon under the book saves the EPUB file: Chrome/Edge (via the launcher) show
-  a dialog to choose the folder; other browsers download it as usual.
+- One rule for every book: the **cover** (or the **title**) shows the book's page, the **Read**
+  button under it starts reading straight away (one tap on a phone). The download icon next to
+  Read saves the EPUB file: Chrome/Edge (via the launcher) show a dialog to choose the folder;
+  other browsers download it as usual.
+- The book's page: the cover flies from the shelf to the left and the description slides in on
+  the right (or "This book has no description."), with **Read** and **Save** buttons. `Esc`, the
+  **Catalog** button or the browser's Back return to the shelf (the cover flies back); leaving the
+  reader brings you back to the book's page. `Ctrl`+click / middle click on a cover opens the reader
+  in a new tab. With "reduce motion" turned on in the system there is no animation.
 - **Open file** opens any EPUB from disk in the reader.
 
 ### Reader
@@ -150,7 +159,9 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
 A single offline page (`reader/reader.html`) built on [epub.js](https://github.com/futurepress/epub.js)
 and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). Nothing is uploaded.
 
-- Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows, swipe on touch screens.
+- Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows. On touch screens: swipe, or tap
+  the lower half of the page (from the middle down to the slider) — right side for the next page,
+  left side for the previous one. Taps in the upper half, on links or while selecting text don't turn pages.
 - Table of contents (`T`), current chapter, page in chapter and % of the book.
 - `Esc` closes an open panel (contents, search, bookmarks), then clears search highlights,
   then closes the book and returns to the catalog, scrolled to where you left it
@@ -191,6 +202,23 @@ The launcher starts a tiny web server on this computer only (`localhost:48765`; 
 program uses that port, the next free one up to 48784) and opens the catalog in the browser. Close the window (or `Ctrl+C`) to stop it; the Linux one
 also stops after 3 hours without use. Running it again while it works just opens the browser.
 Reading places are stored per address, so keep using the launcher to keep them.
+
+#### Reading on a phone or tablet (home Wi-Fi)
+
+`Open Library (network).bat` (Windows) and `Open Library (network).sh` (Linux) do the same, but
+the library can also be opened from other devices in your home network. The window shows the
+address to type on the phone, e.g. `http://192.168.1.64:48865/`.
+
+- Only home-network addresses (`192.168.x.x`, `10.x.x.x`, `172.16–31.x.x`, link-local) get an
+  answer, so even a port forwarded on the router doesn't put the library on the internet.
+  For reading away from home use a VPN to your home network instead.
+- Files are only read; folder listings and uploads are refused.
+- Anyone on the same Wi-Fi who knows the address can open the library.
+- Windows asks once whether PowerShell may use the network: allow it for **Private** networks
+  (and check the Wi-Fi is set as a Private network). No administrator rights needed.
+  On Linux a firewall (`ufw`, `firewalld`) may need to allow the port.
+- It uses its own ports (48865–48884), so both launchers can run at the same time. Reading places
+  and bookmarks are kept separately on each device.
 
 ## fix_cover.py
 

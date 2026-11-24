@@ -17,7 +17,7 @@
           --panel: #1f1f22; --accent: #7ea2ff; --accent-soft: rgba(126,162,255,.15); --hover: rgba(255,255,255,.07);
           --bar: rgba(22,22,24,.85); --shadow: 0 10px 30px -10px rgba(0,0,0,.8); color-scheme: dark; }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
+  html, body { height: 100%; margin: 0; overscroll-behavior: none; }   /* a swipe turns the page, never "browser back" */
   body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
          background: var(--bg); color: var(--text); display: flex; flex-direction: column; overflow: hidden;
          -webkit-font-smoothing: antialiased; transition: background .2s, color .2s; }
@@ -398,11 +398,8 @@ async function openBook(data, fileName) {
   rendition.themes.fontSize(prefs.font + "%");
   rendition.on("relocated", onRelocated);
   rendition.on("keydown", onKey);
-  rendition.on("touchstart", e => touchX = e.changedTouches[0].screenX);
-  rendition.on("touchend", e => {
-    const dx = e.changedTouches[0].screenX - touchX;
-    if (Math.abs(dx) > 50) dx < 0 ? rendition.next() : rendition.prev();
-  });
+  rendition.on("touchstart", touchStart);
+  rendition.on("touchend", touchEnd);
 
   const saved = store.get(bookKey);
   try { await rendition.display(saved && saved.cfi || undefined); }
@@ -989,7 +986,37 @@ $("back").addEventListener("click", e => { e.preventDefault(); backToCatalog(); 
 
 // ------------------------------------------------------------ controls
 
-let touchX = 0;
+// Touch: swipe left / right turns the page; so does a tap in the lower half of the page
+// (from the middle down to the slider): right side — next page, left side — previous.
+// The upper half is left alone, so reading and selecting text there never turns a page.
+let touch = null;
+function touchStart(e) {
+  const t = e.changedTouches[0];
+  touch = { x: t.screenX, y: t.screenY, time: Date.now() };
+}
+function touchEnd(e) {
+  if (!touch || !rendition) return;
+  const t = e.changedTouches[0], dx = t.screenX - touch.x, dy = t.screenY - touch.y;
+  const quick = Date.now() - touch.time < 500;
+  touch = null;
+  if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) { dx < 0 ? rendition.next() : rendition.prev(); return; }
+  if (!quick || Math.abs(dx) > 10 || Math.abs(dy) > 10) return;   // a long press or a drag, not a tap
+  if (e.target.closest && e.target.closest("a[href], button, input, select, textarea, label")) return;   // links work as usual
+  if (["toc", "search", "marks"].some(id => $(id).classList.contains("open"))) return;
+  const sel = e.view && e.view.getSelection && e.view.getSelection();
+  if (sel && !sel.isCollapsed) return;   // finishing a text selection
+  // Where on the screen: the book page sits in an iframe, so add the iframe's position
+  const frame = e.view && e.view.frameElement, r = frame ? frame.getBoundingClientRect() : { left: 0, top: 0 };
+  const x = r.left + t.clientX, y = r.top + t.clientY;
+  const stage = $("stage").getBoundingClientRect();
+  if (y < stage.top + stage.height / 2 || y > stage.bottom) return;
+  e.preventDefault();   // no extra click / zoom after the tap
+  x < stage.left + stage.width / 2 ? rendition.prev() : rendition.next();
+}
+// Taps on the page margins (outside the book's iframe) count too
+$("stage").addEventListener("touchstart", e => { if (!e.target.closest("iframe")) touchStart(e); }, { passive: true });
+$("stage").addEventListener("touchend", e => { if (!e.target.closest("iframe") && $("viewer").contains(e.target)) touchEnd(e); });
+
 function onKey(e) {
   if (!rendition) return;
   const k = e.key;

@@ -31,7 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageChops, ImageStat
 except ImportError:  # Pillow is optional
     Image = None
 
@@ -40,7 +40,7 @@ NS = {
     "opf": "http://www.idpf.org/2007/opf",
     "dc": "http://purl.org/dc/elements/1.1/",
 }
-THUMB_SIZE = (300, 450)   # max cover size in the catalog, px
+THUMB_SIZE = (600, 900)   # max cover size in the catalog, px (sharp on the book page and HiDPI screens)
 THUMB_QUALITY = 82        # JPEG quality of cover copies
 INDEX_DIR = ".index"      # subfolder for catalog files (covers)
 COVERS_DIR = "covers"
@@ -144,10 +144,47 @@ def locate_cover(zf: zipfile.ZipFile, opf, opf_dir: str) -> tuple[str | None, st
     return None, ""
 
 
+RASTER = re.compile(r"\.(jpe?g|png|gif|webp|bmp)$", re.I)
+SAME_PICTURE = 12   # mean difference (0-255) of 16x24 grey copies below which two pictures are the same
+
+
+def sharper_copy(zf: zipfile.ZipFile, path: str, raw: bytes) -> bytes:
+    """Many books mark a small cover (e.g. 126x200) and show the same picture in full size on the
+    first page. If the book has a bigger copy of the cover, return that one instead."""
+    if Image is None:
+        return raw
+    try:
+        small = Image.open(io.BytesIO(raw))
+        w, h = small.size
+        if h >= THUMB_SIZE[1] or w >= THUMB_SIZE[0]:
+            return raw   # already sharp enough for the catalog
+        ratio, sig = w / h, None
+        best, best_area = raw, w * h
+        for info in zf.infolist():
+            if info.filename == path or not RASTER.search(info.filename) or info.file_size > 30_000_000:
+                continue
+            try:
+                data = zf.read(info.filename)
+                img = Image.open(io.BytesIO(data))
+                cw, ch = img.size   # only the header is read so far
+                if cw * ch <= best_area or abs(cw / ch - ratio) > ratio * .06:
+                    continue
+                if sig is None:
+                    sig = small.convert("L").resize((16, 24))
+                diff = ImageChops.difference(sig, img.convert("L").resize((16, 24)))
+                if ImageStat.Stat(diff).mean[0] < SAME_PICTURE:
+                    best, best_area = data, cw * ch
+            except Exception:
+                continue
+        return best
+    except Exception:
+        return raw
+
+
 def find_cover(zf: zipfile.ZipFile, opf, opf_dir: str) -> bytes | None:
-    """Bytes of the cover picture, or None if the book has none."""
+    """Bytes of the cover picture (its biggest copy in the book), or None if the book has none."""
     path, _ = locate_cover(zf, opf, opf_dir)
-    return zf.read(path) if path else None
+    return sharper_copy(zf, path, zf.read(path)) if path else None
 
 
 def save_cover(raw: bytes | None, covers_dir: Path, used: set[str]) -> str:
@@ -320,15 +357,9 @@ PAGE = r"""<!DOCTYPE html>
            background: linear-gradient(90deg, rgba(0,0,0,.22) 0, rgba(255,255,255,.18) 2.5%,
                        rgba(0,0,0,.08) 4.5%, transparent 9%); }
   .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .book:hover .cover, .cover:focus-visible { transform: translateY(-4px); box-shadow: var(--shadow-hover); }
-  .read { position: absolute; z-index: 2; left: 50%; bottom: 12px; transform: translate(-50%, 6px);
-          display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px;
-          font-size: 13px; font-weight: 600; color: #fff; background: rgba(20,20,24,.72);
-          -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); opacity: 0;
-          transition: opacity .18s, transform .18s; white-space: nowrap; }
-  .read .ic { width: 16px; height: 16px; }
-  .book:hover .read, .cover:focus-visible .read { opacity: 1; transform: translate(-50%, 0); }
-  @media (hover: none) and (pointer: coarse) { .read { display: none; } }   /* touch screens: tap opens anyway */
+  .shelf { position: relative; transition: transform .2s ease; }
+  .book:hover .shelf, .shelf:focus-within { transform: translateY(-4px); }
+  .book:hover .cover, .shelf:focus-within .cover { box-shadow: var(--shadow-hover); }
   .ph { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center;
         padding: 16px 14px 16px 20px; font-weight: 700; text-align: center; gap: 10px; line-height: 1.25;
         text-shadow: 0 1px 2px rgba(0,0,0,.25); }
@@ -341,17 +372,71 @@ PAGE = r"""<!DOCTYPE html>
   .authors a { color: inherit; text-decoration: none; cursor: pointer; }
   .authors a:hover { color: var(--accent); }
   .meta { color: var(--muted); font-size: 12px; opacity: .85; }
-  .actions { display: flex; align-items: center; gap: 2px; margin: 6px 0 0 -8px; }
+  .actions { display: flex; align-items: center; gap: 4px; margin: auto 0 0; padding-top: 8px; }   /* bottom of the card: Read buttons line up */
   .act { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 8px; border: 0;
          border-radius: 8px; background: none; font: inherit; font-size: 13px; font-weight: 500;
          color: var(--muted); cursor: pointer; text-decoration: none; }
   .act .ic { width: 16px; height: 16px; }
   .act:hover { background: var(--surface-2); color: var(--text); }
-  .act[aria-expanded=true] { color: var(--accent); }
-  .act[aria-expanded=true] .ic { transform: rotate(180deg); }
   .act.save { margin-left: auto; }
-  .desc { margin: 4px 0 0; font-size: 13px; color: var(--muted); white-space: pre-line; }
+  /* Read: always visible under the cover, so a tap on the phone goes straight into the book */
+  .act.go { padding: 0 12px 0 10px; color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+  .act.go:hover { color: #fff; background: var(--accent); }
+  @media (max-width: 640px) {
+    .act { height: 34px; }
+    .act.go { flex: 1; justify-content: center; }
+  }
   .err { color: var(--danger); font-size: 12px; }
+
+  /* Book page: the cover flies from the shelf to the left, the description slides in on the right */
+  .detail { position: fixed; inset: 0; z-index: 20; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+  .dbg { position: fixed; inset: 0; background: var(--bg); }
+  .dwrap { position: relative; max-width: 1240px; margin: 0 auto; min-height: 100%; display: grid;
+           grid-template-columns: clamp(200px, 38%, 460px) 1fr; gap: clamp(28px, 5vw, 64px); align-items: start;
+           padding: 88px clamp(20px, 4vw, 40px) 56px; }
+  .dcover { position: sticky; top: 88px; display: block; aspect-ratio: 2 / 3; justify-self: end;
+            width: min(100%, calc((100dvh - 136px) * 2 / 3));   /* whole cover fits in the window */ border-radius: 6px 12px 12px 6px;
+            overflow: hidden; background: var(--surface-2); color: #fff; text-decoration: none;
+            box-shadow: var(--shadow-hover); }
+  .dcover img, .ghost img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .dcover .ph { font-size: 20px; }
+  .dcover::before, .ghost::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+            background: linear-gradient(90deg, rgba(0,0,0,.22) 0, rgba(255,255,255,.18) 2.5%,
+                        rgba(0,0,0,.08) 4.5%, transparent 9%); }
+  .ghost { position: fixed; z-index: 30; margin: 0; overflow: hidden; pointer-events: none; color: #fff;
+           border-radius: 6px 12px 12px 6px; background: var(--surface-2); box-shadow: var(--shadow-hover); }
+  .dbody { min-width: 0; padding-top: 8px; }
+  .dbody h3 { margin: 0 0 8px; font-size: 32px; line-height: 1.15; letter-spacing: -.02em; font-weight: 750; }
+  .dbody .authors { font-size: 17px; white-space: normal; }
+  .dbody .meta { margin-top: 6px; font-size: 13px; }
+  .dact { display: flex; gap: 10px; align-items: center; margin: 24px 0 0; flex-wrap: wrap; }
+  .dtext.none { font-style: italic; color: var(--muted); }
+  .dtext { margin: 28px 0 0; padding-top: 24px; border-top: 1px solid var(--line); max-width: 68ch;
+           white-space: pre-line; font-size: 16px; line-height: 1.65; color: var(--text); opacity: .9; }
+  .btn { height: 46px; display: inline-flex; align-items: center; gap: 8px; padding: 0 24px; border-radius: 12px;
+         font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; border: 1px solid var(--line);
+         background: var(--surface); color: var(--text); transition: background .15s, transform .15s, box-shadow .15s; }
+  .btn:hover { background: var(--surface-2); }
+  .btn.primary { border: 0; color: #fff; background: linear-gradient(135deg, #5b8cff, #3563e9);
+         box-shadow: 0 8px 20px -8px rgba(53,99,233,.7); }
+  .btn.primary:hover { transform: translateY(-1px); box-shadow: 0 12px 24px -8px rgba(53,99,233,.8); }
+  .dback { position: fixed; top: 20px; left: 24px; z-index: 2; height: 40px; display: inline-flex; align-items: center;
+           gap: 6px; padding: 0 14px 0 10px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer;
+           font: inherit; font-size: 14px; font-weight: 500; color: var(--text); background: var(--header);
+           -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+  .dback:hover { background: var(--surface-2); }
+  body.detail-open { overflow: hidden; }
+  @media (max-width: 640px) {
+    .dwrap { grid-template-columns: 1fr; gap: 24px; padding: 72px 16px 96px; }
+    .dcover { position: relative; top: 0; width: min(240px, 62vw); justify-self: center; }
+    .dbody { padding-top: 0; }
+    .dbody h3 { font-size: 24px; }
+    .dback { top: 14px; left: 16px; }
+    .dact { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+            background: var(--surface); border-top: 1px solid var(--line); flex-wrap: nowrap; z-index: 2; }
+    .dact .btn.primary { flex: 1; justify-content: center; }
+    .dtext { margin-top: 0; border-top: 0; padding-top: 0; }
+  }
 
   .note { max-width: 1400px; margin: 16px auto 0; padding: 12px 16px; border-radius: 12px; display: flex;
           gap: 10px; align-items: flex-start; border: 1px solid var(--line); background: var(--accent-soft);
@@ -378,6 +463,7 @@ PAGE = r"""<!DOCTYPE html>
     .select .ic { left: 11px; color: var(--text); }
     .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 26px 16px; }
   }
+  @media (max-width: 420px) { .brand .badge { display: none; } }   /* the library name needs the room */
 </style>
 </head>
 <body>
@@ -389,7 +475,7 @@ PAGE = r"""<!DOCTYPE html>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
   <symbol id="i-read" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
-  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
 </svg>
 <header><div class="bar">
@@ -424,7 +510,8 @@ PAGE = r"""<!DOCTYPE html>
   the catalog with <b>Open Library</b> (<code>Open Library.bat</code> on Windows,
   <code>Open Library.sh</code> on Linux) in this folder.</div></div>
 <main id="list"></main>
-<footer>Generated __DATE__ · click a cover or a title to read the book</footer>
+<section id="detail" class="detail" role="region" aria-label="About the book" hidden></section>
+<footer>Generated __DATE__ · cover or title: about the book · Read: start reading</footer>
 
 <script id="data" type="application/json">__DATA__</script>
 <script>
@@ -496,40 +583,194 @@ async function saveAs(e, href, fileName) {
   } catch (err) { alert("Can't save " + fileName + ": " + err.message); }
 }
 
-function card(b) {
-  // Cover opens the book in the reader, like the title
-  const cover = el("a", { class: "cover", href: readerUrl(b), title: "Read in the browser" },
-                   b.cover ? el("img", { src: b.cover, alt: "", loading: "lazy" }) : placeholder(b),
-                   el("span", { class: "read" }, icon("read"), "Read"));
+function coverArt(b) {
+  return b.cover ? el("img", { src: b.cover, alt: "" }) : placeholder(b);
+}
+
+function authorLinks(b) {
   const authors = el("div", { class: "authors" });
   (b.authors.length ? b.authors : ["Unknown Author"]).forEach((a, i) => {
     if (i) authors.append(", ");
     authors.append(el("a", { title: "Show all books by this author",
-                             on: () => { $("q").value = a; render(); } }, a));
+                             on: () => { if (current) requestClose(); $("q").value = a; render(); } }, a));
   });
-  const meta = [b.series && `${b.series}${b.seriesIndex ? " #" + b.seriesIndex : ""}`,
-                b.year, b.publisher, fmtSize(b.size)].filter(Boolean).join(" · ");
-  const actions = el("div", { class: "actions" });
-  let desc = null;
-  if (b.description) {
-    desc = el("p", { class: "desc", hidden: "" }, b.description);
-    const about = el("button", { class: "act", type: "button", "aria-expanded": "false" }, "About", icon("chevron"));
-    about.addEventListener("click", () => {
-      desc.hidden = !desc.hidden;
-      about.setAttribute("aria-expanded", String(!desc.hidden));
-    });
-    actions.append(about);
-  }
+  return authors;
+}
+
+const metaLine = b => [b.series && `${b.series}${b.seriesIndex ? " #" + b.seriesIndex : ""}`,
+                       b.year, b.publisher, fmtSize(b.size)].filter(Boolean).join(" · ");
+
+function saveLink(b, props, ...children) {
   const fileName = b.file.split("/").pop();
-  const save = el("a", { class: "act save", href: b.href, download: fileName, "aria-label": "Save as…",
-                         title: "Save the EPUB file: " + fileName }, icon("download"));
-  save.addEventListener("click", e => saveAs(e, b.href, fileName));
-  actions.append(save);
-  return el("article", { class: "book" }, cover,
-    el("div", { class: "info" },
-      el("a", { class: "title", href: readerUrl(b), title: b.title }, b.title), authors,
-      el("div", { class: "meta" }, meta),
-      b.error ? el("div", { class: "err" }, "⚠ " + b.error) : null, actions, desc));
+  const a = el("a", { href: b.href, download: fileName, title: "Save the EPUB file: " + fileName, ...props }, ...children);
+  a.addEventListener("click", e => saveAs(e, b.href, fileName));
+  return a;
+}
+
+// Book page: shown first for books with a description; "Read" then opens the reader.
+// The cover flies from its place on the shelf to the left, the text slides in from the right;
+// closing plays it backwards. Each open book page is a history entry: Back closes it, and
+// leaving the reader with Esc comes back to it.
+const detail = $("detail");
+const motion = matchMedia("(prefers-reduced-motion: no-preference)");
+const DUR = 520, EASE = "cubic-bezier(.22,.8,.24,1)";
+let current = null;
+
+const shelfCover = b => document.querySelector(`.book[data-key="${CSS.escape(b.href)}"] .shelf`);
+const onScreen = r => r.width > 0 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;
+const box = r => ({ left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px" });
+
+// The running transition (opening or closing): its animations, the flying cover copy, the
+// covers hidden meanwhile and what to do at the end. Only one at a time; all clean-up is here,
+// so an interrupted transition never leaves a stray copy or a hidden cover behind.
+let flight = null;
+
+function endFlight(f) {
+  if (flight !== f) return;
+  flight = null;
+  f.anims.forEach(a => a.cancel());
+  if (f.ghost) f.ghost.remove();
+  f.hidden.forEach(e => e.style.visibility = "");
+  if (f.end) f.end();
+}
+
+function startFlight(phase, anims, ghost, hidden, end) {
+  const f = { phase, anims, ghost, hidden, end };
+  flight = f;
+  hidden.forEach(e => e.style.visibility = "hidden");
+  Promise.all(anims.map(a => a.finished)).then(() => { if (f.phase === phase) endFlight(f); }, () => {});
+  return f;
+}
+
+// A copy of the cover moving between two places (null if either is off screen)
+function fly(from, to, b, o) {
+  if (!from || !to) return null;
+  const a = from.getBoundingClientRect(), z = to.getBoundingClientRect();
+  if (!onScreen(a) || !onScreen(z)) return null;
+  const ghost = el("div", { class: "ghost" }, coverArt(b));
+  if (!b.cover) ghost.firstChild.style.fontSize = getComputedStyle(to.querySelector(".ph") || to).fontSize;
+  document.body.append(ghost);
+  return { ghost, anim: ghost.animate([box(a), box(z)], o) };
+}
+
+// Text lines slide in from the right one after another (out in one go); the phone's
+// pinned Read bar rises from the bottom instead (moving its parent would drag it along)
+function slideParts(body, opening, o) {
+  return [...body.children].map((part, i) => {
+    const pinned = getComputedStyle(part).position === "fixed";
+    const away = { opacity: 0, transform: pinned ? "translateY(100%)" : "translateX(80px)" };
+    const here = { opacity: 1, transform: "none" };
+    return part.animate(opening ? [away, here] : [here, away],
+                        opening ? { ...o, delay: DUR * .22 + i * 45 } : o);
+  });
+}
+
+function setCatalogInert(on) {
+  for (const e of [document.querySelector("header"), $("fileNote"), $("list"), document.querySelector("footer")])
+    if (e) e.inert = on;
+  document.body.classList.toggle("detail-open", on);
+}
+
+function hideDetail() { detail.hidden = true; detail.replaceChildren(); detail.style.pointerEvents = ""; }
+
+function openDetail(b, animate = true) {
+  if (flight) endFlight(flight);   // e.g. a click while the previous book is still flying back
+  current = b;
+  const read = el("a", { class: "btn primary", href: readerUrl(b) }, icon("read"), "Read");
+  const body = el("div", { class: "dbody" },
+    el("h3", {}, b.title), authorLinks(b),
+    el("div", { class: "meta" }, metaLine(b)),
+    el("div", { class: "dact" }, read, saveLink(b, { class: "btn" }, icon("download"), "Save")),
+    b.description ? el("div", { class: "dtext" }, b.description)
+                  : el("div", { class: "dtext none" }, "This book has no description."));
+  const cover = el("a", { class: "dcover", href: readerUrl(b), title: "Read in the browser" }, coverArt(b));
+  detail.replaceChildren(el("div", { class: "dbg" }),
+    el("button", { class: "dback", type: "button", title: "Back to the catalog (Esc)", on: requestClose }, icon("back"), "Catalog"),
+    el("div", { class: "dwrap" }, cover, body));
+  detail.hidden = false;
+  detail.style.pointerEvents = "";
+  detail.scrollTop = 0;
+  setCatalogInert(true);
+  read.focus({ preventScroll: true });
+  if (!animate || !motion.matches) return;
+  const o = { duration: DUR, easing: EASE, fill: "both" };
+  const shelf = shelfCover(b), trip = fly(shelf, cover, b, o);
+  startFlight("open", [
+    detail.querySelector(".dbg").animate([{ opacity: 0 }, { opacity: 1 }], { ...o, duration: DUR * .8 }),
+    detail.querySelector(".dback").animate([{ opacity: 0 }, { opacity: 1 }], { ...o, delay: DUR * .4 }),
+    ...slideParts(body, true, o),
+    ...(trip ? [trip.anim] : [])], trip && trip.ghost, trip ? [shelf, cover] : [], null);
+}
+
+function closeDetail() {
+  if (!current) return;
+  const b = current;
+  current = null;
+  setCatalogInert(false);
+  detail.style.pointerEvents = "none";   // the fading page must not catch clicks on the shelf
+  const shelf = shelfCover(b);
+  const after = () => { hideDetail(); if (shelf && !current) shelf.querySelector(".cover").focus({ preventScroll: true }); };
+
+  // Still opening: play the same animations backwards from where they are now
+  if (flight && flight.phase === "open") {
+    const f = flight;
+    f.phase = "close";
+    f.end = after;
+    f.anims.forEach(a => a.reverse());
+    Promise.all(f.anims.map(a => a.finished)).then(() => { if (f.phase === "close") endFlight(f); }, () => {});
+    return;
+  }
+  if (flight) endFlight(flight);
+  if (!motion.matches) return after();
+  const cover = detail.querySelector(".dcover");
+  const o = { duration: DUR * .8, easing: EASE, fill: "both" };
+  const trip = fly(cover, shelf, b, o);
+  startFlight("close", [
+    detail.querySelector(".dbg").animate([{ opacity: 1 }, { opacity: 0 }], o),
+    detail.querySelector(".dback").animate([{ opacity: 1 }, { opacity: 0 }], { ...o, duration: DUR * .3 }),
+    ...slideParts(detail.querySelector(".dbody"), false, { ...o, duration: DUR * .5 }),
+    ...(trip ? [trip.anim] : [])], trip && trip.ghost, trip ? [cover, shelf] : [], after);
+}
+
+function showDetail(b) {
+  history.pushState({ book: b.href }, "");
+  openDetail(b);
+}
+function requestClose() {
+  const pop = history.state && history.state.book;
+  closeDetail();                // right away, not after the browser gets to popstate
+  if (pop) history.back();      // drop the book page from history (popstate then has nothing to do)
+}
+addEventListener("popstate", e => {
+  const key = e.state && e.state.book, b = key && books.find(x => x.href === key);
+  if (b) { if (!current || current.href !== key) openDetail(b); }
+  else closeDetail();
+});
+
+// One rule for every book: the cover (or title) shows the book's page, the Read button reads.
+// Ctrl / middle click on the cover still opens the reader in a new tab.
+function bookClick(b) {
+  return e => {
+    if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    showDetail(b);
+  };
+}
+
+function card(b) {
+  const cover = el("a", { class: "cover", href: readerUrl(b), title: "About the book" },
+                   b.cover ? el("img", { src: b.cover, alt: "", loading: "lazy" }) : placeholder(b));
+  cover.addEventListener("click", bookClick(b));
+  const shelf = el("div", { class: "shelf" }, cover);
+  const title = el("a", { class: "title", href: readerUrl(b), title: b.title }, b.title);
+  title.addEventListener("click", bookClick(b));
+  const actions = el("div", { class: "actions" },
+    el("a", { class: "act go", href: readerUrl(b), title: "Read in the browser" }, icon("read"), "Read"),
+    saveLink(b, { class: "act save", "aria-label": "Save as…" }, icon("download")));
+  return el("article", { class: "book", "data-key": b.href }, shelf,
+    el("div", { class: "info" }, title, authorLinks(b),
+      el("div", { class: "meta" }, metaLine(b)),
+      b.error ? el("div", { class: "err" }, "⚠ " + b.error) : null, actions));
 }
 
 const sorters = {
@@ -575,10 +816,14 @@ $("group").addEventListener("click", e => {
   save(); render();
 });
 document.addEventListener("keydown", e => {
+  if (current) { if (e.key === "Escape") { e.preventDefault(); requestClose(); } return; }
   if (e.key === "/" && document.activeElement !== $("q")) { e.preventDefault(); $("q").focus(); }
   if (e.key === "Escape") { $("q").value = ""; render(); }
 });
 render();
+// Came back to a book page (reload, or the reader's Back): show it without the flight
+{ const key = history.state && history.state.book, b = key && books.find(x => x.href === key);
+  if (b) openDetail(b, false); }
 </script>
 </body>
 </html>
