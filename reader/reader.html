@@ -660,11 +660,15 @@ function toggleToc(open = !$("toc").classList.contains("open")) {
 // Going to the next / previous chapter, epub.js removes the old chapter first and shows the new one
 // once it is laid out: the page goes blank for a moment, and the text jumps when its font arrives.
 // Instead the old page stays on screen, frozen in place, until the new one is ready.
+// Phones draw a page some frames after it is shown, and Chrome doesn't draw what is fully covered:
+// so the frozen page is very slightly see-through (the new one gets drawn under it) and stays a few
+// frames longer. It then goes at once: fading it out would show both pages over each other.
 function keepOldPageUntilNewIsReady(r) {
   const mgr = r.manager, clear = mgr && mgr.clear;
   if (!clear) return;
   let frozen = [], timer = 0;
   const drop = () => { clearTimeout(timer); for (const v of frozen) { try { v.destroy(); } catch {} v.element.remove(); } frozen = []; };
+  const frames = n => new Promise(ok => { const step = () => --n > 0 ? requestAnimationFrame(step) : ok(); requestAnimationFrame(step); });
   mgr.clear = function () {
     drop();
     if (!this.views || !Array.isArray(this.views._views)) return clear.call(this);   // other epub.js version: as is
@@ -674,7 +678,7 @@ function keepOldPageUntilNewIsReady(r) {
     for (const v of old) {
       const e = v.element.getBoundingClientRect();
       Object.assign(v.element.style, {
-        position: "fixed", zIndex: 5, pointerEvents: "none", margin: 0,
+        position: "fixed", zIndex: 5, pointerEvents: "none", margin: 0, opacity: 0.99,
         left: e.left + "px", top: e.top + "px", width: e.width + "px", height: e.height + "px",
         clipPath: `inset(${box.top - e.top}px ${e.right - box.right}px ${e.bottom - box.bottom}px ${box.left - e.left}px)`,
       });
@@ -685,11 +689,30 @@ function keepOldPageUntilNewIsReady(r) {
     timer = setTimeout(drop, 1500);
     return clear.call(this);
   };
+  // Back into the previous chapter, epub.js shows its last page and then, whenever that chapter's
+  // width changes (its fonts or pictures arrive late, as on phones), moves by the whole change, to
+  // stay on the last page. Right after the jump that is right; once the reader has turned a page
+  // it throws them back to where they were. So it only works until the next page turn.
+  const counter = mgr.counter, prev = mgr.prev, next = mgr.next;
+  let justCameBack = false;
+  if (counter && prev && next) {
+    mgr.counter = function () { if (justCameBack) return counter.apply(this, arguments); };
+    mgr.prev = function () {
+      justCameBack = false;
+      const first = this.views && this.views.first && this.views.first();
+      const res = prev.apply(this, arguments);
+      const now = this.views && this.views.first && this.views.first();
+      justCameBack = !!(now && now !== first);   // a new chapter was put in front
+      return res;
+    };
+    mgr.next = function () { justCameBack = false; return next.apply(this, arguments); };
+  }
+
   r.on("relocated", () => {
     if (!frozen.length) return;
     const docs = r.getContents().map(c => c.document && c.document.fonts && c.document.fonts.ready);
     Promise.race([Promise.all(docs), new Promise(ok => setTimeout(ok, 400))])
-      .then(() => requestAnimationFrame(() => requestAnimationFrame(drop)));
+      .then(() => frames(6)).then(drop);
   });
 }
 
