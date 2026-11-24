@@ -20,6 +20,8 @@ RETRY_COVERAGE = 0.97      # below this the page is recognised again
 RETRY_MISSING_RUN = 4      # ... or when this many words in a row were missing
 WHOLE_PAGE_FAST = 0.5      # below this the fast page is used instead
 LAYER_MISSING_RUN = 8      # text only the PDF layer has is put back from this length
+EXTRA_RUN = 20             # this many words in a row that no witness has: recognise again
+ELSEWHERE = 0.6            # a "missing" piece whose word triples are this much on the page has only moved
 
 
 # ---------------------------------------------------------------- a tiny HTML tree
@@ -175,6 +177,36 @@ def _latin_only(w: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z]+", w))
 
 
+def _all_cyrillic(w: str) -> bool:
+    return bool(re.fullmatch(r"[А-Яа-яЁё]+", w))
+
+
+def _grams(words: list[str]) -> list[tuple]:
+    n = min(3, len(words))
+    return [tuple(words[i:i + n]) for i in range(len(words) - n + 1)] if n else []
+
+
+def _elsewhere(words: list[str], acc_words: list[str]) -> bool:
+    """The words are on the accurate page already, only somewhere else (a block in another order)."""
+    grams = _grams([norm(w) for w in words])
+    if not grams:
+        return False
+    n = len(grams[0])
+    have = {tuple(acc_words[i:i + n]) for i in range(len(acc_words) - n + 1)}
+    return sum(1 for g in grams if g in have) >= ELSEWHERE * len(grams)
+
+
+def _chunk(toks: list[Tok]) -> str:
+    """The witness's own text of a run of words (with the punctuation between and after them)."""
+    first, last = toks[0], toks[-1]
+    if all(t.text is first.text for t in toks):
+        end = last.span[1]
+        while end < len(last.text.s) and not last.text.s[end].isspace() and not last.text.s[end].isalnum():
+            end += 1
+        return last.text.s[first.span[0]:end]
+    return " ".join(t.word for t in toks)
+
+
 # ---------------------------------------------------------------- the result
 
 @dataclass
@@ -185,6 +217,8 @@ class MergeResult:
     inserted_blocks: int
     coverage: float
     max_missing_run: int = 0
+    extra_run: int = 0          # longest run of accurate words no witness has
+    looped: bool = False        # ... and it repeats itself (a recognition loop)
 
 
 def _covered(witness: list[Tok], acc: list[Tok]) -> set[int]:
@@ -250,22 +284,54 @@ def merge_page(acc_html: str, fast_html: str, layer_text: str, digital: bool) ->
             choice = l
         elif f is not None and l is not None and f == l:
             choice = f
-        elif _latin_only(a):
-            witness = next((w for w in (f, l) if w and _cyrillic(w)), None)
+        elif _latin_only(a) and f != a and l != a:
+            witness = next((w for w in (f, l) if w and _all_cyrillic(w)), None)
             if witness:
                 choice = witness
         if choice != a:
             edits[i] = choice
-    by_text: dict[int, list] = {}
-    for i, new in edits.items():
-        by_text.setdefault(id(acc[i].text), []).append((acc[i], new))
-    for items in by_text.values():
-        node = items[0][0].text
-        for tok, new in sorted(items, key=lambda x: -x[0].span[0]):
-            node.s = node.s[:tok.span[0]] + new + node.s[tok.span[1]:]
-
-    # 2. text a witness has and the accurate page lacks goes back where it was
+    acc_words = [norm(t.word) for t in acc]
     to_acc_fast = align(fast, acc)
+
+    # 2a. a run of words missing inside a paragraph that is otherwise there (accurate stopped
+    #     early or skipped a sentence) goes back next to its neighbours
+    ops: list[tuple] = []           # (text node, start, end, new text)
+    for i, new in edits.items():
+        ops.append((acc[i].text, acc[i].span[0], acc[i].span[1], new))
+    partial = 0
+    for ui in range(len(fast_units)):
+        idx = [k for k, t in enumerate(fast) if t.unit == ui]
+        missing = [k for k in idx if k not in fast_cov]
+        if not idx or len(missing) >= 0.6 * len(idx):
+            continue                    # absent as a whole: put back below as a block
+        for s_, e_ in _runs(len(fast), fast_cov):
+            if s_ not in idx or e_ - s_ < RETRY_MISSING_RUN:
+                continue
+            run = fast[s_:e_]
+            if _elsewhere([t.word for t in run], acc_words):
+                continue
+            before = next((k for k in range(s_ - 1, idx[0] - 1, -1) if k in to_acc_fast), None)
+            after = next((k for k in range(e_, idx[-1] + 1) if k in to_acc_fast), None)
+            if before is not None:
+                tok = acc[to_acc_fast[before]]
+                pos = tok.span[1]
+                while pos < len(tok.text.s) and not tok.text.s[pos].isspace() and not tok.text.s[pos].isalnum():
+                    pos += 1
+                ops.append((tok.text, pos, pos, " " + _chunk(run)))
+            elif after is not None:
+                tok = acc[to_acc_fast[after]]
+                ops.append((tok.text, tok.span[0], tok.span[0], _chunk(run) + " "))
+            else:
+                continue
+            partial += 1
+    by_text: dict[int, list] = {}
+    for op in ops:
+        by_text.setdefault(id(op[0]), []).append(op)
+    for items in by_text.values():
+        for node, start, end, new in sorted(items, key=lambda x: (-x[1], -x[2])):
+            node.s = node.s[:start] + new + node.s[end:]
+
+    # 2b. text a witness has and the accurate page lacks goes back where it was
     inserted = 0
     max_run = 0
     cursor: dict[int, tuple] = {}      # acc unit -> (container, index) of the last insertion after it
@@ -313,6 +379,8 @@ def merge_page(acc_html: str, fast_html: str, layer_text: str, digital: bool) ->
         max_run = max([max_run] + [e - s for s, e in _runs(len(fast), fast_cov) if s in idx])
         if len(missing) < 0.6 * len(idx) or (len(idx) < 2 and not unit.is_item):
             continue
+        if _elsewhere([fast[k].word for k in idx], acc_words):
+            continue                    # the same text is on the page, in another place
         content = "".join(serialize(n) for n in unit.nodes).strip()
         if unit.is_item:
             body = BULLET.sub("", re.sub(r"^<li[^>]*>|</li>$", "", content))
@@ -331,6 +399,8 @@ def merge_page(acc_html: str, fast_html: str, layer_text: str, digital: bool) ->
             run = range(s, e)
             if e - s < LAYER_MISSING_RUN or sum(1 for k in run if k in in_fast) > 0.5 * (e - s):
                 continue
+            if _elsewhere([layer[k].word for k in run], acc_words):
+                continue
             max_run = max(max_run, e - s)
             chunk = layer_text[layer[s].span[0]:layer[e - 1].span[1]]
             end = layer_text[layer[e - 1].span[1]:layer[e - 1].span[1] + 1]
@@ -339,9 +409,22 @@ def merge_page(acc_html: str, fast_html: str, layer_text: str, digital: bool) ->
             place_after(acc_unit_before(s, to_acc_layer), parse(f"<p>{html.escape(chunk, quote=False)}</p>").children[0],
                         False)
 
-    source = "spliced" if inserted else "accurate"
-    return MergeResult(serialize(acc_root), source, len(edits), inserted, cov, max_run)
+    # 4. accurate words no witness has: a recognition loop or made-up text
+    seen = set()
+    for w in (fast, layer):
+        if w:
+            seen |= _covered(acc, w)
+    extra = max([e - s for s, e in _runs(len(acc), seen)] + [0]) if (fast or layer) else 0
+    looped = False
+    if extra >= EXTRA_RUN:
+        s, e = max(_runs(len(acc), seen), key=lambda r: r[1] - r[0])
+        grams = _grams(acc_words[s:e])
+        looped = len(set(grams)) < 0.5 * len(grams)
+
+    source = "spliced" if inserted or partial else "accurate"
+    return MergeResult(serialize(acc_root), source, len(edits), inserted + partial, cov, max_run, extra, looped)
 
 
 def needs_retry(result: MergeResult) -> bool:
-    return result.source != "fast" and (result.coverage < RETRY_COVERAGE or result.max_missing_run >= RETRY_MISSING_RUN)
+    return result.source != "fast" and (result.coverage < RETRY_COVERAGE or result.max_missing_run >= RETRY_MISSING_RUN
+                                        or result.extra_run >= EXTRA_RUN)

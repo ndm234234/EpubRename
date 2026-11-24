@@ -81,6 +81,14 @@ class VoteTest(unittest.TestCase):
         self.assertIn("предсказать когда результаты", r.html)
 
 
+    def test_latin_word_kept_when_fast_agrees(self):
+        acc = "<p>Синдром ADHD описал Whitmore в своей книге подробно.</p>"
+        layer = "Синдром АDНD описал Whitmоrе в своей книге подробно."
+        r = merge_page(acc, acc, layer, digital=False)
+        self.assertIn("ADHD", r.html)
+        self.assertIn("Whitmore", r.html)
+
+
 class SpliceTest(unittest.TestCase):
     def test_missing_list_items_spliced(self):
         acc = "<p>Исследования показывают, что результаты связаны с:</p>" + ul(ITEMS[:3])
@@ -132,6 +140,36 @@ class SpliceTest(unittest.TestCase):
         r = merge_page(acc, fast, "", digital=False)
         self.assertNotIn("Cnep", r.html)
         self.assertEqual(r.inserted_blocks, 0)
+
+    def test_truncated_paragraph_restored(self):
+        words = ("Последний абзац страницы рассказывает о том, как важно хвалить ребенка сразу, "
+                 "а не через час, потому что дети с СДВГ плохо связывают похвалу с поступком, "
+                 "если между ними прошло много времени и случилось что-то еще.")
+        cut = " ".join(words.split()[:16])
+        acc = f"<p>Первый абзац на месте.</p><p>{cut}</p>"
+        fast = f"<p>Первый абзац на месте.</p><p>{words}</p>"
+        r = merge_page(acc, fast, "", digital=False)
+        self.assertIn(words, text(r.html))
+        self.assertEqual(r.html.count("<p>"), 2, "the words go back into the same paragraph")
+
+    def test_moved_block_not_duplicated(self):
+        a = "Первый абзац рассказывает о том, как дети растут и учатся каждый день."
+        b = "Врезка: родителям стоит помнить, что поведение зависит от ситуации и усталости."
+        c = "Третий абзац завершает страницу и подводит итог всему сказанному выше."
+        r = merge_page(f"<p>{a}</p><p>{c}</p><p>{b}</p>", f"<p>{a}</p><p>{b}</p><p>{c}</p>", "", digital=False)
+        self.assertEqual([text(r.html).count(w) for w in ("Первый", "Врезка", "Третий")], [1, 1, 1], r.html)
+        r = merge_page(f"<p>{a}</p><p>{c}</p><p>{b}</p>", f"<p>{a}</p><p>{c}</p><p>{b}</p>", f"{a} {b} {c}",
+                       digital=False)
+        self.assertEqual([text(r.html).count(w) for w in ("Первый", "Врезка", "Третий")], [1, 1, 1], r.html)
+
+    def test_extra_text_flagged(self):
+        page = "<p>Обычный текст страницы о воспитании детей и их поведении дома и в школе.</p>"
+        loop = "<p>" + " ".join(["и так далее"] * 40) + "</p>"
+        r = merge_page(page + loop, page, "", digital=False)
+        self.assertGreaterEqual(r.extra_run, 20)
+        self.assertTrue(needs_retry(r))
+        r = merge_page(page, page, "", digital=False)
+        self.assertEqual(r.extra_run, 0)
 
     def test_junk_not_spliced(self):
         acc = "<p>Хороший родитель должен быть с ребенком и наслаждаться им.</p>"
