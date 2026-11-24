@@ -3,11 +3,16 @@
 
 Usage:
     python3 pdf2epub.py [PDF or FOLDER ...] [--out DIR] [--title T] [--author A]
-                        [--lang CODE] [--force] [--yes]
+                        [--lang CODE] [--force] [--yes] [--quick] [--keep-work]
 
 By default every .pdf in ./Pdf is converted into ./In/<same name>.epub, so that
 epub_rename.py can then sort the new books into Out/ like any other EPUB.
 The PDF files are only read, never changed.
+
+Every page is recognised from its picture by Marker (free, offline), read twice (fast and
+accurate) and checked against the PDF text layer (pdf2epub_hybrid.py). The first run
+installs the engine into ~/.local/share/pdf2epub (about 3 GB, one time); a stopped run goes
+on from the same page. --quick, or a missing engine, uses only the PDF text layer.
 
 What ends up in the book:
   - the text of every page (also the hidden text layer of scanned and recognised
@@ -1073,6 +1078,12 @@ def guess_meta(pdf: Path, info: dict[str, str], args) -> tuple[str, str]:
     return args.title or title, args.author if args.author is not None else author
 
 
+def estimate(pages: int) -> str:
+    """Time of the accurate recognition: about 2 minutes a page on a CPU."""
+    minutes = pages * 2
+    return f"~{minutes} min" if minutes < 60 else f"~{minutes / 60:.1f} h"
+
+
 def ask(prompt: str, default: str) -> str:
     try:
         answer = input(f"   {prompt} [{default or '—'}]: ").strip()
@@ -1081,13 +1092,23 @@ def ask(prompt: str, default: str) -> str:
     return answer or default
 
 
-def convert(pdf: Path, out: Path, args) -> str:
+def book_meta(pdf: Path, args) -> tuple[str, str, int]:
+    """Title, author (asked when unknown) and the number of pages."""
     info = read_info(pdf)
     title, author = guess_meta(pdf, info, args)
     if not author and not args.yes and sys.stdin.isatty():
         print(f"\n📄 {pdf.name}: the author is not in the file; press Enter to keep a suggestion")
         title = ask("Title ", title)
         author = ask("Author", author)
+    try:
+        pages = int(info.get("Pages", "0"))
+    except ValueError:
+        pages = 0
+    return title, author, pages
+
+
+def convert(pdf: Path, out: Path, args, meta: tuple[str, str] | None = None) -> str:
+    title, author = meta or book_meta(pdf, args)[:2]
 
     with tempfile.TemporaryDirectory(prefix="pdf2epub-") as tmp_name:
         tmp = Path(tmp_name)
@@ -1162,6 +1183,10 @@ def main() -> int:
     ap.add_argument("--lang", help="language code, e.g. ru, uk, en (default: guessed from the text)")
     ap.add_argument("--force", action="store_true", help="overwrite books that already exist in the output folder")
     ap.add_argument("--yes", action="store_true", help="never ask questions")
+    ap.add_argument("--quick", action="store_true",
+                    help="quick mode: only the PDF text layer, no recognition (seconds instead of hours)")
+    ap.add_argument("--keep-work", action="store_true",
+                    help="keep the recognition work folder (In/.pdf2epub-work) after the book is done")
     args = ap.parse_args()
 
     missing = [t for t in TOOLS if not shutil.which(t)]
@@ -1191,16 +1216,45 @@ def main() -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     print(f"📚 Found {len(pdfs)} PDF file(s)\n")
     done = skipped = failed = 0
+    # all questions first, so that the long recognition can then run unattended (overnight)
+    jobs = []
     for pdf in pdfs:
         out = args.out / (safe_name(pdf.stem) + ".epub")
         if out.exists() and not args.force:
             print(f"⏭️  {pdf.name}: {out.name} already exists (--force to overwrite)")
             skipped += 1
             continue
+        try:
+            jobs.append((pdf, out, *book_meta(pdf, args)))
+        except Exception as e:
+            print(f"❌ {pdf.name}: {e}")
+            failed += 1
+
+    engine = None
+    if jobs and not args.quick:
+        from pdf2epub_engine import ensure_engine
+        engine = ensure_engine(print)
+        if engine is None:
+            print("⚠️  The recognition engine is not available: using quick mode (the PDF text layer only)")
+        else:
+            pages = sum(job[4] for job in jobs)
+            print(f"⏱️  {estimate(pages)} for {pages} pages "
+                  "(it can be stopped with Ctrl+C and goes on from the same page next time)\n")
+
+    for pdf, out, title, author, _ in jobs:
         print(f"⏳ {pdf.name} ...", flush=True)
         started = time.time()
         try:
-            summary = convert(pdf, out, args)
+            if engine is not None:
+                from pdf2epub_hybrid import convert_hybrid
+                summary = convert_hybrid(pdf, out, title, author, args.lang, engine, args.keep_work,
+                                         lambda line: print("   " + line, flush=True))
+            else:
+                summary = convert(pdf, out, args, (title, author))
+        except KeyboardInterrupt:
+            print(f"\n⏸️  Stopped. Everything recognised so far is kept: run it again to go on "
+                  f"from the same page.")
+            return 130
         except Exception as e:        # one bad PDF must not stop the rest
             print(f"❌ {pdf.name}: {e}")
             failed += 1

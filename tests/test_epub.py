@@ -1,12 +1,16 @@
 """Tests for writing the EPUB: lists, tables, generator mark, headings made of parts."""
 
+import contextlib
+import io
 import sys
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pdf2epub  # noqa: E402
 from pdf2epub import Block, check_epub, split_chapters, write_epub  # noqa: E402
 from pdf2epub_html import merge_heading_runs  # noqa: E402
@@ -56,6 +60,36 @@ class HeadingRunsTest(unittest.TestCase):
         blocks = [Block("h", "ПРЕДИСЛОВИЕ", "ПРЕДИСЛОВИЕ", 1, page=15),
                   Block("h", "Как пользоваться этой книгой", "Как пользоваться этой книгой", 2, page=15)]
         self.assertEqual(len(merge_heading_runs(blocks)), 2)
+
+
+class MainTest(unittest.TestCase):
+    def test_main_falls_back_to_quick(self):
+        from test_hybrid import make_pdf
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf = make_pdf(Path(tmp) / "book.pdf", y=400)  # mid-page: not a running header
+            out_dir = Path(tmp) / "In"
+            stdout = io.StringIO()
+            with mock.patch("pdf2epub_engine.ensure_engine", return_value=None), \
+                    mock.patch.object(sys, "argv", ["pdf2epub.py", str(pdf), "--out", str(out_dir), "--yes"]), \
+                    contextlib.redirect_stdout(stdout):
+                code = pdf2epub.main()
+            self.assertEqual(code, 0, stdout.getvalue())
+            self.assertIn("quick mode", stdout.getvalue())
+            with zipfile.ZipFile(out_dir / "book.epub") as zf:
+                self.assertIn('content="pdf2epub quick"', zf.read("OEBPS/content.opf").decode())
+
+    def test_ctrl_c_explains_resume(self):
+        from test_hybrid import make_pdf
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf = make_pdf(Path(tmp) / "book.pdf", y=400)
+            stdout = io.StringIO()
+            with mock.patch("pdf2epub_engine.ensure_engine", return_value=None), \
+                    mock.patch.object(pdf2epub, "convert", side_effect=KeyboardInterrupt), \
+                    mock.patch.object(sys, "argv", ["pdf2epub.py", str(pdf), "--out", str(Path(tmp) / "In"), "--yes"]), \
+                    contextlib.redirect_stdout(stdout):
+                code = pdf2epub.main()
+            self.assertEqual(code, 130)
+            self.assertIn("run it again", stdout.getvalue())
 
 
 if __name__ == "__main__":

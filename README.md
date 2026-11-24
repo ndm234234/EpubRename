@@ -12,7 +12,8 @@ Small Python scripts to tidy up an EPUB collection:
   and removes references to files the book doesn't contain. Asks before changing each book.
 - **`pdf2epub.py`** — turns PDF books from `Pdf/` into EPUB files in `In/`, ready for
   `epub_rename.py`: real paragraphs instead of printed lines, headings and table of contents,
-  pictures, the first page as the cover. Works with scanned books that have recognised text.
+  lists, tables, pictures, the first page as the cover. Reads every page with a free offline
+  recognition engine (installed by the script on first run), or just the PDF text layer in quick mode.
 
 No dependencies besides Python (`pdf2epub.py` also needs the free
 [Poppler](https://poppler.freedesktop.org/) tools). [Pillow](https://pypi.org/project/pillow/) is optional
@@ -376,15 +377,44 @@ python3 pdf2epub.py some/folder --out other/folder
 python3 pdf2epub.py --force         # convert again books that are already in In/
 python3 pdf2epub.py --yes           # never ask questions
 python3 pdf2epub.py --lang uk       # language of the book (normally guessed from the text)
+python3 pdf2epub.py --quick         # only the PDF text layer: seconds instead of hours
+python3 pdf2epub.py --keep-work     # keep In/.pdf2epub-work (recognised pages, report.json)
 ```
+
+### Recognition (the default)
+
+Every page is read from its picture, the way a person reads it, by
+[Marker](https://github.com/datalab-to/marker) with the Surya models — free, and
+**offline** once installed:
+
+1. **First run** installs the engine by itself (one time, about 3 GB, needs internet):
+   Python 3.12 and Marker go to `~/.local/share/pdf2epub/`, the models to
+   `~/.cache/huggingface/`. Nothing is installed system-wide.
+2. Each book is read twice: a fast pass over the whole book (minutes), then a careful pass
+   page by page (about **2 minutes a page** on a CPU — a 230-page book takes a night).
+   The careful reading is checked word by word against the fast one and the PDF's own text
+   layer: foreign or misread words are outvoted, and lines, list items or paragraphs that
+   the careful pass dropped are put back in place.
+3. All questions (author, title) are asked before the long part starts, so it can run
+   unattended. It can be stopped any time (Ctrl+C, power off): the next run goes on from
+   the same page. The work lives in `In/.pdf2epub-work/` and is removed when the book is done.
 
 ```
 📚 Found 1 PDF file(s)
 
-⏳ Mila Fenwick - Quiet Rivers.pdf ...
-✅ Mila Fenwick - Quiet Rivers.epub: 26 chapter(s), 61235 words, 0 picture(s) (2 s)
+⏱️  ~7.6 h for 228 pages (it can be stopped with Ctrl+C and goes on from the same page next time)
 
-Done: 1 converted, 0 skipped, 0 failed. Books are in In/
+⏳ Mila Fenwick - Quiet Rivers.pdf ...
+   ⚡ fast recognition of 228 page(s)…
+   📄 page 1/228 · accurate · 0:01:52 elapsed · ~7:03:44 left
+   ...
+```
+
+If the engine can't be installed (no internet on the first run, unsupported system), the
+script says so and uses quick mode. To remove the engine:
+
+```bash
+rm -rf ~/.local/share/pdf2epub ~/.cache/huggingface/hub/models--datalab-to--*
 ```
 
 ### What it does
@@ -415,7 +445,8 @@ Done: 1 converted, 0 skipped, 0 failed. Books are in In/
   a new book is written to a temporary file and checked (every page is valid, every
   listed file is there) before it gets its name.
 
-The result depends on the PDF: page layout is turned into flowing text by guessing, so
+In quick mode (`--quick`, or when the engine is not available) the result depends on the
+PDF's text layer: page layout is turned into flowing text by guessing, so
 tables, multi-column pages and side notes can come out in the wrong order, and a badly
 recognised scan gives badly recognised text. Formulas and drawings made of lines (not
 pictures) are lost on pages that also have text.

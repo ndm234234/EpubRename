@@ -18,7 +18,7 @@ SENTENCES = ["Первая страница рассказывает о том, 
              "Третья страница подводит итог и завершает эту короткую тестовую книгу."]
 
 
-def make_pdf(path: Path, pages=SENTENCES) -> Path:
+def make_pdf(path: Path, pages=SENTENCES, y=700) -> Path:
     """A tiny text PDF, one Helvetica line per page (latin transliteration is enough for the layer)."""
     objs = []
 
@@ -29,7 +29,7 @@ def make_pdf(path: Path, pages=SENTENCES) -> Path:
     font = add(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
     contents = []
     for n, _ in enumerate(pages):
-        data = f"BT /F1 12 Tf 72 700 Td (Page {n + 1} text line for the layer) Tj ET".encode()
+        data = f"BT /F1 12 Tf 72 {y} Td (Page {n + 1} text line for the layer) Tj ET".encode()
         contents.append(add(b"<< /Length %d >>\nstream\n" % len(data) + data + b"\nendstream"))
     pages_id = len(objs) + len(pages) + 1
     kids = [add(b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 %d 0 R >> >>"
@@ -135,6 +135,47 @@ class HybridTest(unittest.TestCase):
         out = self.out.parent / 'Книга "тест" 1.epub'
         self.convert(FakeEngine(), pdf=pdf, out=out)
         check_epub(out)
+
+
+class BookPartsTest(unittest.TestCase):
+    def test_text_page_is_not_a_cover(self):
+        words = " ".join(["слово"] * 80)
+        self.assertFalse(hy.first_page_is_cover(f"<h1>СОДЕРЖАНИЕ</h1><p>{words}</p>", big_picture=True))
+        self.assertTrue(hy.first_page_is_cover("<h1>Тихие реки</h1><p>Мила Фенвик</p>", big_picture=True))
+        self.assertFalse(hy.first_page_is_cover("<p>Мила Фенвик</p>", big_picture=False))
+
+    def test_layer_contents_preferred(self):
+        from pdf2epub import Block, Toc, TocEntry
+        blocks = [Block("page", level=1, page=1), Block("h", "СОДЕРЖАНИЕ", "СОДЕРЖАНИЕ", 1, page=1),
+                  Block("table", rows=[["<b>ПРЕДИСЛОВИЕ</b>", "<b>15</b>"]], page=1),
+                  Block("page", level=2, page=2),
+                  Block("h", "ПРИНЦИП 1. КЛЮЧИ 37", "ПРИНЦИП 1. КЛЮЧИ 37", 2, page=2),
+                  Block("p", "Ключ 1. Оценка 42", "Ключ 1. Оценка 42", page=2),
+                  Block("page", level=3, page=3), Block("p", "Текст главы.", "Текст главы.", page=3)]
+        toc = Toc("СОДЕРЖАНИЕ", [TocEntry("ПРЕДИСЛОВИЕ", 15, 0, 1), TocEntry("ПРИНЦИП 1. КЛЮЧИ", 37, 0, 2),
+                                 TocEntry("Ключ 1. Оценка", 42, 10, 2, level=2)], [1, 2])
+        tocs = hy.place_tocs(blocks, [toc])
+        self.assertEqual(tocs, [toc])
+        self.assertEqual([b.kind for b in blocks], ["page", "h", "toc", "page", "page", "p"])
+
+    def test_marker_contents_without_layer(self):
+        from pdf2epub import Block
+        blocks = [Block("h", "СОДЕРЖАНИЕ", "СОДЕРЖАНИЕ", 1, page=1),
+                  Block("table", rows=[["<b>ПРЕДИСЛОВИЕ</b>", "<b>15</b>"], ["Как читать", "17"],
+                                       ["<b>ВВЕДЕНИЕ</b>", "<b>19</b>"], ["Симптомы", "21"]], page=1)]
+        tocs = hy.place_tocs(blocks, [])
+        self.assertEqual([e.title for e in tocs[0].entries], ["ПРЕДИСЛОВИЕ", "Как читать", "ВВЕДЕНИЕ", "Симптомы"])
+
+
+class TimeTest(unittest.TestCase):
+    def test_estimate(self):
+        import pdf2epub
+        self.assertEqual(pdf2epub.estimate(9), "~18 min")
+        self.assertEqual(pdf2epub.estimate(228), "~7.6 h")
+
+    def test_time_left_counts_only_recognised_pages(self):
+        self.assertEqual(hy.time_left(elapsed=240, recognised=2, remaining=3), 360)
+        self.assertIsNone(hy.time_left(elapsed=0.1, recognised=0, remaining=5))
 
 
 if __name__ == "__main__":

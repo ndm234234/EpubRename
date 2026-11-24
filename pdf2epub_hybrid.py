@@ -6,6 +6,7 @@ is stopped (Ctrl+C, power off) goes on from the first unfinished page next time.
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -31,6 +32,36 @@ def _write(path: Path, text: str) -> None:
 def _fmt(seconds: float) -> str:
     seconds = int(seconds)
     return f"{seconds // 3600}:{seconds // 60 % 60:02d}:{seconds % 60:02d}"
+
+
+def time_left(elapsed: float, recognised: int, remaining: int) -> float | None:
+    """Seconds left, from the pages recognised in this run (pages from the cache took no time)."""
+    return elapsed / recognised * remaining if recognised else None
+
+
+COVER_WORDS = 40       # a first page with more recognised words is a page of the book, not a cover
+
+
+def first_page_is_cover(page_html: str, big_picture: bool) -> bool:
+    """In a scan every page is a picture: the first one is a cover only if it has little text."""
+    return big_picture and len(re.sub(r"<[^>]+>", " ", page_html).split()) <= COVER_WORDS
+
+
+def place_tocs(blocks: list[Block], layer_tocs: list) -> list:
+    """The printed contents: from the PDF text layer when it has one (it sees every page of the
+    contents, with nesting from the indent), else from the tables Marker made of it."""
+    if not layer_tocs:
+        return tocs_from_blocks(blocks)
+    for i, toc in enumerate(layer_tocs):
+        on = set(toc.pages)
+        kept = [b for b in blocks if not (b.page in on and b.kind != "page")]
+        at = next((k for k, b in enumerate(kept) if b.kind == "page" and b.page == toc.pages[0]), None)
+        if at is None:
+            continue
+        kept[at + 1:at + 1] = [Block("h", base.esc(toc.title), toc.title, 1, page=toc.pages[0]),
+                               Block("toc", level=i, page=toc.pages[0])]
+        blocks[:] = kept
+    return layer_tocs
 
 
 def _escape(text: str) -> str:
@@ -110,13 +141,14 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
 
         # 2. accurate page by page (hours), checked against fast and the text layer
         todo = [n for n in numbers if not merged_file(n).exists()]
-        started, done_now = time.time(), 0
+        started, done_now, recognised = time.time(), 0, 0
         for i in range(0, len(todo), ACC_BATCH):
             batch = todo[i:i + ACC_BATCH]
             need = [n for n in batch if not acc_file(n).exists()]
             if need:
                 for n, page_html in recognise("accurate", need).items():
                     _write(acc_file(n), page_html)
+                recognised += len(need)
             for n in batch:
                 fast_html = fast_file(n).read_text(encoding="utf-8")
                 acc_html = acc_file(n).read_text(encoding="utf-8")
@@ -151,8 +183,9 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                 log(f"page {n}: {source} {info}")
                 done_now += 1
                 elapsed = time.time() - started
-                left = elapsed / done_now * (len(todo) - done_now)
-                progress(f"📄 page {n}/{numbers[-1]} · accurate · {_fmt(elapsed)} elapsed · ~{_fmt(left)} left")
+                left = time_left(elapsed, recognised, len(todo) - done_now)
+                progress(f"📄 page {n}/{numbers[-1]} · accurate · {_fmt(elapsed)} elapsed"
+                         + (f" · ~{_fmt(left)} left" if left is not None else ""))
     finally:
         stop(engine)
 
@@ -160,8 +193,8 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
     with tempfile.TemporaryDirectory(prefix="pdf2epub-") as tmp_name:
         tmp = Path(tmp_name)
         cover = base.render_page(pdf, 1, tmp / "cover", base.COVER_HEIGHT)
-        first_pics = pictures.get(1, [])
-        skip_first = cover is not None and any(w * h >= 0.5 * pages[0].width * pages[0].height for w, h in first_pics)
+        big = any(w * h >= 0.5 * pages[0].width * pages[0].height for w, h in pictures.get(1, []))
+        skip_first = cover is not None and first_page_is_cover(merged_file(1).read_text(encoding="utf-8"), big)
         blocks: list[Block] = []
         for n in numbers:
             if skip_first and n == 1:
@@ -171,9 +204,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
         blocks = join_pages(blocks)
         fix_drop_cap(blocks)
         blocks = merge_heading_runs(blocks)
-        tocs = tocs_from_blocks(blocks)
-        if not tocs:
-            tocs = _layer_tocs(blocks, pages, body)
+        tocs = place_tocs(blocks, base.find_tocs(pages, body))
         main = max(tocs, key=lambda t: len(t.entries)) if tocs else None
         if tocs:
             base.anchor_tocs(blocks, tocs, base.page_offset(pages, tocs, blocks))
@@ -200,19 +231,3 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
     return (f"{len(chapters)} chapter(s), {words} words; pages: {parts}; {fixed} word(s) corrected — «{title}»"
             + (f", {author}" if author else ""))
 
-
-def _layer_tocs(blocks: list[Block], pages, body) -> list:
-    """Printed contents found in the PDF text layer (when Marker didn't see it as a table):
-    the blocks of those pages are replaced by the contents list."""
-    tocs = base.find_tocs(pages, body)
-    for i, toc in enumerate(tocs):
-        on = set(toc.pages)
-        first = next((k for k, b in enumerate(blocks) if b.page in on and b.kind != "page"), None)
-        if first is None:
-            continue
-        kept = [b for b in blocks if not (b.page in on and b.kind not in ("page",))]
-        title = Block("h", base.esc(toc.title), toc.title, 1, page=toc.pages[0])
-        at = next(k for k, b in enumerate(kept) if b.kind == "page" and b.page == toc.pages[0]) + 1
-        kept[at:at] = [title, Block("toc", level=i, page=toc.pages[0])]
-        blocks[:] = kept
-    return tocs
