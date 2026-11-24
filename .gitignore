@@ -1,7 +1,9 @@
 # Books — copyrighted, never commit them
 In/
 Out/
+Pdf/
 *.epub
+*.pdf
 
 # Generated catalog
 index.html

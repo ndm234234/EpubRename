@@ -10,8 +10,12 @@ Small Python scripts to tidy up an EPUB collection:
 - **`fix_cover.py`** — makes sure every book has a cover that readers and catalogs can find:
   marks the cover picture when the book doesn't, or draws one from the title and author,
   and removes references to files the book doesn't contain. Asks before changing each book.
+- **`pdf2epub.py`** — turns PDF books from `Pdf/` into EPUB files in `In/`, ready for
+  `epub_rename.py`: real paragraphs instead of printed lines, headings and table of contents,
+  pictures, the first page as the cover. Works with scanned books that have recognised text.
 
-No dependencies besides Python. [Pillow](https://pypi.org/project/pillow/) is optional
+No dependencies besides Python (`pdf2epub.py` also needs the free
+[Poppler](https://poppler.freedesktop.org/) tools). [Pillow](https://pypi.org/project/pillow/) is optional
 (used to shrink covers for the catalog, and by `fix_cover.py` to draw missing covers).
 
 ## Quick start
@@ -29,6 +33,10 @@ Then open `Out/index.html` in a browser.
 
 - Python 3.10 or newer
 - Optional: Pillow — `pip install pillow` (without it covers are copied at full size)
+- For `pdf2epub.py` only: Poppler — `sudo apt install poppler-utils` (Linux),
+  `brew install poppler` (macOS), or on Windows
+  [poppler-windows](https://github.com/oschwartz10612/poppler-windows/releases) with its
+  `Library/bin` folder added to `PATH`
 
 Works on Linux, macOS and Windows.
 
@@ -353,13 +361,72 @@ byte for byte; the fixed file is checked (opens, nothing lost, every listed file
 cover found) before it replaces the old one, and keeps the old file's date. Running it
 again changes nothing. Run `make_index.py` afterwards to see the covers in the catalog.
 
+## pdf2epub.py
+
+```bash
+python3 pdf2epub.py                 # every Pdf/*.pdf -> In/*.epub
+python3 epub_rename.py              # then sort them into Out/ as usual
+```
+
+Like `epub_rename.py`, it takes `Pdf/` and `In/` from the **current folder**. Other options:
+
+```bash
+python3 pdf2epub.py book.pdf --title "Title" --author "Author"   # one file, set the names
+python3 pdf2epub.py some/folder --out other/folder
+python3 pdf2epub.py --force         # convert again books that are already in In/
+python3 pdf2epub.py --yes           # never ask questions
+python3 pdf2epub.py --lang uk       # language of the book (normally guessed from the text)
+```
+
+```
+📚 Found 1 PDF file(s)
+
+⏳ Mila Fenwick - Quiet Rivers.pdf ...
+✅ Mila Fenwick - Quiet Rivers.epub: 26 chapter(s), 61235 words, 0 picture(s) (2 s)
+
+Done: 1 converted, 0 skipped, 0 failed. Books are in In/
+```
+
+### What it does
+
+- **Text** of every page, including the hidden text layer of scanned books that were
+  recognised (OCR). Printed lines are joined into paragraphs, words hyphenated at the end
+  of a line are glued back, running headers, footers and page numbers are removed.
+  Bold and italic are kept.
+- **Table of contents** is taken from the book's own printed contents, when it has one:
+  the entries, their nesting (from the indent) and page numbers. Each entry is found in the
+  text (printed page numbers are matched to PDF pages by the numbers in headers/footers),
+  so the reader's table of contents looks like the printed one and leads to the right place.
+  The printed contents pages become a list of clickable links with page numbers; chapters
+  are split at its top-level entries; sections it lists are shown as headings.
+- **Headings** are also found by their larger font, or as short bold lines standing on their own.
+  Without printed contents, the biggest headings start new chapters and the table of
+  contents is made of them. A book without any headings is cut into parts of 20 pages.
+- **Pictures** among the text are kept; the page scans under recognised text are not.
+  A page without any text (a scan that wasn't recognised, a diagram) is added as a
+  picture of the whole page.
+- **Cover** — the first page as a picture. If that page is a picture itself, it is not
+  repeated in the text.
+- **Title and author** come from the PDF properties, or from a file name like
+  `Author - Title.pdf`. If the author is still unknown, the script asks for the title and
+  author (Enter keeps the suggestion); `--title`/`--author` set them, `--yes` skips the question.
+- **Language** is guessed from the text (Russian, Ukrainian or English); `--lang` sets it.
+- PDF files are only read. A book already in `In/` is skipped unless `--force`;
+  a new book is written to a temporary file and checked (every page is valid, every
+  listed file is there) before it gets its name.
+
+The result depends on the PDF: page layout is turned into flowing text by guessing, so
+tables, multi-column pages and side notes can come out in the wrong order, and a badly
+recognised scan gives badly recognised text. Formulas and drawings made of lines (not
+pictures) are lost on pages that also have text.
+
 ## Notes and limitations
 
 - Only the metadata stored in the book is used. If a book says `Whitmore Clara`
   (last name first, no comma), the script can't tell which part is the first name.
 - Genres are not used: many EPUBs don't contain them.
 - Please respect copyright — this repository contains only the scripts; don't commit
-  your books (`In/`, `Out/` and `*.epub` are in `.gitignore`).
+  your books (`In/`, `Out/`, `Pdf/`, `*.epub` and `*.pdf` are in `.gitignore`).
 
 ## License
 
