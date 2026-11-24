@@ -829,6 +829,10 @@ div.toc p.toc2 { padding-left: 1.2em; }
 div.toc p.toc3 { padding-left: 2.4em; }
 div.toc a { text-decoration: none; color: inherit; }
 div.toc span.pg { float: right; padding-left: 1em; font-weight: normal; }
+ul.list { list-style: none; padding-left: 1.2em; margin: 0.5em 0; }
+ul.list li { margin: 0.2em 0; text-indent: -1.2em; padding-left: 1.2em; }
+table { border-collapse: collapse; margin: 1em auto; }
+td { border: 1px solid #999; padding: 0.2em 0.4em; vertical-align: top; }
 """
 
 
@@ -895,7 +899,8 @@ def detect_lang(text: str) -> str:
 
 
 def write_epub(out: Path, title: str, author: str, lang: str, chapters: list[Chapter],
-               cover: Path | None, images: dict[str, str], tocs: list, main) -> None:
+               cover: Path | None, images: dict[str, str], tocs: list, main,
+               generator: str = "pdf2epub quick") -> None:
     """images: source file -> name inside the book (images/...)."""
     book_id = f"urn:uuid:{uuid.uuid4()}"
     modified = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -943,6 +948,11 @@ def write_epub(out: Path, title: str, author: str, lang: str, chapters: list[Cha
                 parts.append(f'<div class="{cls}"{id_attr}><img src="{images[b.src]}" alt="{esc(b.text)}"/></div>')
             elif b.kind == "toc":
                 parts.append(contents_list(tocs[b.level], id_attr))
+            elif b.kind == "list":
+                parts.append(f'<ul class="list"{id_attr}>' + "".join(f"<li>{i}</li>" for i in b.items) + "</ul>")
+            elif b.kind == "table":
+                rows = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in b.rows)
+                parts.append(f"<table{id_attr}>{rows}</table>")
         if not any(t[2].startswith(ch.file + "#") for t in toc):
             toc.append((1, ch.title, ch.file))
         files[ch.file] = xhtml(ch.title, "\n".join(parts), lang).encode()
@@ -996,7 +1006,8 @@ def write_epub(out: Path, title: str, author: str, lang: str, chapters: list[Cha
     manifest.append('<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>')
 
     creator = f"<dc:creator>{esc(author)}</dc:creator>\n" if author else ""
-    cover_meta = '<meta name="cover" content="cover-image"/>\n' if cover else ""
+    cover_meta = ('<meta name="cover" content="cover-image"/>\n' if cover else "") + \
+        f'<meta name="generator" content="{esc(generator)}"/>\n'
     guide = '<guide><reference type="cover" title="Cover" href="cover.xhtml"/></guide>\n' if cover else ""
     opf = (
         '<?xml version="1.0" encoding="utf-8"?>\n'

@@ -1,0 +1,62 @@
+"""Tests for writing the EPUB: lists, tables, generator mark, headings made of parts."""
+
+import sys
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import pdf2epub  # noqa: E402
+from pdf2epub import Block, check_epub, split_chapters, write_epub  # noqa: E402
+from pdf2epub_html import merge_heading_runs  # noqa: E402
+
+
+def write(blocks, generator="pdf2epub hybrid"):
+    tmp = tempfile.TemporaryDirectory()
+    out = Path(tmp.name) / "book.epub"
+    chapters = split_chapters(blocks, "Book")
+    write_epub(out, "Book", "Author", "ru", chapters, None, {}, [], None, generator=generator)
+    with zipfile.ZipFile(out) as zf:
+        pages = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+        opf = zf.read("OEBPS/content.opf").decode()
+    check_epub(out)
+    tmp.cleanup()
+    return pages, opf
+
+
+class EpubTest(unittest.TestCase):
+    def test_list_and_table_render(self):
+        blocks = [Block("h", "Глава", "Глава", 1, page=1),
+                  Block("list", items=["☐ Крепко прижать", "☐ <b>Улыбнуться</b>"], page=1),
+                  Block("table", rows=[["Утро", "<b>Да</b>"], ["Вечер", "Нет"]], page=1)]
+        pages, _ = write(blocks)
+        self.assertIn('<ul class="list"><li>☐ Крепко прижать</li><li>☐ <b>Улыбнуться</b></li></ul>', pages)
+        self.assertIn("<td>Утро</td><td><b>Да</b></td>", pages)
+
+    def test_generator_meta(self):
+        _, opf = write([Block("p", "Текст", "Текст", page=1)])
+        self.assertIn('<meta name="generator" content="pdf2epub hybrid"/>', opf)
+        _, opf = write([Block("p", "Текст", "Текст", page=1)], generator="pdf2epub quick")
+        self.assertIn('content="pdf2epub quick"', opf)
+
+
+class HeadingRunsTest(unittest.TestCase):
+    def test_heading_runs(self):
+        blocks = [Block("h", "ПРИНЦИП", "ПРИНЦИП", 1, page=38), Block("h", "1", "1", 2, page=38),
+                  Block("h", "ИСПОЛЬЗУЙТЕ КЛЮЧИ К УСПЕХУ", "ИСПОЛЬЗУЙТЕ КЛЮЧИ К УСПЕХУ", 1, page=38),
+                  Block("p", "Текст", "Текст", page=38)]
+        out = merge_heading_runs(blocks)
+        self.assertEqual([b.kind for b in out], ["h", "p"])
+        self.assertEqual(out[0].text, "ПРИНЦИП 1. ИСПОЛЬЗУЙТЕ КЛЮЧИ К УСПЕХУ")
+        self.assertEqual(out[0].html, "ПРИНЦИП 1<br/>ИСПОЛЬЗУЙТЕ КЛЮЧИ К УСПЕХУ")
+        self.assertEqual(out[0].level, 1)
+
+    def test_separate_headings_stay(self):
+        blocks = [Block("h", "ПРЕДИСЛОВИЕ", "ПРЕДИСЛОВИЕ", 1, page=15),
+                  Block("h", "Как пользоваться этой книгой", "Как пользоваться этой книгой", 2, page=15)]
+        self.assertEqual(len(merge_heading_runs(blocks)), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
