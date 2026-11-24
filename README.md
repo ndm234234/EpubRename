@@ -195,12 +195,9 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
   don't matter; `Esc` clears it). The book search (`Ctrl+F`) also lists matching bookmarks and notes,
   in a separate group above the matches in the text.
 - Light / sepia / dark theme, remembered.
-- **Print** (computer; also `Ctrl+P`) prints the open pages and nothing else: two pages side by
-  side on an A4 landscape sheet, or one page on A4 portrait when one is shown. Black text on white
-  whatever the theme, with the chosen font and pictures, and no browser header or footer. The text
-  size (up to 14 pt) is picked so the pages fit on the sheet. When two open pages hold more text than
-  one sheet can take at 8 pt (a big monitor with small text), each page is printed on its own A4
-  portrait sheet instead. The browser's own Print menu prints a note pointing to the button.
+- **Print** (computer; also `Ctrl+P` or the browser's Print menu) prints exactly what is on the
+  screen, like a picture of it: the open pages, without the bars and buttons, scaled to fit an
+  A4 sheet (landscape for a wide window, portrait for a tall one), black on white whatever the theme.
 - **Aa** — text settings, remembered for all books:
   - size (also `+` / `−`);
   - font: *As in book*, or one of the reading fonts that come with the reader — Literata,
