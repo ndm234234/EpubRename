@@ -165,6 +165,12 @@ def _cyrillic(w: str) -> bool:
     return bool(re.search(r"[а-яё]", w, re.I))
 
 
+def _similar(a: str, b: str) -> bool:
+    """The same word read slightly differently (not just any word that happens to sit there)."""
+    a, b = norm(a), norm(b)
+    return a == b or difflib.SequenceMatcher(None, a, b).ratio() >= 0.5
+
+
 def _latin_only(w: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z]+", w))
 
@@ -232,7 +238,7 @@ def merge_page(acc_html: str, fast_html: str, layer_text: str, digital: bool) ->
         f = fast[to_fast[i]].word if i in to_fast else None
         l = layer[to_layer[i]].word if i in to_layer else None
         choice = a
-        if digital and l is not None:
+        if digital and l is not None and _similar(a, l):
             choice = l
         elif f is not None and l is not None and f == l:
             choice = f

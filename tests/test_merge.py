@@ -59,6 +59,20 @@ class VoteTest(unittest.TestCase):
         r = merge_page(acc, fast, layer, digital=True)
         self.assertIn("Главная мысль", r.html)
 
+    def test_unrelated_layer_changes_nothing(self):
+        acc = "<h1>Глава 1</h1><p>Первая страница рассказывает о том, как дети растут.</p>"
+        layer = "Page 1 text line for the layer"
+        r = merge_page(acc, acc, layer, digital=True)
+        self.assertIn("Глава 1", r.html)
+        self.assertEqual(r.fixed_words, 0)
+
+    def test_dissimilar_word_not_replaced(self):
+        acc = "<p>Родители часто читают детям сказки перед сном.</p>"
+        fast = "<p>Родители часто поют детям сказки перед сном.</p>"
+        layer = "Родители часто поют детям сказки перед сном."
+        r = merge_page(acc, fast, layer, digital=False)
+        self.assertIn("поют", r.html, "two witnesses agree on a whole different word: they win")
+
     def test_markup_preserved(self):
         acc = "<p><b>ПРОБЛЕМА.</b> Очень трудно предсказать quando результаты</p>"
         fast = "<p>ПРОБЛЕМА. Очень трудно предсказать когда результаты</p>"
