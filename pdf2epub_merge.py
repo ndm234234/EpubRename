@@ -188,7 +188,15 @@ class MergeResult:
 
 
 def _covered(witness: list[Tok], acc: list[Tok]) -> set[int]:
-    return set(align(witness, acc))
+    """Witness words the accurate page has, maybe read differently. Words in a stretch where
+    the accurate page has at least half as many words of its own count as read differently,
+    not missing (a misread line plus a stray letter must not come back as a copy)."""
+    covered = set()
+    sm = difflib.SequenceMatcher(None, [norm(t.word) for t in witness], [norm(t.word) for t in acc], autojunk=False)
+    for op, i1, i2, j1, j2 in sm.get_opcodes():
+        if op == "equal" or (op == "replace" and 2 * (j2 - j1) >= i2 - i1):
+            covered.update(range(i1, i2))
+    return covered
 
 
 def coverage(acc_html: str, witnesses: list[str]) -> float:

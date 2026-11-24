@@ -125,6 +125,14 @@ class SpliceTest(unittest.TestCase):
         self.assertEqual(r.source, "accurate")
         self.assertFalse(needs_retry(r))
 
+    def test_misread_line_not_spliced_as_missing(self):
+        acc = ("<ul><li>☐ Отличная работа!</li><li>☐ Здорово!</li><li>☐ Потрясающе!</li>"
+               "<li>☐ Супер!</li><li>☐ Фантастика!</li></ul>")
+        fast = "<p>◦ Отличная работа!<br/>◦ Здорово!<br/>◦ Потрясающе!<br/>• Cnep!</p><h2>О Фантастика!</h2>"
+        r = merge_page(acc, fast, "", digital=False)
+        self.assertNotIn("Cnep", r.html)
+        self.assertEqual(r.inserted_blocks, 0)
+
     def test_junk_not_spliced(self):
         acc = "<p>Хороший родитель должен быть с ребенком и наслаждаться им.</p>"
         fast = "<p>Хороший родитель должен быть с ребенком и наслаждаться им.</p><p>Ш8Ш</p>"
