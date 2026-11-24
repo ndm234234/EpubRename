@@ -257,6 +257,19 @@ address to type on the phone, e.g. `http://192.168.1.64:48865/`.
   browser in the background, out of Wi-Fi) is shown as gone, and comes back as connected
   when it reports in again. Refused outside addresses are logged once each.
 
+#### Installing as an app
+
+The library can be installed as an app on a phone, tablet or computer: its own icon, full screen,
+no address bar. The browser doesn't push it; it's in the browser's menu — Chrome: ⋮ → *Install app*
+(or *Add to Home screen*), Safari on iPhone: Share → *Add to Home Screen*.
+
+- A full install needs the library on an **https** address (or `localhost` on the same computer).
+  On a plain `http://192.168.…` address Chrome only offers a home-screen shortcut that opens in the
+  browser; Safari on iPhone opens it full screen either way.
+- The app opens the library at the address it was installed from: keep the computer's address (and
+  port) the same, e.g. a fixed address for it in the router. The library server must be running.
+- `make_index.py` writes the app description to `.index/manifest.webmanifest`, named after the library.
+
 ## fix_cover.py
 
 ```bash

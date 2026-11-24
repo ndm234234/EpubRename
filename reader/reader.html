@@ -6,6 +6,10 @@
 <title>Reader</title>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" id="themeColor" content="#fdfcf8">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <!-- Offline EPUB reader: epub.js + JSZip are local files next to this page. -->
 <script src="jszip.min.js"></script>
 <script src="epub.min.js"></script>
@@ -419,6 +423,9 @@ const THEME_CSS = {
 const prefs = Object.assign({ theme: "light", font: 100, face: "book", layout: "book" }, store.get("epubReader:prefs"));
 const savePrefs = () => store.set("epubReader:prefs", prefs);
 document.documentElement.dataset.theme = prefs.theme;
+// The phone's status bar (and an installed app's title bar) in the colour of the reader's bar
+const showThemeColor = () => $("themeColor").content = { light: "#fdfcf8", sepia: "#f4ecd8", dark: "#161618" }[prefs.theme] || "#fdfcf8";
+showThemeColor();
 
 let book = null, rendition = null, bookKey = "", tocItems = [];
 let locationsReady = false;   // positions for the whole book are computed (see prepareLocations)
@@ -1498,6 +1505,7 @@ $("themeBtn").onclick = () => {
   prefs.theme = THEMES[(THEMES.indexOf(prefs.theme) + 1) % THEMES.length];
   savePrefs();
   document.documentElement.dataset.theme = prefs.theme;
+  showThemeColor();
   if (rendition) rendition.themes.select(prefs.theme);
 };
 $("pickBtn").onclick = $("openBtn").onclick = () => $("file").click();
@@ -1505,6 +1513,10 @@ $("file").onchange = e => { openFile(e.target.files[0]); e.target.value = ""; };
 $("stage").addEventListener("click", e => {
   if ($("toc").classList.contains("open") && !$("toc").contains(e.target) ) toggleToc(false);
 });
+
+// Can be installed as an app (browser menu → "Install app" / "Add to Home screen"), but the browser
+// is not to suggest it by itself
+addEventListener("beforeinstallprompt", e => e.preventDefault());
 
 // Let the library server know this page is open: the network launcher's window lists the devices
 // using the library. A "still here" every minute and "bye" on closing; nothing from file://.

@@ -280,6 +280,11 @@ PAGE = r"""<!DOCTYPE html>
 <title>__TITLE__</title>
 <link rel="icon" href=".index/reader/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href=".index/reader/icon.png">
+<link rel="manifest" href=".index/manifest.webmanifest">
+<meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <style>
   :root {
     --bg: #f7f7f5; --surface: #ffffff; --surface-2: #efeeeb; --text: #18181b; --muted: #6b6b74;
@@ -823,6 +828,10 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") { $("q").value = ""; render(); }
 });
 render();
+// Can be installed as an app (browser menu → "Install app" / "Add to Home screen"), but the browser
+// is not to suggest it by itself
+addEventListener("beforeinstallprompt", e => e.preventDefault());
+
 // Let the library server know this page is open: the network launcher's window lists the devices
 // using the library. A "still here" every minute and "bye" on closing; nothing from file://.
 (() => {
@@ -884,6 +893,30 @@ def install_reader(dest: Path) -> None:
             f.rmdir()
 
 
+def write_manifest(index_dir: Path, title: str) -> None:
+    """The web app manifest: the library can be installed as an app on a phone or computer
+    (from the browser's menu; it needs an https address, or localhost)."""
+    icons = "reader/icon"
+    manifest = {
+        "name": title,
+        "short_name": title,
+        "description": "EPUB library and reader",
+        "start_url": "../index.html",
+        "scope": "../",
+        "display": "standalone",
+        "background_color": "#f7f7f5",
+        "theme_color": "#f7f7f5",
+        "icons": [
+            {"src": f"{icons}-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": f"{icons}-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": f"{icons}-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+            {"src": f"{icons}.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+        ],
+    }
+    (index_dir / "manifest.webmanifest").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def install_launchers(root: Path) -> None:
     """Put "Open Library.bat" (Windows) and "Open Library.sh" (Linux) next to index.html."""
     if not LAUNCHERS_SRC.is_dir():
@@ -941,6 +974,7 @@ def build_index(folder: Path, title: str | None = None) -> int:
         print("\r\033[K", end="")
 
     install_reader(root / INDEX_DIR / READER_DIR)
+    write_manifest(index_dir, title or DEFAULT_TITLE)
     install_launchers(root)
 
     out = root / "index.html"
