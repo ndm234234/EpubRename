@@ -15,6 +15,8 @@ from pdf2epub_merge import Node, Text, parse
 
 KEEP = {"b": "b", "strong": "b", "i": "i", "em": "i", "sup": "sup", "sub": "sub"}
 CHECKBOX = "☐ "
+CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")      # not allowed in XHTML
+SPACED = {"p", "div", "li", "blockquote", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6"}  # block inside inline text
 LOOKALIKE = {"A": "А", "B": "В", "C": "С", "D": "В", "E": "Е", "H": "Н", "K": "К", "M": "М",
              "O": "О", "P": "Р", "T": "Т", "X": "Х"}
 
@@ -22,12 +24,14 @@ LOOKALIKE = {"A": "А", "B": "В", "C": "С", "D": "В", "E": "Е", "H": "Н", "
 def inline(node) -> str:
     """HTML of a node's content with only bold, italic, sup/sub and line breaks kept."""
     if isinstance(node, Text):
-        return html.escape(node.s, quote=False)
+        return html.escape(CONTROL.sub("", node.s), quote=False)
     if node.tag == "br":
         return "<br/>"
     if node.tag == "input" and "checkbox" in node.start:
         return CHECKBOX
     inner = "".join(inline(c) for c in node.children)
+    if node.tag in SPACED:
+        inner = f" {inner} "
     tag = KEEP.get(node.tag)
     return f"<{tag}>{inner}</{tag}>" if tag and inner.strip() else inner
 
@@ -51,7 +55,8 @@ def _text(fragment: str) -> str:
 def _images(node) -> list[str]:
     if isinstance(node, Text):
         return []
-    found = [m.group(1) for m in [re.search(r'src="([^"]+)"', node.start)] if node.tag == "img" and m]
+    found = [html.unescape(m.group(2)) for m in [re.search(r"""src=(['"])(.*?)\1""", node.start)]
+             if node.tag == "img" and m]
     for c in node.children:
         found += _images(c)
     return found

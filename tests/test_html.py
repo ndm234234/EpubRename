@@ -44,6 +44,21 @@ class PageBlocksTest(unittest.TestCase):
         self.assertEqual(h.html, "<i>Невербальные знаки одобрения</i>")
 
 
+class ImageTest(unittest.TestCase):
+    def test_single_quoted_src(self):
+        blocks = page_blocks("<p>Рис. 7.1</p><p><img src='/w/images/fast-_page_7_Diagram_1.jpeg' alt=''/></p>", page=8)
+        self.assertEqual([(b.kind, b.src) for b in blocks if b.kind == "img"],
+                         [("img", "/w/images/fast-_page_7_Diagram_1.jpeg")])
+
+    def test_nested_paragraphs_keep_a_space(self):
+        blocks = page_blocks("<blockquote><p>Конец цитаты.</p><p>Автор</p></blockquote>", page=1)
+        self.assertIn("Конец цитаты. Автор", " ".join(b.text for b in blocks))
+
+    def test_control_characters_removed(self):
+        blocks = page_blocks("<p>Текст\x1b с мусором\x07.</p>", page=1)
+        self.assertEqual(blocks[0].text, "Текст с мусором.")
+
+
 class DropCapTest(unittest.TestCase):
     def check(self, start):
         blocks = [Block("h", "ПРИНЦИП 1", "ПРИНЦИП 1", 1), Block("p", start + " родители мечтают", start + " родители мечтают"),

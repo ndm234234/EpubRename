@@ -165,6 +165,7 @@ class MarkerRunTest(unittest.TestCase):
         img = re.search(r'src="([^"]+)"', pages[5]).group(1)
         self.assertTrue(Path(img).is_file(), img)
         self.assertEqual(Path(img).parent, self.dir / "work" / "images")
+        self.assertTrue(Path(img).name.startswith("accurate-"), "fast and accurate pictures must not mix")
 
     def test_run_marker_error(self):
         runner, _ = self.fake_marker(code=1)

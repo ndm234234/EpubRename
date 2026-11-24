@@ -6,6 +6,7 @@ module installs them on first use and runs them; it uses only the standard libra
 """
 
 import hashlib
+import html
 import os
 import re
 import signal
@@ -175,9 +176,10 @@ def run_marker(engine: Engine, pdf: Path, mode: str, pages: list[int], out_dir: 
         for f in found[0].parent.iterdir():
             if f.suffix.lower() in (".jpeg", ".jpg", ".png", ".gif", ".webp"):
                 images.mkdir(exist_ok=True)
-                target = images / f.name
+                target = images / f"{mode}-{f.name}"
                 shutil.move(str(f), target)
-                html_text = html_text.replace(f'src="{f.name}"', f'src="{target}"')
+                html_text = re.sub(r"""src=(['"])""" + re.escape(f.name) + r"\1",
+                                   lambda _: f'src="{html.escape(str(target))}"', html_text)
         return split_pages(html_text)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
