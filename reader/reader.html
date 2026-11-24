@@ -53,14 +53,18 @@
   footer { border-top-width: 1px; justify-content: space-between; color: var(--muted); font-size: 13px;
            flex-wrap: wrap; row-gap: 2px; padding-top: 4px; }
   #chapter, #pct { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The footer keeps one height from the start: the page is laid out for the space left, and if
+     the footer grew after the book opened (empty text line filled, progress bar swapped for the
+     slider) the bottom line of the page was cut off and pages no longer matched the saved place */
+  #chapter, #where, #pct { min-height: 18px; line-height: 18px; }
   #pct { text-align: right; }
   /* Progress slider: the filled part is what has been read */
   #seek { flex: 0 0 100%; margin: 4px 0; height: 22px; cursor: pointer; background: transparent;
           -webkit-appearance: none; appearance: none; --p: 0%; }
   #seek:disabled { cursor: default; opacity: .4; }
   /* While page positions are being computed: a progress bar in place of the slider */
-  #navLoad { flex: 0 0 100%; display: grid; gap: 8px; margin: 6px 0 6px; }
-  .navHead { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 500;
+  #navLoad { flex: 0 0 100%; display: grid; gap: 4px; margin: 4px 0; height: 22px; align-content: center; }
+  .navHead { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 500; line-height: 14px;
              color: var(--text); white-space: nowrap; }
   .navHead small { color: var(--muted); font-weight: 400; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
   .navHead b { margin-left: auto; color: var(--accent); font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -427,7 +431,7 @@ document.documentElement.dataset.theme = prefs.theme;
 const showThemeColor = () => $("themeColor").content = { light: "#fdfcf8", sepia: "#f4ecd8", dark: "#161618" }[prefs.theme] || "#fdfcf8";
 showThemeColor();
 
-let book = null, rendition = null, bookKey = "", tocItems = [];
+let book = null, rendition = null, bookKey = "", tocItems = [], turnPage = null;
 let locationsReady = false;   // positions for the whole book are computed (see prepareLocations)
 let marksKey = "", marks = [];   // bookmarks of the open book: [{cfi, text, name, note, time}]
 
@@ -438,6 +442,12 @@ const params = new URLSearchParams(location.hash.slice(1));
 const src = params.get("book");
 if (src) {
   $("back").classList.remove("hidden");
+  // The installed app's catalog lists the books opened last first: {href from the catalog: time}
+  try {
+    const k = "epubLibrary:opened", m = JSON.parse(localStorage.getItem(k)) || {};
+    m[src.replace(/^(\.\.\/)+/, "")] = Date.now();
+    localStorage.setItem(k, JSON.stringify(m));
+  } catch {}
   openFromUrl(src);
 }
 
@@ -498,6 +508,7 @@ async function openBook(data, fileName) {
   const md = book.packaging.metadata;
   // The same book gets the same key whether opened from the catalog or picked by hand
   bookKey = "epubReader:book:" + (md.identifier || md.title || fileName);
+  anchor = "";
   marksKey = "epubReader:marks:" + (md.identifier || md.title || fileName);
   marks = store.get(marksKey) || [];
   $("markFilter").value = "";
@@ -516,6 +527,26 @@ async function openBook(data, fileName) {
     contents.document.addEventListener("wheel", onWheel, { passive: false });
   });
   rendition.started.then(() => keepOldPageUntilNewIsReady(rendition));
+  // Window resized: back to the reading place, not to the start of the page shown (see displayAt)
+  rendition.onResized = function (size, cfi) {
+    this.emit("resized", { width: size.width, height: size.height }, cfi);
+    if (this.location && this.location.start) displayAt(cfi || anchor || this.location.start.cfi);
+  };
+  // The reader's own moves (page turns any way: buttons, keys, swipes, wheel; contents, search,
+  // slider) set the reading place and stop displayAt's second jump. displayAt itself uses the
+  // originals (turnPage), so a re-layout never moves the reading place.
+  turnPage = { next: rendition.next.bind(rendition), prev: rendition.prev.bind(rendition),
+               display: rendition.display.bind(rendition) };
+  const byReader = f => async (...a) => {
+    moved = true;
+    const r = await f(...a);
+    const loc = here();
+    if (loc) { anchor = loc.start.cfi; savePlace(); }
+    return r;
+  };
+  rendition.next = byReader(turnPage.next);
+  rendition.prev = byReader(turnPage.prev);
+  rendition.display = byReader(turnPage.display);
   rendition.on("relocated", onRelocated);
   rendition.on("click", () => toggleTypo(false));
   rendition.on("keydown", onKey);
@@ -523,7 +554,7 @@ async function openBook(data, fileName) {
   rendition.on("touchend", touchEnd);
 
   const saved = store.get(bookKey);
-  try { await rendition.display(saved && saved.cfi || undefined); }
+  try { await (saved && saved.cfi ? displayAt(saved.cfi) : rendition.display()); }
   catch { await rendition.display(); }   // saved place is no longer valid
   $("start").classList.add("hidden");
   for (const id of ["prev", "next", "smaller", "bigger", "typoBtn", "searchBtn", "markBtn", "printBtn"]) $(id).disabled = false;
@@ -769,10 +800,64 @@ addEventListener("afterprint", () => {
 const printPages = () => { if (rendition) print(); };
 $("printBtn").onclick = () => printPages();
 
+// Go to a saved place (where reading stopped, a bookmark).
+// The page is laid out at once, while the chosen font (or the book's own) is still loading and
+// before pictures know their size; when they arrive the text flows anew, but epub.js stays on the
+// same page number, so the place drifts a page or more away, and that wrong page was saved: each
+// return went further back. So: go there, wait until fonts and pictures are in, go there again
+// (unless the reader turned the page meanwhile), and only then save the place.
+// The same happens whenever the page is laid out anew: the window changes size (on a phone the
+// browser's address bar hides and shows), the font or its size changes. epub.js then goes to the
+// start of the page shown, a little before the reading place, and each time a bit further back.
+// So the reading place (anchor) is kept apart: set by the reader's own moves, never by a re-layout,
+// and every re-layout goes back to it.
+let settling = false, moved = false;   // moved: the reader turned a page while we were waiting
+let anchor = "", placing = 0;   // placing: the latest displayAt (resizes come in bursts)
+async function displayAt(cfi) {
+  const my = ++placing;
+  settling = true; moved = false;
+  anchor = cfi;
+  try {
+    await placeAt(cfi);
+    await layoutSettled();
+    if (!moved && my === placing) await placeAt(cfi);
+  } finally { if (my === placing) settling = false; }
+  if (my === placing && !moved) savePlace();
+}
+// The place starts a page, so it must be on the page shown; if it is just after it, step forward
+async function placeAt(cfi) {
+  await turnPage.display(cfi);
+  const loc = here();
+  if (loc && !loc.atEnd && new ePub.CFI().compare(cfi, loc.end.cfi) > 0) await turnPage.next();
+}
+function layoutSettled() {
+  const c = rendition.getContents()[0], doc = c && c.document;
+  if (!doc) return Promise.resolve();
+  const loaded = el => new Promise(r => { el.addEventListener("load", r, { once: true }); el.addEventListener("error", r, { once: true }); });
+  const link = doc.getElementById("readerFonts");
+  const fonts = (link && !link.sheet ? loaded(link) : Promise.resolve()).then(() => {
+    const face = FACES[prefs.face];
+    const loads = face ? ["", "italic ", "bold ", "italic bold "].map(v =>
+      doc.fonts.load(v + "16px " + face.stack.split(",")[0], "Аа Aa").catch(() => {})) : [];
+    return Promise.all(loads).then(() => doc.fonts.ready);
+  });
+  const pictures = [...doc.images].filter(i => !i.complete).map(loaded);
+  const frames = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  return Promise.race([Promise.all([fonts, ...pictures]).then(frames),
+                       new Promise(r => setTimeout(r, 4000))]);
+}
+
+// What is saved is the reading place (anchor), not the start of the page shown
+function savePlace() {
+  if (settling || !anchor) return;
+  const pct = locationsReady ? book.locations.percentageFromCfi(anchor) : null;
+  store.set(bookKey, { cfi: anchor, pct, title: document.title, time: Date.now() });
+}
+
 function onRelocated(loc) {
   if (!loc || !loc.start) return;
   const pct = locationsReady ? book.locations.percentageFromCfi(loc.start.cfi) : null;
-  store.set(bookKey, { cfi: loc.start.cfi, pct, title: document.title, time: Date.now() });
+  savePlace();
   const d = loc.start.displayed;
   $("where").textContent = d && d.total ? `page ${d.page} of ${d.total} in chapter` : "";
   if (locationsReady) $("pct").textContent = Math.round(pct * 100) + "%";   // else: progress text
@@ -1105,7 +1190,7 @@ function hideToast() { clearTimeout(toastTimer); $("toast").classList.remove("sh
 $("toastAct").onclick = () => { const a = toastAction; hideToast(); if (a) a(); };
 
 function goToMark(m) {
-  rendition.display(m.cfi);
+  displayAt(m.cfi);
   if (innerWidth < 900) toggleMarks(false);
 }
 
@@ -1114,7 +1199,7 @@ function stepMark(dir) {
   if (!loc || !marks.length) return;
   const m = dir > 0 ? marks.find(m => cfiCmp(m.cfi, loc.end.cfi) > 0)
                     : marks.filter(m => cfiCmp(m.cfi, loc.start.cfi) < 0).pop();
-  if (m) rendition.display(m.cfi);
+  if (m) displayAt(m.cfi);
 }
 
 function markInfo(m) {
@@ -1412,7 +1497,7 @@ document.addEventListener("keydown", onKey);
 function setFont(delta) {
   prefs.font = Math.min(200, Math.max(60, prefs.font + delta));
   savePrefs();
-  if (rendition) rendition.themes.fontSize(prefs.font + "%");
+  if (rendition) { rendition.themes.fontSize(prefs.font + "%"); relayout(); }
   showTypo();
 }
 
@@ -1479,8 +1564,10 @@ function setTypo(key, value) {
   prefs[key] = value;
   savePrefs();
   showTypo();
-  if (rendition) for (const c of rendition.getContents()) applyTypo(c.document);
+  if (rendition) { for (const c of rendition.getContents()) applyTypo(c.document); relayout(); }
 }
+// Font or layout changed: the text flows anew, stay at the reading place
+function relayout() { if (anchor) displayAt(anchor); }
 for (const [seg, key] of [["faceSeg", "face"], ["layoutSeg", "layout"]])
   $(seg).addEventListener("click", e => { const b = e.target.closest("button"); if (b) setTypo(key, b.dataset.v); });
 function toggleTypo(open = !$("typo").classList.contains("open")) {

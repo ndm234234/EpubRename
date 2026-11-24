@@ -9,7 +9,7 @@ descriptions, has search, sorting and grouping by author; clicking a title
 opens the book in the built-in reader (epub.js, offline). Works offline; no internet or server needed.
 
 Written files:  FOLDER/index.html, small cover copies in  FOLDER/.index/covers/
-the reader in  FOLDER/.index/reader/  and the "Open Library" launchers in  FOLDER/
+the reader in  FOLDER/.index/reader/, the "Open Library" launchers and sw.js (offline app) in  FOLDER/
 (they open the catalog through a tiny local web server, so books open with a click).
 EPUB files are only read, never modified.
 Pillow (optional) is used to shrink covers; without it covers are copied as is.
@@ -416,6 +416,8 @@ PAGE = r"""<!DOCTYPE html>
   .dbody h3 { margin: 0 0 8px; font-size: 32px; line-height: 1.15; letter-spacing: -.02em; font-weight: 750; }
   .dbody .authors { font-size: 17px; white-space: normal; }
   .dbody .meta { margin-top: 6px; font-size: 13px; }
+  .dact .short { display: none; }
+  @media (max-width: 640px) { .dact .short { display: inline; } }
   .dact { display: flex; gap: 10px; align-items: center; margin: 24px 0 0; flex-wrap: wrap; }
   .dtext.none { font-style: italic; color: var(--muted); }
   .dtext { margin: 28px 0 0; padding-top: 24px; border-top: 1px solid var(--line); max-width: 68ch;
@@ -424,6 +426,7 @@ PAGE = r"""<!DOCTYPE html>
          font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; border: 1px solid var(--line);
          background: var(--surface); color: var(--text); transition: background .15s, transform .15s, box-shadow .15s; }
   .btn:hover { background: var(--surface-2); }
+  .btn:disabled { opacity: .65; cursor: default; background: var(--surface); }
   .btn.primary { border: 0; color: #fff; background: linear-gradient(135deg, #5b8cff, #3563e9);
          box-shadow: 0 8px 20px -8px rgba(53,99,233,.7); }
   .btn.primary:hover { transform: translateY(-1px); box-shadow: 0 12px 24px -8px rgba(53,99,233,.8); }
@@ -442,6 +445,8 @@ PAGE = r"""<!DOCTYPE html>
     .dact { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
             background: var(--surface); border-top: 1px solid var(--line); flex-wrap: nowrap; z-index: 2; }
     .dact .btn.primary { flex: 1; justify-content: center; }
+    .dact .btn { padding: 0 18px; }
+    .dact .long { display: none; }
     .dtext { margin-top: 0; border-top: 0; padding-top: 0; }
   }
 
@@ -454,15 +459,53 @@ PAGE = r"""<!DOCTYPE html>
   .empty { color: var(--muted); text-align: center; padding: 80px 0; display: flex; flex-direction: column;
            align-items: center; gap: 12px; }
   .empty .ic { width: 40px; height: 40px; stroke-width: 1.5; opacity: .6; }
+  /* Installed app: books kept on the device */
+  .pop { position: fixed; z-index: 15; top: 64px; right: max(16px, calc((100vw - 1400px) / 2 + 28px)); width: min(360px, calc(100vw - 32px));
+         padding: 16px; display: flex; flex-direction: column; gap: 12px; border-radius: 14px; font-size: 14px;
+         background: var(--surface); border: 1px solid var(--line); box-shadow: 0 18px 40px -12px rgba(0,0,0,.35); }
+  .pophead { font-weight: 700; font-size: 15px; }
+  .popstat { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .popbar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+  .popbar div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .popseg { display: flex; flex-direction: column; gap: 6px; }
+  .popseg label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  .popinfo { color: var(--muted); font-size: 13px; }
+  .popinfo:empty { display: none; }
+  .pop .btn { height: 40px; justify-content: center; font-size: 14px; }
+  .book.away .shelf, .book.away .info { opacity: .4; }
+  #offBtn .count { font-weight: 600; font-size: 12px; padding: 1px 7px; border-radius: 999px; color: var(--muted);
+                   background: var(--surface-2); font-variant-numeric: tabular-nums; }
+  #offBtn.all .count { color: #fff; background: #22a35a; }
+  #offBtn.busy { color: var(--accent); border-color: var(--accent); }
+  #offBtn.busy .count { color: #fff; background: var(--accent); }
+  /* On the cover: is the book on this device (check) or only in the library (cloud) */
+  .where { position: absolute; z-index: 2; right: 7px; bottom: 7px; width: 28px; height: 28px; border-radius: 50%;
+           display: grid; place-items: center; padding: 0; border: 0; cursor: pointer; color: #fff;
+           background: rgba(20,20,24,.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+           box-shadow: 0 0 0 1.5px rgba(255,255,255,.75), 0 2px 6px rgba(0,0,0,.35); }
+  .where .ic { width: 17px; height: 17px; stroke-width: 2.1; }
+  .where::after { content: ""; position: absolute; inset: -10px; }   /* easier to hit with a finger */
+  .where:hover { transform: scale(1.1); }
+  .where .ic:last-child { display: none; }
+  .book.here .where { background: #22a35a; }
+  .book.here .where .ic:first-child { display: none; }
+  .book.here .where .ic:last-child { display: block; }
+  .book.busy .where { animation: busy 1s ease-in-out infinite alternate; }
+  @keyframes busy { to { background: var(--accent); transform: scale(.85); } }
+  .toast { position: fixed; z-index: 40; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+           max-width: calc(100vw - 32px); padding: 12px 18px; border-radius: 12px; font-size: 14px;
+           background: var(--text); color: var(--bg); box-shadow: 0 12px 30px -10px rgba(0,0,0,.5); }
   footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 20px 32px; opacity: .8; }
 
   @media (max-width: 640px) {
     header { padding: 10px 16px; }
     main { padding: 20px 16px 48px; }
     .note { margin: 12px 16px 0; }
+    .pop { right: 16px; }
     .search { order: 3; flex-basis: 100%; }
     .brand { flex: 1; }
     .chip span { display: none; }
+    #offBtn { padding: 0 8px 0 10px; gap: 5px; }
     .chip { padding: 0 11px; }
     /* sort becomes an icon button; the phone's own picker still lists the options */
     .select select { width: 40px; padding: 0; color: transparent; background-image: none; }
@@ -483,6 +526,11 @@ PAGE = r"""<!DOCTYPE html>
   <symbol id="i-read" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></symbol>
+  <symbol id="i-device" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></symbol>
+  <symbol id="i-offline" viewBox="0 0 24 24"><path d="M2 8.8a15 15 0 0 1 4.2-2.6M10.7 5.1A15 15 0 0 1 22 8.8M5 12.9a10 10 0 0 1 5.2-2.7M16.8 11.2a10 10 0 0 1 2.2 1.7M8.5 16.4a5 5 0 0 1 7 0M12 20h.01M2 2l20 20"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M12 13v8M8 17l4 4 4-4M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.24"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
 </svg>
 <header><div class="bar">
@@ -508,6 +556,8 @@ PAGE = r"""<!DOCTYPE html>
     </div>
     <button id="group" class="chip" aria-pressed="false" title="Group books by author">
       <svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><span>Group by author</span></button>
+    <button id="offBtn" class="chip" type="button" aria-expanded="false" aria-controls="offPanel" hidden
+      title="Books kept on this device"><svg class="ic" aria-hidden="true"><use href="#i-cloud"/></svg><span>Offline</span><b id="offLabel" class="count"></b></button>
     <a id="openFile" class="chip" href="__READER__" title="Open any EPUB file in the reader">
       <svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span>Open file</span></a>
   </div>
@@ -516,6 +566,22 @@ PAGE = r"""<!DOCTYPE html>
   <div>Opened directly from disk: books ask you to choose the file. For one-click reading open
   the catalog with <b>Open Library</b> (<code>Open Library.bat</code> on Windows,
   <code>Open Library.sh</code> on Linux) in this folder.</div></div>
+<div id="offPanel" class="pop" role="dialog" aria-label="Books on this device" hidden>
+  <div class="pophead">On this device</div>
+  <div id="offStat" class="popstat"></div>
+  <div class="popbar" id="offBarWrap" hidden><div id="offBar"></div></div>
+  <div class="popseg" role="radiogroup" aria-label="Keep on this device">
+    <label><input type="radio" name="offMode" value="all"> All books (the whole library offline)</label>
+    <label><input type="radio" name="offMode" value="opened"> Only books I open or keep</label>
+  </div>
+  <div id="offInfo" class="popinfo"></div>
+  <button id="offClear" class="btn" type="button">Remove all books from this device</button>
+</div>
+<div id="netNote" class="note" hidden><svg class="ic" aria-hidden="true"><use href="#i-offline"/></svg>
+  <div>No connection to the library. Books on this device can be read; the others are dimmed.</div></div>
+<div id="newNote" class="note" hidden><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>
+  <div>The library has changed. <a href="" id="reloadLink">Show the new catalog</a></div></div>
+<div id="toast" class="toast" role="status" hidden></div>
 <main id="list"></main>
 <section id="detail" class="detail" role="region" aria-label="About the book" hidden></section>
 <footer>Generated __DATE__ · cover or title: about the book · Read: start reading</footer>
@@ -531,12 +597,23 @@ const authorLine = b => b.authors.length ? b.authors.join(", ") : "Unknown Autho
 const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB";
 books.forEach(b => b._search = norm([b.title, authorLine(b), b.series, b.description, b.file].join(" ")));
 
-// Settings survive page reloads
-const saved = JSON.parse(localStorage.getItem("epubIndex") || "{}");
-if (saved.sort) $("sort").value = saved.sort;
+// Installed as an app (started from its icon): the books opened last come first, and the library
+// can be kept on the device (see "Offline library" below). In a browser tab neither.
+const inApp = navigator.standalone === true ||
+  matchMedia("(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)").matches;
+if (inApp) $("sort").prepend(new Option("Recently opened", "opened"));
+// When each book was last opened in the reader: {href: time}, written by reader.html
+const openedTimes = () => { try { return JSON.parse(localStorage.getItem("epubLibrary:opened")) || {}; } catch { return {}; } };
+let openedAt = openedTimes();
+
+// Settings survive page reloads (the app keeps its own)
+const PREFS = inApp ? "epubIndex:app" : "epubIndex";
+const saved = (() => { try { return JSON.parse(localStorage.getItem(PREFS)) || {}; } catch { return {}; } })();
+$("sort").value = saved.sort || (inApp ? "opened" : "author");
+if (!$("sort").value) $("sort").value = "author";
 if (saved.group === true) $("group").setAttribute("aria-pressed", "true");
-const save = () => localStorage.setItem("epubIndex", JSON.stringify(
-  { sort: $("sort").value, group: $("group").getAttribute("aria-pressed") === "true" }));
+const save = () => { try { localStorage.setItem(PREFS, JSON.stringify(
+  { sort: $("sort").value, group: $("group").getAttribute("aria-pressed") === "true" })); } catch {} };
 
 const NS = "http://www.w3.org/2000/svg";
 function icon(name) {
@@ -687,7 +764,8 @@ function openDetail(b, animate = true) {
   const body = el("div", { class: "dbody" },
     el("h3", {}, b.title), authorLinks(b),
     el("div", { class: "meta" }, metaLine(b)),
-    el("div", { class: "dact" }, read, saveLink(b, { class: "btn" }, icon("download"), "Save")),
+    el("div", { class: "dact" }, read, ...(offline ? [offline.bookButton(b), saveLink(b, { class: "btn", "aria-label": "Save the file" }, icon("download"))]
+                                           : [saveLink(b, { class: "btn" }, icon("download"), "Save")])),
     b.description ? el("div", { class: "dtext" }, b.description)
                   : el("div", { class: "dtext none" }, "This book has no description."));
   const cover = el("a", { class: "dcover", href: readerUrl(b), title: "Read in the browser" }, coverArt(b));
@@ -769,18 +847,21 @@ function card(b) {
                    b.cover ? el("img", { src: b.cover, alt: "", loading: "lazy" }) : placeholder(b));
   cover.addEventListener("click", bookClick(b));
   const shelf = el("div", { class: "shelf" }, cover);
+  if (offline) shelf.append(el("button", { class: "where", type: "button",
+    on: e => { e.preventDefault(); e.stopPropagation(); offline.toggleBook(b); } }, icon("cloud"), icon("device")));
   const title = el("a", { class: "title", href: readerUrl(b), title: b.title }, b.title);
   title.addEventListener("click", bookClick(b));
   const actions = el("div", { class: "actions" },
     el("a", { class: "act go", href: readerUrl(b), title: "Read in the browser" }, icon("read"), "Read"),
     saveLink(b, { class: "act save", "aria-label": "Save as…" }, icon("download")));
-  return el("article", { class: "book", "data-key": b.href }, shelf,
+  return el("article", { class: "book" + (offline ? offline.marks(b) : ""), "data-key": b.href }, shelf,
     el("div", { class: "info" }, title, authorLinks(b),
       el("div", { class: "meta" }, metaLine(b)),
       b.error ? el("div", { class: "err" }, "⚠ " + b.error) : null, actions));
 }
 
 const sorters = {
+  opened: (a, b) => (openedAt[b.href] || 0) - (openedAt[a.href] || 0) || sorters.author(a, b),
   author: (a, b) => coll.compare(authorLine(a), authorLine(b)) || coll.compare(a.title, b.title),
   title:  (a, b) => coll.compare(a.title, b.title),
   added:  (a, b) => b.added - a.added,
@@ -790,6 +871,7 @@ const sorters = {
 function render() {
   $("searchBox").classList.toggle("filled", !!$("q").value);   // hides the "/" hint
   const words = norm($("q").value).split(/\s+/).filter(Boolean);
+  openedAt = openedTimes();
   const shown = books.filter(b => words.every(w => b._search.includes(w))).sort(sorters[$("sort").value]);
   $("count").textContent = shown.length === books.length
     ? `${books.length} books` : `${shown.length} of ${books.length} books`;
@@ -815,6 +897,264 @@ function render() {
   }
 }
 
+// ------------------------------------------------------------ Offline library (installed app)
+// The app keeps the catalog, the reader and the books in the site's own storage on the device
+// (Cache Storage; not the browser's HTTP cache, which it clears as it likes), so they open
+// without a connection; sw.js serves them from there. Here we decide what is kept: at start,
+// when the connection comes back and when the app comes to the front, .index/library.json is
+// compared with what is stored. Changed files are fetched again; books changed or removed in the
+// library are deleted from the device; with "All books" new ones are downloaded one by one.
+const offline = (() => {
+  if (!inApp || !("serviceWorker" in navigator) || !("caches" in window) || !isSecureContext ||
+      !/^https?:$/.test(location.protocol)) return null;
+  const SHELL = "epublib-shell", BOOKS = "epublib-books", STATE = "epubLibrary:offline";
+  const root = new URL(".", location.href);
+  const SYNC = { cache: "no-store", headers: { "x-lib-sync": "1" } };   // sw.js lets these through
+  // The same address however its letters are encoded (the same rule as in sw.js)
+  const canon = url => {
+    const u = new URL(url, root);
+    return u.origin + u.pathname.split("/").map(p => {
+      try { return encodeURIComponent(decodeURIComponent(p)); } catch { return p; }
+    }).join("/");
+  };
+  const bookUrl = b => b._url || (b._url = canon(b.href));
+  // mode: "all" | "opened"; shell: {url: hash}; books: {url: "size:mtime" of the stored copy};
+  // skip: {url: true} books removed by hand that "All books" leaves alone
+  const st = { mode: "all", shell: {}, books: {}, skip: {} };
+  try { Object.assign(st, JSON.parse(localStorage.getItem(STATE))); } catch {}
+  const keep = () => { try { localStorage.setItem(STATE, JSON.stringify(st)); } catch {} };
+  let onDevice = new Set(), online = true, busy = false, again = false, lastSync = 0;
+  let progress = null, noRoom = false;
+
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
+  async function scan() {
+    onDevice = new Set((await (await caches.open(BOOKS)).keys()).map(r => r.url));
+  }
+
+  function setOnline(v) { online = v; $("netNote").hidden = v; }
+
+  async function sync() {
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      let lib;
+      try {
+        const r = await fetch(canon(".index/library.json"), SYNC);
+        if (!r.ok) throw new Error(r.status);
+        lib = await r.json();
+      } catch { setOnline(false); return; }
+      setOnline(true);
+      lastSync = Date.now();
+      if (lib.build !== "__BUILD__") $("newNote").hidden = false;   // this page is an older copy
+      await syncShell(lib.shell);
+      await syncBooks(lib.books);
+    } finally {
+      busy = false; progress = null;
+      await scan().catch(() => {}); show();
+      if (again) { again = false; sync(); }
+    }
+  }
+
+  async function syncShell(list) {
+    const cache = await caches.open(SHELL);
+    const want = new Map(list.map(f => [canon(f.url), f.hash]));
+    for (const req of await cache.keys())
+      if (!want.has(req.url) && !req.url.endsWith("/")) await cache.delete(req);
+    const had = st.shell;
+    st.shell = {};
+    for (const [url, hash] of want) {
+      if (had[url] === hash && await cache.match(url)) { st.shell[url] = hash; continue; }
+      try {
+        const r = await fetch(url, SYNC);
+        if (r.ok) { await cache.put(url, r); st.shell[url] = hash; }
+      } catch { setOnline(false); break; }
+    }
+    keep();
+  }
+
+  async function syncBooks(list) {
+    const cache = await caches.open(BOOKS);
+    const want = new Map(list.map(b => [canon(b.href), b.size + ":" + b.mtime]));
+    // Removed from the library, or changed there: the copy on the device goes
+    for (const req of await cache.keys()) {
+      const stamp = want.get(req.url), had = st.books[req.url];
+      if (!stamp || (had && had !== stamp)) { await cache.delete(req); delete st.books[req.url]; }
+      else st.books[req.url] = stamp;    // stored by the reader since the last check
+    }
+    for (const url of Object.keys(st.books)) if (!want.has(url)) delete st.books[url];
+    keep();
+    await scan();
+    show();
+    if (st.mode !== "all") return;
+    for (const url of Object.keys(st.skip)) if (!want.has(url) || onDevice.has(url)) delete st.skip[url];
+    const missing = [...want].filter(([url]) => !onDevice.has(url) && !st.skip[url]);
+    noRoom = false;
+    progress = { done: 0, total: missing.length };
+    for (const [url, stamp] of missing) {
+      if (st.mode !== "all") break;
+      progress.url = url;
+      show();
+      try {
+        const r = await fetch(url, SYNC);
+        if (r.ok) {
+          await cache.put(url, r);
+          st.books[url] = stamp; keep();
+          onDevice.add(url);
+        }
+      } catch (e) {
+        if (e.name === "QuotaExceededError") noRoom = true; else setOnline(false);
+        break;
+      }
+      progress.done++;
+    }
+  }
+
+  function show() {
+    const here = books.filter(b => onDevice.has(bookUrl(b)));
+    $("offStat").textContent = `${here.length} of ${books.length} books · ` +
+      fmtSize(here.reduce((n, b) => n + b.size, 0));
+    $("offLabel").textContent = progress && progress.total
+      ? `${progress.done} / ${progress.total}` : `${here.length} / ${books.length}`;
+    $("offBtn").title = `Offline: books on this device ${here.length} of ${books.length}`;
+    $("offBtn").classList.toggle("busy", !!(progress && progress.total));
+    $("offBtn").classList.toggle("all", here.length === books.length);
+    $("offBarWrap").hidden = !(progress && progress.total);
+    if (progress && progress.total) $("offBar").style.width = (100 * progress.done / progress.total) + "%";
+    $("offInfo").textContent =
+      progress && progress.total ? "Downloading books… The app can be used meanwhile." :
+      !online ? "No connection to the library: changes will be checked when it is back." :
+      noRoom ? "The device has no room for more books." :
+      st.mode === "opened" ? "A book is kept after it is opened. Books removed or changed in the library are deleted here." :
+      here.length === books.length ? "All books are on this device. New ones are downloaded, removed ones deleted." : "";
+    for (const r of document.getElementsByName("offMode")) r.checked = r.value === st.mode;
+    $("offClear").hidden = !here.length;
+    pageButtons.forEach(b => b.isConnected ? b._label() : pageButtons.delete(b));
+    for (const c of document.querySelectorAll(".book[data-key]")) {
+      const b = byHref.get(c.dataset.key);
+      if (!b) continue;
+      const url = bookUrl(b);
+      c.classList.toggle("away", away(b));
+      c.classList.toggle("here", onDevice.has(url));
+      c.classList.toggle("busy", (!!progress && progress.url === url) || loading.has(url));
+      const mark = c.querySelector(".where");
+      if (mark) mark.title = mark.ariaLabel = onDevice.has(url) ? "On this device · tap to remove" : "Not on this device · tap to download";
+      c.querySelector(".cover").title = onDevice.has(url) ? "About the book · on this device"
+                                                          : "About the book · not on this device";
+    }
+  }
+
+  const byHref = new Map(books.map(b => [b.href, b]));
+  const away = b => !online && !onDevice.has(bookUrl(b));
+
+  // A book that is not here can't be read without the library: say so instead of a broken page
+  document.addEventListener("click", e => {
+    const a = e.target.closest("a[href*='#book=']");
+    if (!a || e.defaultPrevented) return;
+    const src = new URLSearchParams(new URL(a.href).hash.slice(1)).get("book") || "";
+    const b = byHref.get(src.replace(/^(\.\.\/)+/, ""));
+    if (b && away(b)) { e.preventDefault(); e.stopImmediatePropagation(); toast("This book is not on this device. Connect to the library to read it."); }
+  }, true);
+
+  for (const r of document.getElementsByName("offMode"))
+    r.addEventListener("change", () => { st.mode = r.value; st.skip = {}; keep(); show(); if (st.mode === "all") sync(); });
+  // All of them: also stops "All books", or they would come right back
+  $("offClear").addEventListener("click", async () => {
+    if (!confirm("Remove all books from this device?\nThey stay in the library. New books will not be downloaded by themselves any more.")) return;
+    st.mode = "opened";
+    await caches.delete(BOOKS);
+    st.books = {}; st.skip = {}; keep();
+    await scan(); show();
+  });
+  const panel = $("offPanel"), btn = $("offBtn");
+  const openPanel = on => {
+    if (on) panel.style.top = btn.getBoundingClientRect().bottom + 8 + "px";   // under the button, however the header wraps
+    panel.hidden = !on; btn.setAttribute("aria-expanded", on);
+  };
+  btn.addEventListener("click", () => openPanel(panel.hidden));
+  document.addEventListener("pointerdown", e => {
+    if (!panel.hidden && !panel.contains(e.target) && !btn.contains(e.target)) openPanel(false);
+  });
+  $("reloadLink").addEventListener("click", e => { e.preventDefault(); location.reload(); });
+  addEventListener("online", () => sync());
+  addEventListener("offline", () => { setOnline(false); show(); });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && Date.now() - lastSync > 30000) sync();
+  });
+  btn.hidden = false;
+  scan().then(show, () => {});
+  sync();
+  // One book: download it to the device, or remove it from there. With "All books" a book removed
+  // by hand is remembered (st.skip) and not downloaded again, until it is kept again or "All books"
+  // is chosen anew.
+  const loading = new Set();
+  async function keepBook(b) {
+    const url = bookUrl(b);
+    if (onDevice.has(url) || loading.has(url)) return;
+    loading.add(url); show();
+    try {
+      const r = await fetch(url, SYNC);
+      if (!r.ok) throw new Error(r.status + " " + r.statusText);
+      await (await caches.open(BOOKS)).put(url, r);
+      st.books[url] = b.size + ":" + b.added; delete st.skip[url]; onDevice.add(url);
+    } catch (e) {
+      toast(e.name === "QuotaExceededError" ? "The device has no room for this book."
+                                            : "Can't download the book: no connection to the library.");
+    } finally { loading.delete(url); keep(); show(); }
+  }
+  async function dropBook(b) {
+    const url = bookUrl(b);
+    await (await caches.open(BOOKS)).delete(url);
+    delete st.books[url]; onDevice.delete(url);
+    if (st.mode === "all") st.skip[url] = true;
+    keep(); show();
+  }
+  // The mark on the cover is a button too: the cloud downloads the book, the phone removes it
+  // (after asking). The cover itself still opens the book.
+  function toggleBook(b) {
+    if (loading.has(bookUrl(b))) return;
+    if (!onDevice.has(bookUrl(b))) return keepBook(b);
+    if (confirm(`Remove “${b.title}” from this device?\nIt stays in the library and can be downloaded again.`)) dropBook(b);
+  }
+
+  // The book page's button: the same, said in words
+  const pageButtons = new Set();
+  function bookButton(b) {
+    const url = bookUrl(b), btn = el("button", { class: "btn", type: "button" });
+    btn._label = () => {
+      const here = onDevice.has(url), busy = loading.has(url) || (progress && progress.url === url);
+      const [long, short] = busy ? ["Downloading…", "Downloading…"]
+        : here ? ["Remove from this device", "Remove"] : ["Keep on this device", "Download"];
+      btn.replaceChildren(icon(here ? "trash" : "cloud"), el("span", { class: "long" }, long), el("span", { class: "short" }, short));
+      btn.title = here ? "The book stays in the library" : "Download the book to read it without a connection";
+      btn.disabled = !!busy;
+    };
+    btn.addEventListener("click", () => onDevice.has(url) ? dropBook(b) : keepBook(b));
+    pageButtons.add(btn);
+    btn._label();
+    return btn;
+  }
+
+  const marks = b => (away(b) ? " away" : "") + (onDevice.has(bookUrl(b)) ? " here" : "");
+  return { away, marks, panel: openPanel, bookButton, toggleBook };
+})();
+
+let toastTimer = 0;
+function toast(text) {
+  $("toast").textContent = text;
+  $("toast").hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $("toast").hidden = true, 3500);
+}
+
+// Back from the reader in the app: the book just read moves to the front
+if (inApp) {
+  const fresh = () => { if (JSON.stringify(openedTimes()) !== JSON.stringify(openedAt) && $("sort").value === "opened") render(); };
+  addEventListener("pageshow", e => { if (e.persisted) fresh(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) fresh(); });
+}
+
 if (location.protocol === "file:") $("fileNote").hidden = false;
 $("q").addEventListener("input", render);
 $("sort").addEventListener("change", () => { save(); render(); });
@@ -823,6 +1163,7 @@ $("group").addEventListener("click", e => {
   save(); render();
 });
 document.addEventListener("keydown", e => {
+  if (offline && e.key === "Escape" && !$("offPanel").hidden) { offline.panel(false); return; }
   if (current) { if (e.key === "Escape") { e.preventDefault(); requestClose(); } return; }
   if (e.key === "/" && document.activeElement !== $("q")) { e.preventDefault(); $("q").focus(); }
   if (e.key === "Escape") { $("q").value = ""; render(); }
@@ -852,10 +1193,11 @@ addEventListener("beforeinstallprompt", e => e.preventDefault());
 """
 
 
-def build_page(books: list[dict], title: str) -> str:
+def build_page(books: list[dict], title: str, build: str) -> str:
     # JSON inside <script>: escape "<" so no "</script>" can break out
     data = json.dumps(books, ensure_ascii=False).replace("<", "\\u003c")
     return (PAGE.replace("__TITLE__", html.escape(title))
+                .replace("__BUILD__", build)
                 .replace("__DATE__", datetime.now().strftime("%Y-%m-%d %H:%M"))
                 .replace("__READER__", f"{INDEX_DIR}/{READER_DIR}/reader.html")
                 .replace("__DATA__", data))
@@ -878,7 +1220,8 @@ def install_reader(dest: Path) -> None:
         print(f"⚠️  Reader not found in {READER_SRC}: books will open as plain files")
         return
     dest.mkdir(parents=True, exist_ok=True)
-    names = {f.relative_to(READER_SRC) for f in READER_SRC.rglob("*") if f.is_file()}
+    names = {f.relative_to(READER_SRC) for f in READER_SRC.rglob("*")
+             if f.is_file() and f.name != "sw.js"}   # sw.js goes next to index.html
     for name in names:
         target = dest / name
         src = READER_SRC / name
@@ -915,6 +1258,29 @@ def write_manifest(index_dir: Path, title: str) -> None:
     }
     (index_dir / "manifest.webmanifest").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def write_library_list(root: Path, books: list[dict], build: str) -> None:
+    """.index/library.json: what an installed app keeps on the device. The catalog page compares it
+    with what it has: files with another hash are fetched again, books that changed (size, time)
+    or are gone are dropped, new ones downloaded."""
+    shell = [root / "index.html", root / INDEX_DIR / "manifest.webmanifest"]
+    shell += sorted(f for d in (READER_DIR, COVERS_DIR) for f in (root / INDEX_DIR / d).rglob("*")
+                    if f.is_file() and f.name != "sw.js")
+    library = {
+        "build": build,
+        "shell": [{"url": "/".join(urllib.parse.quote(p) for p in f.relative_to(root).parts),
+                   "hash": hashlib.sha1(f.read_bytes()).hexdigest()[:16]} for f in shell],
+        "books": [{"href": b["href"], "size": b["size"], "mtime": b["added"]} for b in books],
+    }
+    (root / INDEX_DIR / "library.json").write_text(json.dumps(library, ensure_ascii=False), encoding="utf-8")
+
+
+def install_service_worker(root: Path) -> None:
+    """sw.js next to index.html (a service worker only serves the folder it is in and below)."""
+    src = READER_SRC / "sw.js"
+    if src.is_file():
+        shutil.copy2(src, root / "sw.js")
 
 
 def install_launchers(root: Path) -> None:
@@ -976,9 +1342,12 @@ def build_index(folder: Path, title: str | None = None) -> int:
     install_reader(root / INDEX_DIR / READER_DIR)
     write_manifest(index_dir, title or DEFAULT_TITLE)
     install_launchers(root)
+    install_service_worker(root)
 
+    build = datetime.now().strftime("%Y%m%d%H%M%S%f")
     out = root / "index.html"
-    out.write_text(build_page(books, title or DEFAULT_TITLE), encoding="utf-8")
+    out.write_text(build_page(books, title or DEFAULT_TITLE, build), encoding="utf-8")
+    write_library_list(root, books, build)
 
     if errors:
         print(f"\n❌ Errors ({len(errors)}) — listed in the catalog without metadata:")

@@ -267,8 +267,52 @@ no address bar. The browser doesn't push it; it's in the browser's menu — Chro
   On a plain `http://192.168.…` address Chrome only offers a home-screen shortcut that opens in the
   browser; Safari on iPhone opens it full screen either way.
 - The app opens the library at the address it was installed from: keep the computer's address (and
-  port) the same, e.g. a fixed address for it in the router. The library server must be running.
+  port) the same, e.g. a fixed address for it in the router. The server is needed for the first start
+  and for updates; after that the app also works without it (below).
 - `make_index.py` writes the app description to `.index/manifest.webmanifest`, named after the library.
+- In the app the catalog is sorted by **Recently opened** by default: the book read last comes first,
+  then books not opened yet. The other orders are in the same menu. In a browser tab nothing changes.
+
+#### Offline: the library on the device
+
+The installed app (only the app, on https or `localhost`) keeps the library in its own storage on the
+device: the site's storage, not the browser's cache, so the browser doesn't clean it up by itself.
+Without a connection to the library the catalog and the reader open as usual, and so do the books
+that are on the device. The others are dimmed, and *Read* says the book isn't on the device.
+
+Each cover shows where the book is: a green phone — on this device, a cloud with an arrow — only in
+the library (it pulses while the book is being downloaded). The mark is a button:
+
+- tap the **cloud** to download the book (it is not opened);
+- tap the **phone** to remove the book from the device (after asking; it stays in the library);
+- tap the cover itself to open the book as usual. A book opened in the reader is kept on the device
+  by itself.
+
+The book's page has the same as a button: *Keep on this device* / *Remove from this device*.
+
+The **Offline** button in the header (a cloud with an arrow and `books here / all books`; green when
+the whole library is on the device, blue while downloading) opens the settings:
+
+- **All books** (default): the whole library is downloaded, one book after another, with progress
+  on the button and in the panel. The app can be used meanwhile. A book removed by hand is not
+  downloaded again (until it is kept again, or *All books* is chosen anew).
+- **Only books I open or keep**: only the books opened in the reader or downloaded by hand.
+- *Remove all books from this device* removes them all and switches to the second mode, so they
+  don't come back by themselves.
+
+The app checks the library when it starts, when it comes back to the screen and when the connection
+returns. `make_index.py` writes the list for this to `.index/library.json`, so run it after changing
+the books, as always:
+
+- a new book is downloaded (in *All books* mode);
+- a changed book (another size or date) is deleted from the device and downloaded again;
+- a book removed from the library is deleted from the device too;
+- an updated reader, cover or catalog page is fetched again. If the catalog on screen is older than
+  the library, a note offers to show the new one.
+
+The storage is the browser's site data for the library's address. Clearing it (e.g. *Clear data* in
+the site settings, or removing the app) removes the books too. The service worker `sw.js` next to
+`index.html` is written by `make_index.py`.
 
 ## fix_cover.py
 
