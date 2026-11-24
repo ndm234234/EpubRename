@@ -265,6 +265,28 @@
 "use strict";
 const $ = id => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
+
+// epub.js bug: when the manifest lists a file that is missing from the book, its blob URL fails
+// and is dropped from replacementUrls, so every later picture / font / stylesheet gets the
+// neighbour's blob (broken images). Keep the list aligned: a missing file keeps its own path.
+(() => {
+  const proto = ePub.Book && ePub.Book.prototype, orig = proto && proto.replacements;
+  if (!orig) return;
+  proto.replacements = function () {
+    const res = this.resources, own = res && res.replacements;
+    if (own && !res.alignedFix) {
+      res.alignedFix = true;
+      res.replacements = function () {
+        return own.call(res).then(all => {
+          if (Array.isArray(all) && all.length === res.urls.length)
+            res.replacementUrls = all.map((u, i) => typeof u === "string" ? u : res.urls[i]);
+          return all;
+        });
+      };
+    }
+    return orig.call(this);
+  };
+})();
 function icon(name) {   // <svg class="ic"><use href="#i-name"></svg> from the sprite at the top
   const svg = document.createElementNS(NS, "svg"), use = document.createElementNS(NS, "use");
   svg.setAttribute("class", "ic");

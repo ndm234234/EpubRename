@@ -66,35 +66,88 @@ def html_to_text(s: str) -> str:
     return s.strip()
 
 
-def find_cover(zf: zipfile.ZipFile, opf, opf_dir: str) -> bytes | None:
-    """Locate the cover image using EPUB 3, EPUB 2 and common-name conventions."""
-    manifest = opf.find("opf:manifest", NS)
-    if manifest is None:
-        return None
-    items = manifest.findall("opf:item", NS)
-    images = [i for i in items if i.get("media-type", "").startswith("image/")]
+IMG_TAG = re.compile(r"""<(?:\w+:)?(?:img|image)\b[^>]*?\s(?:src|(?:xlink:)?href)\s*=\s*["']([^"']+)["']""", re.I)
 
-    candidate = None
-    # EPUB 3: <item properties="cover-image">
-    candidate = next((i for i in images if "cover-image" in i.get("properties", "").split()), None)
-    # EPUB 2: <meta name="cover" content="item-id">
-    if candidate is None:
-        meta = next((m for m in opf.iter("{%s}meta" % NS["opf"]) if m.get("name") == "cover"), None)
-        if meta is not None:
-            candidate = next((i for i in images if i.get("id") == meta.get("content")), None)
-    # Fallback: an image whose id or file name contains "cover"
-    if candidate is None:
-        candidate = next((i for i in images
-                          if "cover" in (i.get("id", "") + i.get("href", "")).lower()), None)
-    if candidate is None:
-        return None
 
-    href = urllib.parse.unquote(candidate.get("href", ""))
-    path = posixpath.normpath(posixpath.join(opf_dir, href)) if opf_dir else href
+def zip_path(base_dir: str, href: str) -> str:
+    """Path inside the zip of an href written in a file that lives in base_dir."""
+    href = urllib.parse.unquote(href.split("#")[0])
+    return posixpath.normpath(posixpath.join(base_dir, href)) if base_dir else posixpath.normpath(href)
+
+
+def first_image_in_page(zf: zipfile.ZipFile, page_path: str) -> str | None:
+    """Zip path of the first picture shown on an (X)HTML page that exists in the zip."""
     try:
-        return zf.read(path)
+        text = zf.read(page_path).decode("utf-8", "replace")
     except KeyError:
         return None
+    names = set(zf.namelist())
+    for m in IMG_TAG.finditer(text):
+        path = zip_path(posixpath.dirname(page_path), m.group(1))
+        if path in names:
+            return path
+    return None
+
+
+def locate_cover(zf: zipfile.ZipFile, opf, opf_dir: str) -> tuple[str | None, str]:
+    """Find the cover picture the way readers do. Returns (zip path, how it was found).
+
+    "declared" means the book itself marks it as the cover (EPUB 3 cover-image or
+    EPUB 2 <meta name="cover">); other ways are guesses that work for books whose
+    cover is not marked: the guide's cover page, a file named "cover", or the
+    picture on the first page. Marks pointing to files missing from the zip are skipped.
+    """
+    names = set(zf.namelist())
+    manifest = opf.find("opf:manifest", NS)
+    items = manifest.findall("opf:item", NS) if manifest is not None else []
+    by_id = {i.get("id"): i for i in items}
+    is_image = lambda i: i.get("media-type", "").startswith("image/")
+    is_page = lambda i: "html" in i.get("media-type", "")
+
+    def item_image(item):
+        """The picture an item stands for: the image itself, or the first one on a page."""
+        if item is None:
+            return None
+        path = zip_path(opf_dir, item.get("href", ""))
+        if is_image(item):
+            return path if path in names else None
+        return first_image_in_page(zf, path) if is_page(item) else None
+
+    # EPUB 3: <item properties="cover-image">
+    for i in items:
+        if "cover-image" in i.get("properties", "").split() and (path := item_image(i)):
+            return path, "declared"
+    # EPUB 2: <meta name="cover" content="item-id">
+    for m in opf.iter("{%s}meta" % NS["opf"]):
+        if m.get("name") == "cover" and (path := item_image(by_id.get(m.get("content")))):
+            return path, "declared"
+    # EPUB 2 guide: <reference type="cover" href="cover.xhtml or cover.jpg">
+    for r in opf.iter("{%s}reference" % NS["opf"]):
+        if r.get("type", "").lower() in ("cover", "coverimage"):
+            path = zip_path(opf_dir, r.get("href", ""))
+            if path in names:
+                found = path if re.search(r"\.(jpe?g|png|gif|webp)$", path, re.I) else first_image_in_page(zf, path)
+                if found:
+                    return found, "guide"
+    # An image whose id or file name says "cover"
+    for i in items:
+        if is_image(i) and "cover" in (i.get("id", "") + i.get("href", "")).lower() and (path := item_image(i)):
+            return path, "named"
+    # The picture on the first page of the book (converted books often have only this)
+    spine = opf.find("opf:spine", NS)
+    if spine is not None:
+        for ref in spine.findall("opf:itemref", NS):
+            if ref.get("linear", "yes") != "no":
+                if path := item_image(by_id.get(ref.get("idref"))):
+                    return path, "first page"
+                break
+    return None, ""
+
+
+def find_cover(zf: zipfile.ZipFile, opf, opf_dir: str) -> bytes | None:
+    """Bytes of the cover picture, or None if the book has none."""
+    path, _ = locate_cover(zf, opf, opf_dir)
+    return zf.read(path) if path else None
 
 
 def save_cover(raw: bytes | None, covers_dir: Path, used: set[str]) -> str:
@@ -113,7 +166,13 @@ def save_cover(raw: bytes | None, covers_dir: Path, used: set[str]) -> str:
             try:
                 img = Image.open(io.BytesIO(raw))
                 img.thumbnail(THUMB_SIZE)
-                if img.mode not in ("RGB", "L"):
+                if img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info:
+                    # Transparent PNG (some covers are dark text on a transparent page):
+                    # put it on white, a plain convert would show garbage in the clear parts
+                    rgba = img.convert("RGBA")
+                    img = Image.new("RGB", rgba.size, "white")
+                    img.paste(rgba, mask=rgba.getchannel("A"))
+                elif img.mode not in ("RGB", "L"):
                     img = img.convert("RGB")
                 img.save(target, "JPEG", quality=THUMB_QUALITY, optimize=True)
             except Exception:

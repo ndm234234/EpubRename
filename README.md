@@ -1,15 +1,18 @@
 # epub-rename
 
-Two small Python scripts to tidy up an EPUB collection:
+Small Python scripts to tidy up an EPUB collection:
 
 - **`epub_rename.py`** — copies books from `In/` into `Out/<Author>/<Author> - <Title>.epub`,
   using the author and title stored inside each book, and verifies every copy.
 - **`make_index.py`** — builds `index.html`, an offline catalog of a book folder
   with covers, search, sorting and a built-in reader. It runs automatically at the end of `epub_rename.py`
   and can also be used on its own for any folder.
+- **`fix_cover.py`** — makes sure every book has a cover that readers and catalogs can find:
+  marks the cover picture when the book doesn't, or draws one from the title and author,
+  and removes references to files the book doesn't contain. Asks before changing each book.
 
 No dependencies besides Python. [Pillow](https://pypi.org/project/pillow/) is optional
-(used to shrink covers for the catalog).
+(used to shrink covers for the catalog, and by `fix_cover.py` to draw missing covers).
 
 ## Quick start
 
@@ -126,6 +129,10 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
 ### Catalog features
 
 - Cover grid; books without a cover get a generated placeholder.
+  The cover is found the way readers find it: the book's cover mark (EPUB 3 `cover-image`,
+  EPUB 2 `<meta name="cover">`), the guide's cover page, a picture named "cover", or the
+  picture on the first page (many converted books have only that). Marks that point to
+  files missing from the book are skipped. Transparent PNG covers are put on white.
 - Title, authors, series, year, publisher, file size; description opens with **About**.
 - Follows the system light / dark theme.
 - Instant search across title, authors, series, description and file path
@@ -184,6 +191,45 @@ The launcher starts a tiny web server on this computer only (`localhost:48765`; 
 program uses that port, the next free one up to 48784) and opens the catalog in the browser. Close the window (or `Ctrl+C`) to stop it; the Linux one
 also stops after 3 hours without use. Running it again while it works just opens the browser.
 Reading places are stored per address, so keep using the launcher to keep them.
+
+## fix_cover.py
+
+```bash
+python3 fix_cover.py [PATH ...] [--dry-run] [--yes] [--no-generate]   # default PATH: Out
+```
+
+Some books have a cover but don't say so: it's only shown on the first page, the cover
+mark points to a file that is not in the book, or the mark uses the file name instead of
+the manifest id. Readers and libraries then show no cover. Some books also list files
+they don't contain, which makes readers show broken pictures or skip to empty pages.
+For each book the script:
+
+- ✅ the cover is properly marked and every listed file is there — the file is not touched;
+- 🔧 a cover picture is there but not marked — adds the mark (`<meta name="cover">`, and
+  `properties="cover-image"` for EPUB 3);
+- 🎨 there is no cover picture at all — draws one (title and author on a coloured
+  background, like the catalog placeholders) and adds it to the book. Needs Pillow;
+  `--no-generate` skips these books;
+- 🧹 the book lists files it doesn't have — removes them from the manifest, the reading
+  order and the guide. A missing page can't be brought back; the script says so.
+
+**The `.epub` files are changed in place**, so the script asks before each book:
+
+```
+🧹 Oskar Brandt - The Salt Road.epub
+     • the book lists files it doesn't have: OEBPS/cover.jpg, OEBPS/UusgmGFo.html → remove them from the manifest and the reading order
+     ⚠️  1 page(s) are missing from the book itself: their text can't be restored
+   Fix it? The .epub file will be changed. [y]es / [a]ll (yes, don't ask again) / [n]o / [c]ancel:
+```
+
+`y` fixes the book, `a` fixes it and all the next books without asking again, `n` leaves it as it is, `c` (or `Ctrl+C`) stops and leaves the remaining
+books untouched. `--yes` fixes all books without asking (needed when the input is not a
+terminal), `--dry-run` only prints what would be done.
+
+Only the package file (OPF) is edited, as text, so everything else in the book stays
+byte for byte; the fixed file is checked (opens, nothing lost, every listed file present,
+cover found) before it replaces the old one, and keeps the old file's date. Running it
+again changes nothing. Run `make_index.py` afterwards to see the covers in the catalog.
 
 ## Notes and limitations
 
