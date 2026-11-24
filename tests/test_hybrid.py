@@ -50,8 +50,9 @@ def make_pdf(path: Path, pages=SENTENCES, y=700) -> Path:
 class FakeEngine:
     """Stands in for run_marker: records calls, can fail or be interrupted."""
 
-    def __init__(self, fail_accurate=(), interrupt_on=None):
+    def __init__(self, fail_accurate=(), interrupt_on=None, fail_fast=(), loop_accurate=()):
         self.calls, self.fail_accurate, self.interrupt_on = [], set(fail_accurate), interrupt_on
+        self.fail_fast, self.loop_accurate = set(fail_fast), set(loop_accurate)
 
     def __call__(self, engine, pdf, mode, pages, out_dir):
         self.calls.append((mode, list(pages)))
@@ -61,6 +62,11 @@ class FakeEngine:
                 raise KeyboardInterrupt
             if set(pages) & self.fail_accurate:
                 raise MarkerError("boom")
+        elif set(pages) & self.fail_fast:
+            raise MarkerError("boom")
+        if mode == "accurate" and set(pages) & self.loop_accurate:
+            return {i: f"<h1>Глава {i + 1}</h1><p>{SENTENCES[i]}</p><p>" + " ".join(["и так далее"] * 40) + "</p>"
+                    for i in pages}
         tag = "<b>Внимание.</b> " if mode == "accurate" else ""
         return {i: f"<h1>Глава {i + 1}</h1><p>{tag}{SENTENCES[i]}</p>" for i in pages}
 
@@ -116,6 +122,53 @@ class HybridTest(unittest.TestCase):
         self.assertEqual(report["pages"]["1"]["source"], "fast")
         self.assertEqual(report["pages"]["2"]["source"], "accurate")
         check_epub(self.out)
+
+    def test_fast_failure_split_in_halves(self):
+        fake = FakeEngine(fail_fast={1})
+        self.convert(fake, keep_work=True)
+        fast_calls = [p for m, p in fake.calls if m == "fast"]
+        self.assertEqual(fast_calls, [[0, 1, 2], [0], [1, 2], [1], [2]])
+        self.assertTrue((self.work() / "fast" / "page-0003.html").read_text().strip())
+        self.assertFalse((self.work() / "fast" / "page-0002.html").exists(), "a failure is not cached")
+
+    def test_accurate_keeps_failing_stops_the_book(self):
+        with mock.patch.object(hy, "ACC_BATCH", 1), mock.patch.object(hy, "FAIL_LIMIT", 2):
+            with self.assertRaises(RuntimeError) as err:
+                self.convert(FakeEngine(fail_accurate={0, 1, 2}))
+        self.assertIn("again", str(err.exception))
+        self.assertFalse(self.out.exists())
+        self.assertEqual(list((self.work() / "merged").iterdir()), [], "pages are not cached as fast-only")
+
+    def test_loop_after_retry_uses_fast(self):
+        self.convert(FakeEngine(loop_accurate={1}), keep_work=True)
+        report = json.loads((self.work() / "report.json").read_text())
+        self.assertEqual(report["pages"]["2"]["source"], "fast")
+        self.assertNotIn("и так далее и так далее", (self.work() / "merged" / "page-0002.html").read_text())
+
+    def test_other_pdf_same_name_starts_over(self):
+        with mock.patch.object(hy, "ACC_BATCH", 1):
+            with self.assertRaises(KeyboardInterrupt):
+                self.convert(FakeEngine(interrupt_on=2))
+        make_pdf(self.pdf, y=500)                   # another file under the same name
+        second = FakeEngine()
+        self.convert(second)
+        self.assertEqual(second.accurate_pages(), [0, 1, 2])
+
+    def test_empty_page_without_report_is_redone(self):
+        self.convert(FakeEngine(), keep_work=True)
+        report = json.loads((self.work() / "report.json").read_text())
+        del report["pages"]["2"]
+        (self.work() / "report.json").write_text(json.dumps(report))
+        (self.work() / "merged" / "page-0002.html").write_text("")
+        self.out.unlink()
+        second = FakeEngine()
+        self.convert(second, keep_work=True)
+        self.assertEqual(second.accurate_pages(), [], "rebuilt from the cached accurate reading")
+        self.assertIn(SENTENCES[1], (self.work() / "merged" / "page-0002.html").read_text())
+
+    def test_summary_names_pages_to_check(self):
+        summary = self.convert(FakeEngine(fail_accurate={0}))
+        self.assertIn("check: 1 (fast)", summary)
 
     def test_work_folder_removed(self):
         self.convert(FakeEngine())

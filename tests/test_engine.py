@@ -167,6 +167,13 @@ class MarkerRunTest(unittest.TestCase):
         self.assertEqual(Path(img).parent, self.dir / "work" / "images")
         self.assertTrue(Path(img).name.startswith("accurate-"), "fast and accurate pictures must not mix")
 
+    def test_run_marker_timeout(self):
+        def runner(args, **kw):
+            self.assertGreater(kw.get("timeout") or 0, 0)
+            raise subprocess.TimeoutExpired(args, kw["timeout"])
+        with self.assertRaises(eng.MarkerError):
+            eng.run_marker(self.engine, self.pdf, "accurate", [0], self.dir / "work", runner=runner)
+
     def test_run_marker_error(self):
         runner, _ = self.fake_marker(code=1)
         with self.assertRaises(eng.MarkerError):

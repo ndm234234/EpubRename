@@ -4,6 +4,7 @@ Everything a page needs is cached in a work folder next to the output, so a run 
 is stopped (Ctrl+C, power off) goes on from the first unfinished page next time.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -20,12 +21,17 @@ from pdf2epub_html import fix_drop_cap, join_pages, merge_heading_runs, page_blo
 from pdf2epub_merge import merge_page, needs_retry
 
 ACC_BATCH = 4          # pages per accurate run (the model is loaded once per run)
+FAIL_LIMIT = 8         # accurate failing on this many pages in a row: something is broken, stop the book
+CHECK_COVERAGE = 0.9   # pages checked less well than this are named in the summary
 
 
 def _write(path: Path, text: str) -> None:
     """Write so that a file is either complete or absent (never half-written)."""
     part = path.with_name(path.name + ".part")
-    part.write_text(text, encoding="utf-8")
+    with part.open("w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(part, path)
 
 
@@ -62,6 +68,25 @@ def place_tocs(blocks: list[Block], layer_tocs: list) -> list:
                                Block("toc", level=i, page=toc.pages[0])]
         blocks[:] = kept
     return layer_tocs
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def to_check(report: dict) -> list[str]:
+    """Pages worth a look: not from the accurate reading, or checked less well."""
+    out = []
+    for n, p in sorted(report["pages"].items(), key=lambda x: int(x[0])):
+        if p["source"] not in ("accurate", "spliced"):
+            out.append(f"{n} ({p['source']})")
+        elif p.get("coverage", 1) < CHECK_COVERAGE:
+            out.append(f"{n} ({p['coverage']:.0%})")
+    return out
 
 
 def _escape(text: str) -> str:
@@ -115,68 +140,98 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
     acc_file = lambda n: work / "acc" / f"page-{n:04d}.html"
     merged_file = lambda n: work / "merged" / f"page-{n:04d}.html"
     report_path = work / "report.json"
+
+    # the cache belongs to one PDF: another file under the same name starts over
+    stamp = {"sha256": _sha256(pdf), "pages": len(numbers)}
+    stamp_path = work / "source.json"
+    if stamp_path.exists() and json.loads(stamp_path.read_text()) != stamp:
+        log("another PDF under the same name: starting over")
+        for sub in ("fast", "acc", "merged", "images"):
+            shutil.rmtree(work / sub, ignore_errors=True)
+            (work / sub).mkdir()
+        report_path.unlink(missing_ok=True)
+    _write(stamp_path, json.dumps(stamp))
     report = json.loads(report_path.read_text()) if report_path.exists() else {"pages": {}}
 
-    def recognise(mode: str, wanted: list[int]) -> dict[int, str]:
-        """{page number: html}; a failing batch is retried page by page, a failing page gives ''."""
+    def recognise(mode: str, wanted: list[int], keep) -> None:
+        """keep(page number, html) for every page recognised; a failing run is tried again in
+        halves, so one bad page costs a few runs, and a page that fails alone is left out."""
         try:
             got = run(engine, pdf, mode, [n - 1 for n in wanted], work)
-            return {n: got.get(n - 1, "") for n in wanted}
         except MarkerError as e:
-            log(f"{mode} batch {wanted} failed: {e}")
-            if len(wanted) == 1:
-                return {wanted[0]: ""}
-            result = {}
-            for n in wanted:
-                result.update(recognise(mode, [n]))
-            return result
+            log(f"{mode} {wanted[0]}-{wanted[-1]} failed: {e}")
+            if len(wanted) > 1:
+                half = len(wanted) // 2
+                recognise(mode, wanted[:half], keep)
+                recognise(mode, wanted[half:], keep)
+            return
+        for n in wanted:
+            keep(n, got.get(n - 1, ""))
+
+    def done(n: int) -> bool:
+        return merged_file(n).exists() and str(n) in report["pages"]
 
     try:
         # 1. fast for the whole book (minutes), cached per page
         missing = [n for n in numbers if not fast_file(n).exists()]
         if missing:
             progress(f"⚡ fast recognition of {len(missing)} page(s)…")
-            for n, page_html in recognise("fast", missing).items():
-                _write(fast_file(n), page_html)
+            recognise("fast", missing, lambda n, h: _write(fast_file(n), h))
 
         # 2. accurate page by page (hours), checked against fast and the text layer
-        todo = [n for n in numbers if not merged_file(n).exists()]
+        todo = [n for n in numbers if not done(n)]
         started, done_now, recognised = time.time(), 0, 0
+        failing: list[int] = []                    # pages in a row accurate failed on
         for i in range(0, len(todo), ACC_BATCH):
             batch = todo[i:i + ACC_BATCH]
             need = [n for n in batch if not acc_file(n).exists()]
             if need:
-                for n, page_html in recognise("accurate", need).items():
-                    _write(acc_file(n), page_html)
+                recognise("accurate", need, lambda n, h: _write(acc_file(n), h))
                 recognised += len(need)
             for n in batch:
-                fast_html = fast_file(n).read_text(encoding="utf-8")
-                acc_html = acc_file(n).read_text(encoding="utf-8")
+                fast_html = fast_file(n).read_text(encoding="utf-8") if fast_file(n).exists() else ""
+                acc_html = acc_file(n).read_text(encoding="utf-8") if acc_file(n).exists() else None
+                if acc_html is None:
+                    failing.append(n)
+                    if len(failing) >= FAIL_LIMIT:
+                        for k in failing:
+                            merged_file(k).unlink(missing_ok=True)
+                            report["pages"].pop(str(k), None)
+                        _write(report_path, json.dumps(report, ensure_ascii=False, indent=1))
+                        raise RuntimeError(f"accurate recognition failed on {len(failing)} pages in a row "
+                                           f"(see {work / 'log.txt'}); the work so far is kept: run it again")
+                else:
+                    failing = []
                 page = pages[numbers.index(n)]
                 digital = bool(page.lines) and not scanned(page)
-                retried = False
-                if acc_html.strip():
+                retried, info = False, {}
+                if acc_html and acc_html.strip():
                     result = merge_page(acc_html, fast_html, layer[n], digital)
                     if needs_retry(result):
                         retried = True
-                        again = recognise("accurate", [n])[n]
-                        if again.strip():
-                            second = merge_page(again, fast_html, layer[n], digital)
-                            if second.coverage >= result.coverage:
+                        again: dict[int, str] = {}
+                        recognise("accurate", [n], again.__setitem__)
+                        if again.get(n, "").strip():
+                            second = merge_page(again[n], fast_html, layer[n], digital)
+                            if (second.looped, -second.coverage, second.extra_run) < \
+                                    (result.looped, -result.coverage, result.extra_run):
                                 result = second
                     merged, source = result.html, result.source
                     info = {"fixed_words": result.fixed_words, "inserted_blocks": result.inserted_blocks,
                             "coverage": round(result.coverage, 3)}
+                    if result.looped and fast_html.strip():
+                        merged, source, info["reason"] = fast_html, "fast", "accurate repeated itself"
                 elif fast_html.strip():
-                    merged, source, info = fast_html, "fast", {}
+                    merged, source = fast_html, "fast"
+                    info["reason"] = "accurate failed" if acc_html is None else "accurate found nothing"
                 elif layer[n].strip():
-                    merged, source, info = f"<p>{_escape(layer[n])}</p>", "layer", {}
+                    merged, source = f"<p>{_escape(layer[n])}</p>", "layer"
                 else:
-                    merged, source, info = "", "empty", {}
+                    merged, source = "", "empty"
                 if not merged.strip() and pictures.get(n):
                     picture = base.render_page(pdf, n, work / "images" / f"page-{n:04d}", base.PAGE_IMAGE_HEIGHT)
                     if picture:
-                        merged, source = f'<p><img src="{picture}" alt="page {n}"/></p>', "picture"
+                        merged, source = f'<p><img src="{_escape(str(picture))}" alt="page {n}"/></p>', "picture"
                 report["pages"][str(n)] = {"source": source, "retried": retried, **info}
                 _write(report_path, json.dumps(report, ensure_ascii=False, indent=1))
                 _write(merged_file(n), merged)
@@ -210,6 +265,9 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
             base.anchor_tocs(blocks, tocs, base.page_offset(pages, tocs, blocks))
             if sum(1 for e in main.entries if e.anchor) < 0.5 * len(main.entries):
                 main = None
+        for b in blocks:
+            if b.kind == "img" and not Path(b.src).is_absolute():
+                b.src = str(work / "images" / b.src)
         img_names: dict[str, str] = {}
         for b in blocks:
             if b.kind == "img" and b.src not in img_names and Path(b.src).is_file():
@@ -228,6 +286,8 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
     fixed = sum(p.get("fixed_words", 0) for p in report["pages"].values())
     words = sum(len(b.text.split()) for b in blocks if b.kind in ("p", "list"))
     parts = ", ".join(f"{k} {v}" for k, v in sorted(sources.items()))
-    return (f"{len(chapters)} chapter(s), {words} words; pages: {parts}; {fixed} word(s) corrected — «{title}»"
+    check = to_check(report)
+    return (f"{len(chapters)} chapter(s), {words} words; pages: {parts}; {fixed} word(s) corrected"
+            + (f"; check: {', '.join(check)}" if check else "") + f" — «{title}»"
             + (f", {author}" if author else ""))
 

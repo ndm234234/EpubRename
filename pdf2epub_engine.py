@@ -132,6 +132,10 @@ def ensure_engine(log: Callable[[str], None], root: Path = ENGINE_DIR,
 
 # ---------------------------------------------------------------- running Marker
 
+TIMEOUT_START = 1800    # s: loading (on the first run also downloading) the models
+TIMEOUT_PAGE = 600      # s per page; accurate normally needs about 120
+
+
 class MarkerError(Exception):
     """Marker failed or produced nothing."""
 
@@ -166,7 +170,11 @@ def run_marker(engine: Engine, pdf: Path, mode: str, pages: list[int], out_dir: 
                 "--paginate_output", "--output_format", "html",
                 "--page_range", ",".join(str(p) for p in pages), "--output_dir", tmp]
         env = dict(os.environ, LLAMA_CPP_BINARY=str(engine.llama_server))
-        res = runner([str(a) for a in args], env=env, capture_output=True, check=False)
+        try:
+            res = runner([str(a) for a in args], env=env, capture_output=True, check=False,
+                         timeout=TIMEOUT_START + TIMEOUT_PAGE * len(pages))
+        except subprocess.TimeoutExpired:
+            raise MarkerError(f"Marker {mode} took too long on pages {pages}") from None
         found = sorted(tmp.glob("*/*.html"))
         if res.returncode != 0 or not found:
             tail = (res.stderr or b"").decode(errors="replace").strip().splitlines()[-3:]
