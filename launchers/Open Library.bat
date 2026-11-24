@@ -14,7 +14,7 @@ $root = [IO.Path]::GetFullPath($env:LIB_ROOT)
 $types = @{ '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8';
             '.css' = 'text/css'; '.json' = 'application/json'; '.jpg' = 'image/jpeg';
             '.jpeg' = 'image/jpeg'; '.png' = 'image/png'; '.gif' = 'image/gif';
-            '.epub' = 'application/epub+zip'; '.woff2' = 'font/woff2' }
+            '.epub' = 'application/epub+zip'; '.woff2' = 'font/woff2'; '.svg' = 'image/svg+xml' }
 
 function Send($res, [byte[]]$bytes, $type) {
   $res.ContentType = $type

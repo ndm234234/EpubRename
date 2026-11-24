@@ -278,6 +278,8 @@ PAGE = r"""<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
+<link rel="icon" href=".index/reader/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href=".index/reader/icon.png">
 <style>
   :root {
     --bg: #f7f7f5; --surface: #ffffff; --surface-2: #efeeeb; --text: #18181b; --muted: #6b6b74;
