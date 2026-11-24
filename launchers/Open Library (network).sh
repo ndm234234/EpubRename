@@ -7,11 +7,92 @@
 # 3 hours without use. Needs python3 (installed on most Linux systems).
 cd "$(dirname "$0")" || exit 1
 exec python3 - "$PWD" <<'PY'
-import functools, http.server, ipaddress, socket, subprocess, sys, threading, time, urllib.request, webbrowser
+import functools, http.server, ipaddress, posixpath, socket, subprocess, sys, threading, time, urllib.parse, urllib.request, webbrowser
 
 ROOT, IDLE_HOURS = sys.argv[1], 3
 PORTS = range(48865, 48885)   # own range, so this and the computer-only launcher can run together
 last_use = time.time()
+
+# ---- who is using the library: shown in this window
+# The catalog and the reader send a small "still here" every minute and "bye" when the page
+# closes; a device that sends nothing for SILENT seconds is shown as gone.
+SILENT, BYE_GRACE = 180, 10   # going from the catalog to a book closes one page and opens another
+devices, refused, lock = {}, set(), threading.Lock()
+
+def say(line):
+    print(f"  {time.strftime('%H:%M:%S')}  {line}", flush=True)
+
+def device_kind(ua):
+    ua = ua or ""
+    system = ("iPhone" if "iPhone" in ua else "iPad" if "iPad" in ua else "Android" if "Android" in ua else
+              "Windows" if "Windows" in ua else "Mac" if "Macintosh" in ua else "Linux" if "Linux" in ua else "")
+    browser = ("Edge" if "Edg" in ua else "Yandex" if "YaBrowser" in ua else "Opera" if "OPR/" in ua else
+               "Firefox" if "Firefox" in ua or "FxiOS" in ua else "Chrome" if "Chrome" in ua or "CriOS" in ua else
+               "Safari" if "Safari" in ua else "")
+    return " · ".join(x for x in (system, browser) if x) or "unknown browser"
+
+def host_name(ip):
+    """The device's name in the home network, if the router knows it (waits at most 0.7 s)."""
+    found = []
+    def look():
+        try:
+            found.append(socket.gethostbyaddr(ip)[0])
+        except OSError:
+            pass
+    t = threading.Thread(target=look, daemon=True)
+    t.start()
+    t.join(0.7)
+    return found[0] if found and found[0] != ip else ""
+
+def plain_ip(addr):
+    return addr[7:] if addr.startswith("::ffff:") else addr
+
+def minutes(sec):
+    return f"{round(sec / 60)} min" if sec >= 90 else f"{round(sec)} s"
+
+def seen(ip, ua, path):
+    """Note a request; print new devices and opened books."""
+    kind, now = device_kind(ua), time.time()
+    key = (ip, kind)
+    with lock:
+        d = devices.get(key)
+        new = d is None
+        if new:
+            d = devices[key] = {"first": now, "label": f"{ip} · {kind}", "book": "", "bye": 0}
+        d["last"] = now
+        d["bye"] = 0
+        count = len(devices)
+    if new:
+        name = "this computer" if ip in ("127.0.0.1", "::1") else host_name(ip)
+        d["label"] = f"{ip}{f' ({name})' if name else ''} · {kind}"
+        say(f"+ {d['label']} — connected    [devices: {count}]")
+    if path.lower().endswith(".epub"):
+        d["book"] = posixpath.basename(path)[:-5]
+        say(f"📖 {d['label']} — «{d['book']}»")
+
+def bye(ip, ua):
+    with lock:
+        d = devices.get((ip, device_kind(ua)))
+        if d:
+            d["bye"] = time.time()
+
+def watch_devices():
+    while True:
+        time.sleep(2)
+        now, gone = time.time(), []
+        with lock:
+            for key, d in list(devices.items()):
+                if d["bye"] and now - d["bye"] > BYE_GRACE and d["last"] <= d["bye"]:
+                    why = "closed the page"
+                elif now - d["last"] > SILENT:
+                    why = f"no signal for {minutes(SILENT)} (screen off, app in the background or out of Wi-Fi)"
+                else:
+                    continue
+                del devices[key]
+                gone.append((d, why, len(devices)))
+        for d, why, count in gone:
+            book = f", was reading «{d['book']}»" if d["book"] else ""
+            say(f"− {d['label']} — {why}; was here {minutes(d['last'] - d['first'])}{book}    [devices: {count}]")
 
 def is_home(addr):
     """This computer or a home-network address; nothing from the internet."""
@@ -28,6 +109,13 @@ def is_home(addr):
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
+        path = urllib.parse.unquote(self.path.split("?")[0])
+        if path != "/__library_root":
+            seen(plain_ip(self.client_address[0]), self.headers.get("User-Agent"), path)
+        if path == "/__alive":                # "still here" from the catalog / reader
+            self.send_response(204)
+            self.end_headers()
+            return
         if self.path == "/__library_root":   # lets a launcher recognise this library
             body = ROOT.encode()
             self.send_response(200)
@@ -41,9 +129,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def list_directory(self, path):          # no folder listings on the network
         self.send_error(404)
 
+    def do_POST(self):
+        if self.path.split("?")[0] == "/__bye":   # the page is closing
+            bye(plain_ip(self.client_address[0]), self.headers.get("User-Agent"))
+            self.send_response(204)
+            self.end_headers()
+        else:
+            self.send_error(405)
+
     def do_PUT(self):
         self.send_error(405)
-    do_POST = do_DELETE = do_PUT
+    do_DELETE = do_PUT
 
     def log_message(self, *args):
         global last_use
@@ -60,7 +156,13 @@ class Server(http.server.ThreadingHTTPServer):
         super().server_bind()
 
     def verify_request(self, request, client_address):
-        return is_home(client_address[0])
+        if is_home(client_address[0]):
+            return True
+        ip = plain_ip(client_address[0])
+        if ip not in refused:   # say it once per address
+            refused.add(ip)
+            say(f"⛔ refused {ip} — not a home-network address")
+        return False
 
 def is_this_library(port):
     try:
@@ -120,7 +222,9 @@ print(f"\n  On this computer:  http://localhost:{port}/\n  Folder:            {R
 print("  The phone can't connect? Check that a firewall (ufw, firewalld) allows port", port)
 print("  Anyone on this Wi-Fi who knows the address can open the library (read only).")
 print("  Press Ctrl+C or close this window to stop.", flush=True)
+print("\n  Devices using the library:", flush=True)
 threading.Thread(target=stop_when_idle, daemon=True).start()
+threading.Thread(target=watch_devices, daemon=True).start()
 threading.Timer(0.3, webbrowser.open, [f"http://localhost:{port}/index.html"]).start()
 try:
     server.serve_forever()

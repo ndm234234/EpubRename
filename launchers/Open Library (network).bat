@@ -30,6 +30,75 @@ function IsHomeAddress([Net.IPAddress]$ip) {
   return $ip.IsIPv6LinkLocal -or (($b[0] -band 0xfe) -eq 0xfc)
 }
 
+# ---- who is using the library: shown in this window
+# The catalog and the reader send a small "still here" every minute and "bye" when the page
+# closes; a device that sends nothing for $silent seconds is shown as gone.
+$silent = 180; $byeGrace = 10   # going from the catalog to a book closes one page and opens another
+$devices = @{}; $refused = @{}
+
+function Say($line) { Write-Host ("  " + (Get-Date -Format 'HH:mm:ss') + "  " + $line) }
+
+function DeviceKind($ua) {
+  if (-not $ua) { $ua = '' }
+  $system = if ($ua -match 'iPhone') { 'iPhone' } elseif ($ua -match 'iPad') { 'iPad' } elseif ($ua -match 'Android') { 'Android' } `
+            elseif ($ua -match 'Windows') { 'Windows' } elseif ($ua -match 'Macintosh') { 'Mac' } elseif ($ua -match 'Linux') { 'Linux' } else { '' }
+  $browser = if ($ua -match 'Edg') { 'Edge' } elseif ($ua -match 'YaBrowser') { 'Yandex' } elseif ($ua -match 'OPR/') { 'Opera' } `
+             elseif ($ua -match 'Firefox|FxiOS') { 'Firefox' } elseif ($ua -match 'Chrome|CriOS') { 'Chrome' } elseif ($ua -match 'Safari') { 'Safari' } else { '' }
+  $parts = @($system, $browser) | Where-Object { $_ }
+  if ($parts) { return ($parts -join ' · ') } else { return 'unknown browser' }
+}
+
+# The device's name in the home network, if the router knows it (waits at most 0.7 s)
+function HostName($ip) {
+  try {
+    $ar = [Net.Dns]::BeginGetHostEntry($ip, $null, $null)
+    if ($ar.AsyncWaitHandle.WaitOne(700)) { $n = [Net.Dns]::EndGetHostEntry($ar).HostName; if ($n -and $n -ne $ip) { return $n } }
+  } catch {}
+  return ''
+}
+
+function Minutes($sec) { if ($sec -ge 90) { "$([math]::Round($sec / 60)) min" } else { "$([math]::Round($sec)) s" } }
+
+function Seen($ip, $ua, $rel) {
+  $kind = DeviceKind $ua; $key = "$ip|$kind"; $now = [DateTime]::UtcNow
+  $d = $devices[$key]
+  if (-not $d) {
+    $name = if ($ip -eq '127.0.0.1' -or $ip -eq '::1') { 'this computer' } else { HostName $ip }
+    $label = if ($name) { "$ip ($name) · $kind" } else { "$ip · $kind" }
+    $d = @{ first = $now; label = $label; book = ''; bye = $null }
+    $devices[$key] = $d
+    Say "+ $label — connected    [devices: $($devices.Count)]"
+  }
+  $d.last = $now; $d.bye = $null
+  if ($rel.ToLower().EndsWith('.epub')) {
+    $d.book = [IO.Path]::GetFileNameWithoutExtension($rel)
+    Say "> $($d.label) — «$($d.book)»"
+  }
+}
+
+function Bye($ip, $ua) {
+  $d = $devices["$ip|$(DeviceKind $ua)"]
+  if ($d) { $d.bye = [DateTime]::UtcNow }
+}
+
+function WatchDevices {
+  $now = [DateTime]::UtcNow
+  foreach ($key in @($devices.Keys)) {
+    $d = $devices[$key]
+    if ($d.bye -and ($now - $d.bye).TotalSeconds -gt $byeGrace -and $d.last -le $d.bye) { $why = 'closed the page' }
+    elseif (($now - $d.last).TotalSeconds -gt $silent) { $why = "no signal for $(Minutes $silent) (screen off, app in the background or out of Wi-Fi)" }
+    else { continue }
+    $devices.Remove($key)
+    $book = if ($d.book) { ", was reading «$($d.book)»" } else { '' }
+    Say "- $($d.label) — $why; was here $(Minutes (($d.last - $d.first).TotalSeconds))$book    [devices: $($devices.Count)]"
+  }
+}
+
+function PlainIp($addr) {
+  if ($addr.IsIPv4MappedToIPv6) { $addr = $addr.MapToIPv4() }
+  return $addr.ToString()
+}
+
 function Head($stream, $status, $type, [long]$length) {
   $h = "HTTP/1.1 $status`r`nContent-Type: $type`r`nContent-Length: $length`r`n" +
        "Cache-Control: no-cache`r`nConnection: close`r`n`r`n"
@@ -51,15 +120,30 @@ function Serve($client) {
     $stream = $client.GetStream()
     $reader = New-Object IO.StreamReader($stream, [Text.Encoding]::ASCII)
     $line = $reader.ReadLine()
-    while ($true) { $h = $reader.ReadLine(); if ($h -eq $null -or $h -eq '') { break } }
+    $ua = ''
+    while ($true) {
+      $h = $reader.ReadLine(); if ($h -eq $null -or $h -eq '') { break }
+      if ($h -match '^User-Agent:\s*(.*)$') { $ua = $Matches[1] }
+    }
     if (-not $line) { return }
     $parts = $line.Split(' ')
     $method = $parts[0]; $headOnly = $method -eq 'HEAD'
-    if (-not (IsHomeAddress $client.Client.RemoteEndPoint.Address)) { Plain $stream '403 Forbidden' 'Forbidden' $headOnly; return }
+    $addr = $client.Client.RemoteEndPoint.Address
+    if (-not (IsHomeAddress $addr)) {
+      $ip = PlainIp $addr
+      if (-not $refused[$ip]) { $refused[$ip] = $true; Say "! refused $ip — not a home-network address" }
+      Plain $stream '403 Forbidden' 'Forbidden' $headOnly; return
+    }
+    $ip = PlainIp $addr
+    if ($parts.Length -ge 2 -and $method -eq 'POST' -and $parts[1].Split('?')[0] -eq '/__bye') {   # the page is closing
+      Bye $ip $ua; Head $stream '204 No Content' 'text/plain' 0; return
+    }
     if ($parts.Length -lt 2 -or ($method -ne 'GET' -and -not $headOnly)) { Plain $stream '405 Method Not Allowed' 'Method not allowed' $headOnly; return }
     # Raw path, decoded here: a '#' in a file name arrives as %23 and must stay part of the name
     $rel = [Uri]::UnescapeDataString($parts[1].Split('?')[0]).TrimStart('/')
     if ($rel -eq '__library_root') { Plain $stream '200 OK' $root $headOnly; return }   # lets a launcher recognise this library
+    Seen $ip $ua $rel
+    if ($rel -eq '__alive') { Head $stream '204 No Content' 'text/plain' 0; return }   # "still here" from the catalog / reader
     if ($rel -eq '') { $rel = 'index.html' }
     $path = [IO.Path]::GetFullPath([IO.Path]::Combine($root, $rel))
     if (-not ($path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -and [IO.File]::Exists($path))) {
@@ -140,11 +224,15 @@ Write-Host "  The phone can't connect? Allow PowerShell in the Windows Firewall 
 Write-Host "  (Private networks), and check that this Wi-Fi is set as a Private network." -ForegroundColor DarkGray
 Write-Host "  Anyone on this Wi-Fi who knows the address can open the library (read only)." -ForegroundColor DarkGray
 Write-Host "  Close this window to stop."
+Write-Host ""
+Write-Host "  Devices using the library:"
 Start-Process "http://localhost:$port/index.html"
 # Browsers open spare connections and may send nothing on them for a while: take every
 # connection at once, answer those whose request has arrived, drop silent ones after 10 s
 $waiting = New-Object Collections.ArrayList
+$lastWatch = [DateTime]::UtcNow
 while ($true) {
+  if (([DateTime]::UtcNow - $lastWatch).TotalSeconds -ge 2) { WatchDevices; $lastWatch = [DateTime]::UtcNow }
   while ($listener.Pending()) { [void]$waiting.Add(@{ client = $listener.AcceptTcpClient(); since = [DateTime]::UtcNow }) }
   $busy = $false
   foreach ($w in @($waiting)) {

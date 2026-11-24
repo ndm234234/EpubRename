@@ -1247,6 +1247,17 @@ $("stage").addEventListener("click", e => {
   if ($("toc").classList.contains("open") && !$("toc").contains(e.target) ) toggleToc(false);
 });
 
+// Let the library server know this page is open: the network launcher's window lists the devices
+// using the library. A "still here" every minute and "bye" on closing; nothing from file://.
+(() => {
+  if (!/^https?:$/.test(location.protocol)) return;
+  const ping = () => fetch("/__alive", { cache: "no-store" }).catch(() => {});
+  ping();
+  setInterval(ping, 60000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) ping(); });
+  addEventListener("pagehide", () => { try { navigator.sendBeacon("/__bye"); } catch {} });
+})();
+
 // Drag & drop a file anywhere on the page
 document.addEventListener("dragover", e => { e.preventDefault(); $("start").classList.add("drag"); });
 document.addEventListener("dragleave", e => { if (!e.relatedTarget) $("start").classList.remove("drag"); });

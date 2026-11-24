@@ -821,6 +821,17 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") { $("q").value = ""; render(); }
 });
 render();
+// Let the library server know this page is open: the network launcher's window lists the devices
+// using the library. A "still here" every minute and "bye" on closing; nothing from file://.
+(() => {
+  if (!/^https?:$/.test(location.protocol)) return;
+  const ping = () => fetch("/__alive", { cache: "no-store" }).catch(() => {});
+  ping();
+  setInterval(ping, 60000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) ping(); });
+  addEventListener("pagehide", () => { try { navigator.sendBeacon("/__bye"); } catch {} });
+})();
+
 // Came back to a book page (reload, or the reader's Back): show it without the flight
 { const key = history.state && history.state.book, b = key && books.find(x => x.href === key);
   if (b) openDetail(b, false); }
