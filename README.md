@@ -185,6 +185,15 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
   with the %, chapter and first words of the page; rename (pencil), delete (bin) or click to go
   there. The up / down arrows in the list or `[` / `]` jump to the previous / next bookmark. Kept in the browser's
   `localStorage`, like the reading place.
+- Notes: any bookmark can have a note of your own — free text, several lines. Press the note icon
+  next to the bookmark (or **Add note** in the "Bookmark added" message right after bookmarking).
+  It is saved as you type; `Esc`, `Ctrl+Enter` or **Done** finish, an empty note is removed. Notes are
+  shown under their bookmarks; click one to edit it. On phones the list fills the screen, the buttons
+  are finger-sized and the note being edited stays above the on-screen keyboard.
+- Finding your bookmarks and notes: the field at the top of the bookmarks list filters it as you
+  type (by name, the page's first words, chapter and note; all words must match, case and ё/е
+  don't matter; `Esc` clears it). The book search (`Ctrl+F`) also lists matching bookmarks and notes,
+  in a separate group above the matches in the text.
 - Font size (`+` / `−`) and light / sepia / dark theme, remembered.
 - Drag an EPUB onto the page to open it.
 
