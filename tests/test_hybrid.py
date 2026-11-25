@@ -95,9 +95,9 @@ class HybridTest(unittest.TestCase):
         self.stops = []
         self.lines = []
 
-    def convert(self, fake, keep_work=False, pdf=None, out=None):
+    def convert(self, fake, keep_work=False, pdf=None, out=None, status=None):
         return hy.convert_hybrid(pdf or self.pdf, out or self.out, "Book", "Author", "ru", self.engine, keep_work,
-                                 self.lines.append, run=fake, stop=self.stops.append)
+                                 self.lines.append, run=fake, stop=self.stops.append, status=status)
 
     def work(self, pdf=None):
         return self.out.parent / ".pdf2epub-work" / (pdf or self.pdf).stem
@@ -161,6 +161,20 @@ class HybridTest(unittest.TestCase):
         self.assertNotIn("ТЕСТОВАЯ КНИГА", text)
         for s in SENTENCES:
             self.assertIn(s, text)
+
+    def test_page_lines_say_what_the_check_did(self):
+        self.convert(FakeEngine(fail_accurate={0}))
+        pages = [line for line in self.lines if line.startswith("📄")]
+        self.assertEqual(len(pages), 3)
+        self.assertIn("⚠️ fast reading used (accurate failed)", pages[0])
+        self.assertIn("page 2/3 · ok · ", pages[1])
+
+    def test_live_line_while_marker_reads(self):
+        status = []
+        self.convert(FakeEngine(), status=status.append)
+        self.assertTrue(any(s.startswith("⚡ fast reading of pages 1–3") for s in status), status)
+        self.assertTrue(any(s.startswith("🔍 reading pages 1–3") for s in status), status)
+        self.assertEqual(status[-1], "", "the live line is cleared at the end")
 
     def test_fast_failure_split_in_halves(self):
         fake = FakeEngine(fail_fast={1})
@@ -257,6 +271,18 @@ class BookPartsTest(unittest.TestCase):
                                        ["<b>ВВЕДЕНИЕ</b>", "<b>19</b>"], ["Симптомы", "21"]], page=1)]
         tocs = hy.place_tocs(blocks, [])
         self.assertEqual([e.title for e in tocs[0].entries], ["ПРЕДИСЛОВИЕ", "Как читать", "ВВЕДЕНИЕ", "Симптомы"])
+
+
+class PageNoteTest(unittest.TestCase):
+    def test_notes(self):
+        self.assertEqual(hy.page_note("accurate", {"fixed_words": 0, "inserted_blocks": 0, "coverage": 1.0}, False), "ok")
+        self.assertEqual(hy.page_note("spliced", {"fixed_words": 2, "inserted_blocks": 1, "coverage": 0.98}, True),
+                         "read twice, 2 words fixed, 1 missing piece put back")
+        self.assertEqual(hy.page_note("accurate", {"fixed_words": 1, "inserted_blocks": 0, "coverage": 0.79}, False),
+                         "1 word fixed, ⚠️ 79% read, check it")
+        self.assertEqual(hy.page_note("fast", {"reason": "accurate repeated itself"}, True),
+                         "⚠️ fast reading used (accurate repeated itself)")
+        self.assertEqual(hy.page_note("empty", {}, False), "empty page")
 
 
 class TimeTest(unittest.TestCase):

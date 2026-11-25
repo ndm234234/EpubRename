@@ -73,6 +73,27 @@ class HeadingRunsTest(unittest.TestCase):
         self.assertEqual(len(merge_heading_runs(blocks)), 2)
 
 
+class ProgressTest(unittest.TestCase):
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    def test_live_line_on_a_terminal(self):
+        out = self.Tty()
+        progress = pdf2epub.Progress(out)
+        progress.status("🔍 reading pages 1–4 · 0:00:05…")
+        progress("📄 page 1/4 · ok")
+        progress.status("")
+        self.assertEqual(out.getvalue(), "   🔍 reading pages 1–4 · 0:00:05…\r\033[K   📄 page 1/4 · ok\n")
+
+    def test_no_live_line_in_a_log_file(self):
+        out = io.StringIO()
+        progress = pdf2epub.Progress(out)
+        progress.status("🔍 reading pages 1–4 · 0:00:05…")
+        progress("📄 page 1/4 · ok")
+        self.assertEqual(out.getvalue(), "   📄 page 1/4 · ok\n")
+
+
 class MainTest(unittest.TestCase):
     def test_main_falls_back_to_quick(self):
         from test_hybrid import make_pdf

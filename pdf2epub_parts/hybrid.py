@@ -10,7 +10,9 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
 
@@ -72,6 +74,50 @@ def place_tocs(blocks: list[Block], layer_tocs: list) -> list:
     return layer_tocs
 
 
+def page_note(source: str, info: dict, retried: bool) -> str:
+    """What the check did on a page, for its progress line."""
+    if source == "empty":
+        return "empty page"
+    if source == "picture":
+        return "kept as a picture"
+    if source == "layer":
+        return "⚠️ only the PDF's own text"
+    if source == "fast":
+        return f"⚠️ fast reading used ({info.get('reason', 'accurate failed')})"
+    parts = ["read twice"] if retried else []
+    fixed, put_back = info.get("fixed_words", 0), info.get("inserted_blocks", 0)
+    if fixed:
+        parts.append(f"{fixed} word{'s' if fixed > 1 else ''} fixed")
+    if put_back:
+        parts.append(f"{put_back} missing piece{'s' if put_back > 1 else ''} put back")
+    if info.get("coverage", 1.0) < CHECK_COVERAGE:
+        parts.append(f"⚠️ {info['coverage']:.0%} read, check it")
+    return ", ".join(parts) or "ok"
+
+
+@contextmanager
+def _reading(status, label: str):
+    """A live line with a clock while Marker reads (it says nothing for minutes)."""
+    if status is None:
+        yield
+        return
+    started, stop = time.time(), threading.Event()
+
+    def tick():
+        while not stop.wait(1):
+            status(f"{label} · {_fmt(time.time() - started)}…")
+
+    status(f"{label} · {_fmt(0)}…")
+    clock = threading.Thread(target=tick, daemon=True)
+    clock.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        clock.join()
+        status("")
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -97,7 +143,8 @@ def _escape(text: str) -> str:
 
 def convert_hybrid(pdf: Path, out: Path, title: str, author: str, lang: str | None, engine: Engine,
                    keep_work: bool, progress: Callable[[str], None],
-                   run=run_marker, stop=stop_llama_server) -> str:
+                   run=run_marker, stop=stop_llama_server, status: Callable[[str], None] | None = None) -> str:
+    """progress: lines that stay; status: the live line under them (None: no live line)."""
     work = out.parent / ".pdf2epub-work" / base.safe_name(pdf.stem)
     for sub in ("fast", "acc", "merged", "images"):
         (work / sub).mkdir(parents=True, exist_ok=True)
@@ -108,7 +155,7 @@ def convert_hybrid(pdf: Path, out: Path, title: str, author: str, lang: str | No
         log_file.flush()
 
     try:
-        return _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, stop, work, log)
+        return _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, stop, work, log, status)
     finally:
         log_file.close()
         if not keep_work and out.exists() and (work / "done").exists():
@@ -118,7 +165,7 @@ def convert_hybrid(pdf: Path, out: Path, title: str, author: str, lang: str | No
                 parent.rmdir()
 
 
-def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, stop, work, log) -> str:
+def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, stop, work, log, status) -> str:
     log(f"start {pdf}")
     # the PDF's own text layer: a witness, printed page numbers, and "is this page a scan?"
     with tempfile.TemporaryDirectory(prefix="pdf2epub-") as tmp_name:
@@ -158,8 +205,11 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
     def recognise(mode: str, wanted: list[int], keep) -> None:
         """keep(page number, html) for every page recognised; a failing run is tried again in
         halves, so one bad page costs a few runs, and a page that fails alone is left out."""
+        span = f"{wanted[0]}–{wanted[-1]}" if len(wanted) > 1 else f"{wanted[0]}"
+        label = f"⚡ fast reading of pages {span}" if mode == "fast" else f"🔍 reading pages {span}"
         try:
-            got = run(engine, pdf, mode, [n - 1 for n in wanted], work)
+            with _reading(status, label):
+                got = run(engine, pdf, mode, [n - 1 for n in wanted], work)
         except MarkerError as e:
             log(f"{mode} {wanted[0]}-{wanted[-1]} failed: {e}")
             if len(wanted) > 1:
@@ -254,7 +304,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                 done_now += 1
                 elapsed = time.time() - started
                 left = time_left(elapsed, recognised, len(todo) - done_now)
-                progress(f"📄 page {n}/{numbers[-1]} · accurate · {_fmt(elapsed)} elapsed"
+                progress(f"📄 page {n}/{numbers[-1]} · {page_note(source, info, retried)} · {_fmt(elapsed)} elapsed"
                          + (f" · ~{_fmt(left)} left" if left is not None else ""))
     finally:
         stop(engine)

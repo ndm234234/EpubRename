@@ -50,6 +50,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 import zipfile
@@ -1094,6 +1095,36 @@ def guess_meta(pdf: Path, info: dict[str, str], args) -> tuple[str, str]:
     return args.title or title, args.author if args.author is not None else author
 
 
+class Progress:
+    """Lines that stay, and on a terminal one live line under them (rewritten in place)."""
+
+    def __init__(self, stream=None):
+        self.stream = stream or sys.stdout
+        self.live = self.stream.isatty()
+        self.shown = False
+        self.lock = threading.Lock()
+
+    def __call__(self, line: str) -> None:
+        with self.lock:
+            self._clear()
+            print("   " + line, file=self.stream, flush=True)
+
+    def status(self, text: str) -> None:
+        if not self.live:
+            return
+        with self.lock:
+            self._clear()
+            if text:
+                self.stream.write("   " + text)
+                self.stream.flush()
+                self.shown = True
+
+    def _clear(self) -> None:
+        if self.shown:
+            self.stream.write("\r\033[K")
+            self.shown = False
+
+
 def estimate(pages: int) -> str:
     """Time of the whole recognition: about a minute a page on a CPU."""
     minutes = pages
@@ -1263,8 +1294,12 @@ def main() -> int:
         try:
             if engine is not None:
                 from pdf2epub_parts.hybrid import convert_hybrid
-                summary = convert_hybrid(pdf, out, title, author, args.lang, engine, args.keep_work,
-                                         lambda line: print("   " + line, flush=True))
+                progress = Progress()
+                try:
+                    summary = convert_hybrid(pdf, out, title, author, args.lang, engine, args.keep_work,
+                                             progress, status=progress.status)
+                finally:
+                    progress.status("")
             else:
                 summary = convert(pdf, out, args, (title, author))
         except KeyboardInterrupt:

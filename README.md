@@ -423,9 +423,16 @@ Every page is read from its picture, the way a person reads it, by
 
 ⏳ Mila Fenwick - Quiet Rivers.pdf ...
    ⚡ fast recognition of 228 page(s)…
-   📄 page 1/228 · accurate · 0:01:05 elapsed · ~4:05:30 left
+   📄 page 1/228 · ok · 0:03:35 elapsed · ~4:05:30 left
+   📄 page 2/228 · 2 words fixed, 1 missing piece put back · 0:03:35 elapsed · ~4:04:20 left
+   📄 page 3/228 · ⚠️ 79% read, check it · 0:03:35 elapsed · ~4:03:10 left
    ...
+   🔍 reading pages 5–8 · 0:01:42…
 ```
+
+Each page line says what the check did on it (`ok`, words fixed by the vote, missing pieces
+put back from the fast reading, a page read twice, the fast reading used instead). The last
+line is live: it shows which pages Marker is reading and for how long.
 
 If the engine can't be installed (no internet on the first run, unsupported system), the
 script says so and uses quick mode. To remove the engine:
