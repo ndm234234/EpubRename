@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+import re
 import sys
 import tempfile
 import unittest
@@ -37,6 +38,16 @@ class EpubTest(unittest.TestCase):
         pages, _ = write(blocks)
         self.assertIn('<ul class="list"><li>☐ Крепко прижать</li><li>☐ <b>Улыбнуться</b></li></ul>', pages)
         self.assertIn("<td>Утро</td><td><b>Да</b></td>", pages)
+
+    def test_justified_text_is_hyphenated(self):
+        import pdf2epub
+        rule = re.search(r"\np \{([^}]*)\}", pdf2epub.CSS).group(1)
+        self.assertIn("text-align: justify", rule)
+        for prop in ("hyphens: auto", "-webkit-hyphens: auto", "adobe-hyphenate: auto"):
+            self.assertIn(prop, rule, "even word spacing needs hyphenation")
+        self.assertNotIn("hyphens", re.search(r"\nh1, h2, h3 \{([^}]*)\}", pdf2epub.CSS).group(1))
+        self.assertIn("hyphens: manual", re.search(r"div.toc p \{([^}]*)\}", pdf2epub.CSS).group(1),
+                      "contents lines are not hyphenated")
 
     def test_generator_meta(self):
         _, opf = write([Block("p", "Текст", "Текст", page=1)])

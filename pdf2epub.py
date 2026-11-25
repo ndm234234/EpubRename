@@ -818,7 +818,8 @@ def fix_order(blocks: list[Block]) -> list[Block]:
 
 CSS = """\
 body { margin: 0 4%; line-height: 1.45; }
-p { margin: 0; text-indent: 1.3em; text-align: justify; }
+p { margin: 0; text-indent: 1.3em; text-align: justify;
+    -webkit-hyphens: auto; hyphens: auto; adobe-hyphenate: auto; }
 h1, h2, h3 { text-align: center; line-height: 1.25; margin: 1.6em 0 0.9em; page-break-after: avoid; }
 h1 { font-size: 1.5em; page-break-before: always; }
 h2 { font-size: 1.2em; }
@@ -828,7 +829,8 @@ div.page { text-align: center; page-break-before: always; page-break-after: alwa
 div.page img { max-width: 100%; max-height: 98vh; }
 div.cover { text-align: center; margin: 0; padding: 0; }
 div.cover img { max-width: 100%; max-height: 100vh; }
-div.toc p { text-indent: 0; text-align: left; margin: 0.3em 0; }
+div.toc p { text-indent: 0; text-align: left; margin: 0.3em 0;
+    -webkit-hyphens: manual; hyphens: manual; adobe-hyphenate: none; }
 div.toc p.toc1 { margin-top: 0.8em; font-weight: bold; }
 div.toc p.toc2 { padding-left: 1.2em; }
 div.toc p.toc3 { padding-left: 2.4em; }
