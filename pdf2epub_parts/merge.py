@@ -391,8 +391,9 @@ def merge_page(acc_html: str, fast_html: str, layer_text: str, digital: bool) ->
             new = parse(f"<p>{content}</p>").children[0]
         place_after(acc_unit_before(idx[0], to_acc_fast), new, unit.is_item)
 
-    # 3. longer runs only the PDF layer has (not in fast either)
-    if layer:
+    # 3. longer runs only the PDF layer has (not in fast either): only when it is the PDF's own
+    #    text; the layer of a scan is old OCR whose word order can't be trusted
+    if layer and digital:
         to_acc_layer = align(layer, acc)
         in_fast = set(align(layer, fast)) if fast else set()
         for s, e in _runs(len(layer), layer_cov):

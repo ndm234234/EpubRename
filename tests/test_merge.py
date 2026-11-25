@@ -183,8 +183,19 @@ class SpliceTest(unittest.TestCase):
         layer = ("Первое предложение страницы стоит здесь. Второе предложение есть только "
                  "в текстовом слое этой страницы и больше нигде.")
         self.assertLess(coverage(acc, [fast, layer]), 1.0)
-        r = merge_page(acc, fast, layer, digital=False)
+        r = merge_page(acc, fast, layer, digital=True)
         self.assertIn("только в текстовом слое", r.html)
+
+    def test_scan_layer_text_not_spliced(self):
+        acc = ("<p>Это относится не только к попыткам родителей помочь ребенку, но также к терапии и методам "
+               "специального обучения — избегайте тех, кто сосредоточен исключительно на обучении навыкам. "
+               "Вместо этого измените момент исполнения, чтобы показать ребенку, что он знает.</p>")
+        layer = ("Это относится не только кспециальногонапопыткамобучении навыкам и знаниямродителей помочьобучения "
+                 "— избегайте тех)ребенку. Вместо этого,, кто сосредоточен исключительноно такжеизмените момент "
+                 "исполнек терапии и методам- ния, чтобы показать ребенку, что он знает.")
+        r = merge_page(acc, acc, layer, digital=False)
+        self.assertNotIn("исполнек", r.html, "the text layer of a scan is old OCR: its order can't be trusted")
+        self.assertEqual(r.inserted_blocks, 0)
 
 
 if __name__ == "__main__":
