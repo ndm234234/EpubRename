@@ -38,8 +38,22 @@ Then open `Out/index.html` in a browser.
   `brew install poppler` (macOS), or on Windows
   [poppler-windows](https://github.com/oschwartz10612/poppler-windows/releases) with its
   `Library/bin` folder added to `PATH`
+- For the recognition in `pdf2epub.py` (its default mode): **Linux** (x86-64) and Python's
+  `venv` module — on Debian/Ubuntu `sudo apt install python3-venv`. Everything else
+  (Marker, its own Python, the models) the script installs by itself on the first run.
 
-Works on Linux, macOS and Windows.
+Works on Linux, macOS and Windows; the recognition in `pdf2epub.py` is Linux-only for now
+(on macOS and Windows it uses quick mode).
+
+### On a new Linux machine
+
+```bash
+sudo apt install python3 python3-venv poppler-utils
+git clone https://github.com/ndm234234/EpubRename.git
+cd EpubRename
+mkdir Pdf                     # put your .pdf files here
+python3 pdf2epub.py           # first run: installs the engine (~3 GB, needs internet once)
+```
 
 ## epub_rename.py
 
@@ -393,7 +407,8 @@ Every page is read from its picture, the way a person reads it, by
    Python 3.12 and Marker go to `~/.local/share/pdf2epub/`, the models to
    `~/.cache/huggingface/`. Nothing is installed system-wide.
 2. Each book is read twice: a fast pass over the whole book (minutes), then a careful pass
-   page by page (about **2 minutes a page** on a CPU — a 230-page book takes a night).
+   page by page (about **a minute a page** on a CPU, no graphics card is used — a 230-page
+   book takes about 4 hours).
    The careful reading is checked word by word against the fast one and the PDF's own text
    layer: foreign or misread words are outvoted, and lines, list items or paragraphs that
    the careful pass dropped are put back in place.
@@ -404,11 +419,11 @@ Every page is read from its picture, the way a person reads it, by
 ```
 📚 Found 1 PDF file(s)
 
-⏱️  ~7.6 h for 228 pages (it can be stopped with Ctrl+C and goes on from the same page next time)
+⏱️  ~3.8 h for 228 pages (it can be stopped with Ctrl+C and goes on from the same page next time)
 
 ⏳ Mila Fenwick - Quiet Rivers.pdf ...
    ⚡ fast recognition of 228 page(s)…
-   📄 page 1/228 · accurate · 0:01:52 elapsed · ~7:03:44 left
+   📄 page 1/228 · accurate · 0:01:05 elapsed · ~4:05:30 left
    ...
 ```
 

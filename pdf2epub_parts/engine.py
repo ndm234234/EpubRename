@@ -8,6 +8,7 @@ module installs them on first use and runs them; it uses only the standard libra
 import hashlib
 import html
 import os
+import platform
 import re
 import signal
 import shutil
@@ -70,6 +71,10 @@ def ensure_engine(log: Callable[[str], None], root: Path = ENGINE_DIR,
     Every finished step leaves a stamp, so an interrupted or failed install continues
     where it stopped the next time.
     """
+    if platform.system() != "Linux" or platform.machine() not in ("x86_64", "AMD64"):
+        log(f"   The recognition engine works on Linux (x86-64) only for now, not on "
+            f"{platform.system()} {platform.machine()}")
+        return None
     engine = find_engine(root)
     if engine is not None:
         return engine
@@ -120,6 +125,9 @@ def ensure_engine(log: Callable[[str], None], root: Path = ENGINE_DIR,
             action()
         except (_StepFailed, OSError, tarfile.TarError) as e:
             log(f"❌ Could not install {what}: {e}")
+            if name == "bootstrap":
+                log("   Python can't make virtual environments here: on Debian/Ubuntu run "
+                    "`sudo apt install python3-venv`, then start again")
             return None
         (root / f".step-{name}").write_text("")
     engine = _paths(root)

@@ -105,6 +105,19 @@ class EngineInstallTest(unittest.TestCase):
         self.assertEqual(runner.calls, [])
         self.assertEqual(fetch.urls, [])
 
+    def test_failed_venv_suggests_package(self):
+        engine, _, _ = self.install(runner=FakeRunner(self.root, fail_on="-m venv"))
+        self.assertIsNone(engine)
+        self.assertIn("python3-venv", "\n".join(self.log))
+
+    def test_other_system_uses_quick_mode(self):
+        runner = FakeRunner(self.root)
+        with mock.patch("platform.system", return_value="Windows"):
+            engine, _, _ = self.install(runner=runner)
+        self.assertIsNone(engine)
+        self.assertEqual(runner.calls, [], "nothing is installed")
+        self.assertIn("Linux", "\n".join(self.log))
+
     def test_failed_step_resumes(self):
         engine, runner, _ = self.install(runner=FakeRunner(self.root, fail_on="marker-pdf=="))
         self.assertIsNone(engine)

@@ -223,8 +223,8 @@ class BookPartsTest(unittest.TestCase):
 class TimeTest(unittest.TestCase):
     def test_estimate(self):
         import pdf2epub
-        self.assertEqual(pdf2epub.estimate(9), "~18 min")
-        self.assertEqual(pdf2epub.estimate(228), "~7.6 h")
+        self.assertEqual(pdf2epub.estimate(9), "~9 min")
+        self.assertEqual(pdf2epub.estimate(228), "~3.8 h")
 
     def test_time_left_counts_only_recognised_pages(self):
         self.assertEqual(hy.time_left(elapsed=240, recognised=2, remaining=3), 360)

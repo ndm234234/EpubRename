@@ -1079,8 +1079,8 @@ def guess_meta(pdf: Path, info: dict[str, str], args) -> tuple[str, str]:
 
 
 def estimate(pages: int) -> str:
-    """Time of the accurate recognition: about 2 minutes a page on a CPU."""
-    minutes = pages * 2
+    """Time of the whole recognition: about a minute a page on a CPU."""
+    minutes = pages
     return f"~{minutes} min" if minutes < 60 else f"~{minutes / 60:.1f} h"
 
 
