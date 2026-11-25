@@ -9,7 +9,8 @@ Small Python scripts to tidy up an EPUB collection:
   and can also be used on its own for any folder.
 - **`fix_cover.py`** — makes sure every book has a cover that readers and catalogs can find:
   marks the cover picture when the book doesn't, or draws one from the title and author,
-  and removes references to files the book doesn't contain. Asks before changing each book.
+  removes references to files the book doesn't contain, and repairs a first page that shows a
+  missing picture instead of the cover and pages that strict readers can't open. Asks before changing each book.
 - **`pdf2epub.py`** — turns PDF books from `Pdf/` into EPUB files in `In/`, ready for
   `epub_rename.py`: real paragraphs instead of printed lines, headings and table of contents,
   lists, tables, pictures, the first page as the cover. Reads every page with a free offline
@@ -356,7 +357,14 @@ For each book the script:
   background, like the catalog placeholders) and adds it to the book. Needs Pillow;
   `--no-generate` skips these books;
 - 🧹 the book lists files it doesn't have — removes them from the manifest, the reading
-  order and the guide. A missing page can't be brought back; the script says so.
+  order and the guide. A missing page can't be brought back; the script says so;
+- 🖼 the first page shows a picture the book doesn't have (often `file:///tmp/…`, left by
+  the tool that made the book), so readers open on a broken image — points it to the real
+  picture: the one no page shows whose size (or proportions) the page gives, else the cover;
+- 📝 pages are plain HTML although the book lists them as XHTML (common in books exported
+  from online libraries: `<meta charset="UTF-8">` without `/>`), so strict readers can't open
+  them — rewrites them as XHTML; the words are checked to stay exactly the same. A line break
+  after the text of the `mimetype` file is removed too.
 
 **The `.epub` files are changed in place**, so the script asks before each book:
 

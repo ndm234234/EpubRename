@@ -13,15 +13,21 @@ For each book:
   🎨 there is no cover picture at all: one is drawn from the title and author
      and added to the book (needs Pillow: pip install pillow);
   🧹 the book lists files it doesn't have: they are removed from the manifest, the
-     reading order and the guide (readers otherwise show broken pictures or empty pages).
+     reading order and the guide (readers otherwise show broken pictures or empty pages);
+  🖼  the first page shows a picture the book doesn't have (e.g. file:///tmp/… left by
+     the tool that made the book), so readers open on a broken image: it is pointed to
+     the real picture (the unused one of the size the page gives, else the cover).
+  📝 pages are plain HTML though the book lists them as XHTML (strict readers can't open
+     them), or the mimetype file has a line break after its text: the pages are rewritten
+     as XHTML with exactly the same words, the line break is removed.
 
 Before changing a book the script shows what it found and asks: yes / all (yes to this
 and every next book, no more questions) / no / cancel.
 --yes fixes everything without asking, --dry-run only shows what would be done.
 The .epub file is changed in place.
 
-Only the package file (OPF) is edited, as text, so the rest of the book stays the same
-byte for byte (plus the new picture for 🎨). The new file is checked before it replaces
+Only the package file (OPF), the first page (🖼) and the pages and mimetype file (📝) are
+edited, so the rest of the book stays the same byte for byte (plus the new picture for 🎨). The new file is checked before it replaces
 the old one, and it keeps the old file's date (the catalog sorts "recently added" by it).
 """
 
@@ -38,6 +44,7 @@ import time
 import urllib.parse
 import zipfile
 import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
 from pathlib import Path
 
 from make_index import NS, locate_cover, text_of, zip_path
@@ -330,6 +337,208 @@ def drop_missing(text: str, opf_dir: str, gone: set[str]) -> tuple[str, list[str
     return text, gone_paths, gone_ids
 
 
+PAGE_IMAGE = re.compile(r"""(<(?:\w+:)?(?:img|image)\b[^>]*?\s(?:src|(?:xlink:)?href)\s*=\s*)(["'])([^"']+)\2""", re.I)
+WEB = re.compile(r"^(?:https?|data|ftp):", re.I)   # pictures that live on the web, not in the book
+
+
+def picture_size(zf: zipfile.ZipFile, path: str) -> tuple[int, int] | None:
+    if Image is None:
+        return None
+    try:
+        with Image.open(io.BytesIO(zf.read(path))) as im:
+            return im.size
+    except Exception:   # not a picture Pillow can read: just no size
+        return None
+
+
+def repair_cover_page(zf: zipfile.ZipFile, opf, opf_dir: str, names: set[str]) -> tuple[str, bytes, str, str] | None:
+    """The first page shows a picture that is not in the book (often file:///tmp/… left by the
+    tool that made the book), so readers show a broken image instead of the cover. Point it to the
+    picture meant: the image no page shows whose size is the one the page gives, else the cover.
+    Returns (page path, new page, old href, new picture path) or None."""
+    items = opf.findall("opf:manifest/opf:item", NS)
+    by_id = {i.get("id"): i for i in items}
+    pages = [zip_path(opf_dir, i.get("href", "")) for i in items if "html" in i.get("media-type", "")]
+    first = next((by_id.get(r.get("idref")) for r in opf.findall("opf:spine/opf:itemref", NS)
+                  if r.get("linear", "yes") != "no"), None)
+    if first is None or "html" not in first.get("media-type", ""):
+        return None
+    page = zip_path(opf_dir, first.get("href", ""))
+    if page not in names:
+        return None
+    try:
+        text = zf.read(page).decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    page_dir = posixpath.dirname(page)
+    broken = next((m for m in PAGE_IMAGE.finditer(text) if not WEB.match(m.group(3))
+                   and (REMOTE.match(m.group(3)) or zip_path(page_dir, m.group(3)) not in names)
+                   and similar_file(zip_path(page_dir, m.group(3)), names) is None), None)
+    if broken is None:
+        return None
+
+    shown = set()
+    for p in pages:
+        if p in names:
+            d = posixpath.dirname(p)
+            shown |= {zip_path(d, m.group(3)) for m in PAGE_IMAGE.finditer(zf.read(p).decode("utf-8", "replace"))}
+    tag = text[broken.start():text.find(">", broken.end()) + 1]
+    w, h = attr(tag, "width"), attr(tag, "height")
+    target = None
+    if w and h and w.isdigit() and h.isdigit():
+        unused = [p for i in items if i.get("media-type", "").startswith("image/")
+                  and (p := zip_path(opf_dir, i.get("href", ""))) in names and p not in shown]
+        sizes = {p: picture_size(zf, p) for p in unused}
+        want = (int(w), int(h))
+        same = [p for p, s in sizes.items() if s == want]
+        if not same and want[1]:   # the picture may be stored smaller than the page says, in proportion
+            same = [p for p, s in sizes.items() if s and s[1] and abs(s[0] / s[1] - want[0] / want[1]) < 0.01]
+        if same:   # several (e.g. a small cover thumbnail in the same proportion): the sharpest
+            target = max(same, key=lambda p: sizes[p][0] * sizes[p][1])
+    if target is None:
+        target = locate_cover(zf, opf, opf_dir)[0]
+    if target is None:
+        return None
+    href = html.escape(posixpath.relpath(target, page_dir or "."), quote=True)
+    new = text[:broken.start(3)] + href + text[broken.end(3):]
+    return page, new.encode("utf-8"), broken.group(3), target
+
+
+# ---------------------------------------------------------------- HTML pages declared as XHTML
+
+XHTML_NS = "http://www.w3.org/1999/xhtml"
+VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+NOT_XML_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
+PREFIXES = {"xlink": "http://www.w3.org/1999/xlink", "epub": "http://www.idpf.org/2007/ops"}
+# HTML parsing lowercases names; inside <svg> they have to be in their own case again
+SVG_NAMES = {n.lower(): n for n in (
+    "viewBox preserveAspectRatio gradientUnits gradientTransform patternUnits patternContentUnits "
+    "patternTransform clipPathUnits maskUnits maskContentUnits filterUnits primitiveUnits textLength "
+    "lengthAdjust markerWidth markerHeight markerUnits refX refY stdDeviation baseProfile startOffset "
+    "spreadMethod pathLength numOctaves baseFrequency kernelMatrix tableValues xChannelSelector "
+    "yChannelSelector diffuseConstant specularExponent specularConstant surfaceScale "
+    "linearGradient radialGradient clipPath foreignObject textPath feGaussianBlur feOffset feBlend "
+    "feColorMatrix feComposite feFlood feMerge feMergeNode feImage feMorphology feTurbulence "
+    "feDisplacementMap feTile feComponentTransfer feFuncR feFuncG feFuncB feFuncA feDropShadow "
+    "feConvolveMatrix feDiffuseLighting feSpecularLighting fePointLight feSpotLight feDistantLight").split()}
+
+
+class _ToXhtml(HTMLParser):
+    """Writes an HTML page back out as well-formed XHTML: empty elements closed, attributes
+    quoted, named entities as characters, unclosed elements closed, the XHTML namespace on <html>."""
+    def __init__(self, prefixes: set[str]):
+        super().__init__(convert_charrefs=True)
+        self.out, self.stack, self.prefixes, self.svg = [], [], prefixes, 0
+
+    def esc(self, s: str, quote=False) -> str:
+        s = NOT_XML_CHARS.sub("", s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return s.replace('"', "&quot;") if quote else s
+
+    def open(self, tag, attrs, empty):
+        svg = self.svg or tag == "svg"
+        name = SVG_NAMES.get(tag, tag) if svg else tag
+        seen, parts = set(), []
+        for k, v in attrs:
+            k = SVG_NAMES.get(k, k) if svg else k
+            if k in seen or not re.fullmatch(r"[A-Za-z_][\w.:-]*", k):
+                continue   # XML allows each attribute once, and only proper names
+            seen.add(k)
+            parts.append(f' {k}="{self.esc(k if v is None else v, True)}"')
+        if tag == "html":
+            if "xmlns" not in seen:
+                parts.insert(0, f' xmlns="{XHTML_NS}"')
+            parts += [f' xmlns:{p}="{PREFIXES[p]}"' for p in sorted(self.prefixes) if f"xmlns:{p}" not in seen]
+        self.out.append(f"<{name}{''.join(parts)}{' /' if empty else ''}>")
+        if not empty:
+            self.stack.append(name)
+            self.svg += tag == "svg"
+
+    def handle_starttag(self, tag, attrs):
+        self.open(tag, attrs, tag in VOID)
+
+    def handle_startendtag(self, tag, attrs):
+        self.open(tag, attrs, True)
+
+    def handle_endtag(self, tag):
+        name = SVG_NAMES.get(tag, tag) if self.svg else tag
+        if name not in self.stack:
+            return   # a closing tag with nothing to close (e.g. </br>, or one closed already)
+        while self.stack:
+            top = self.stack.pop()
+            self.out.append(f"</{top}>")
+            self.svg -= top == "svg"
+            if top == name:
+                break
+
+    def handle_data(self, data):
+        self.out.append(self.esc(data))
+
+    def handle_comment(self, data):
+        self.out.append("<!--" + NOT_XML_CHARS.sub("", data).replace("--", "- -").rstrip("-") + "-->")
+
+    def handle_decl(self, decl):
+        self.out.append(f"<!{decl}>")
+
+    def handle_pi(self, data):
+        if data.startswith("xml ") and not "".join(self.out).strip():
+            self.out.append(f"<?{data}>" if data.endswith("?") else f"<?{data}?>")
+
+    def unknown_decl(self, data):
+        if data.startswith("CDATA["):
+            self.out.append(self.esc(data[6:]))
+
+    def result(self) -> str:
+        self.close()
+        while self.stack:
+            self.out.append(f"</{self.stack.pop()}>")
+        return "".join(self.out)
+
+
+def to_xhtml(text: str) -> str:
+    used = {p for p in PREFIXES if re.search(rf"\s{p}:[\w-]+\s*=", text)}
+    parser = _ToXhtml(used)
+    parser.feed(text)
+    return parser.result()
+
+
+def page_text(text: str) -> str:
+    """The words of a page as a browser reads them (no comments), spaces squeezed."""
+    class Words(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.words = []
+        def handle_data(self, data):
+            self.words.append(data)
+    p = Words()
+    p.feed(text)
+    p.close()
+    return " ".join(NOT_XML_CHARS.sub("", "".join(p.words)).split())
+
+
+def xhtml_fix(raw: bytes) -> bytes | None:
+    """A page listed as XHTML that is really HTML (so strict readers can't open it) → the
+    same page as XHTML. None when it already is XML. The words must come out the same."""
+    try:
+        ET.fromstring(raw)
+        return None
+    except ET.ParseError:
+        pass
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise ValueError("a page is not UTF-8, not touching it")
+    new = to_xhtml(text)
+    root = ET.fromstring(new.encode("utf-8"))   # raises if it still isn't XML
+    if root.tag != f"{{{XHTML_NS}}}html":
+        raise ValueError("a page has no <html> element, not touching it")
+    if " ".join("".join(root.itertext()).split()) != page_text(text):
+        raise ValueError("a page would lose or change words when rewritten, not touching it")
+    return new.encode("utf-8")
+
+
+MIMETYPE = b"application/epub+zip"
+
+
 COVER_FOUND = {"guide": "the guide's cover page shows it", "named": "a picture named \"cover\"",
                "first page": "the picture on the first page"}
 
@@ -339,6 +548,9 @@ class Plan:
     def __init__(self):
         self.cover = "ok"          # ok / marked / generated / skipped
         self.cleaned = False       # dangling manifest entries removed
+        self.page_fixed = False    # the first page's broken picture pointed to the real one
+        self.xhtml_pages = 0       # HTML pages listed as XHTML, rewritten as XHTML
+        self.mimetype_fixed = False   # "mimetype" had extra bytes (a line break)
         self.steps: list[str] = []   # human-readable list of changes
         self.notes: list[str] = []   # problems that are only reported
         self.replace: dict[str, bytes] = {}
@@ -353,6 +565,8 @@ class Plan:
     @property
     def icon(self) -> str:
         return {"generated": "🎨", "marked": "🔧"}.get(self.cover, "🧹" if self.cleaned else
+                                                     "🖼 " if self.page_fixed else
+                                                     "📝" if self.xhtml_pages or self.mimetype_fixed else
                                                      "⏭ " if self.cover == "skipped" else "✅")
 
 
@@ -378,6 +592,32 @@ def plan_fix(zf: zipfile.ZipFile, generate: bool) -> Plan:
         else:
             missing.append(i)
             gone.add(zip_path(opf_dir, href))
+    repaired = repair_cover_page(zf, opf, opf_dir, names)
+    if repaired:
+        page, new_page, old_href, target = repaired
+        plan.replace[page] = new_page
+        plan.page_fixed = True
+        plan.steps.append(f"the first page shows a picture the book doesn't have ({old_href})"
+                          f" → show {target} there")
+    mimetype = zf.read("mimetype") if "mimetype" in names else MIMETYPE
+    if mimetype != MIMETYPE:
+        if mimetype.strip() != MIMETYPE:
+            raise ValueError("the book's mimetype is not application/epub+zip, not touching it")
+        plan.replace["mimetype"] = MIMETYPE
+        plan.mimetype_fixed = True
+        plan.steps.append("the mimetype file has a line break after application/epub+zip → remove it")
+    html_pages = []
+    for i in items:
+        p = zip_path(opf_dir, i.get("href", ""))
+        if i.get("media-type") == "application/xhtml+xml" and p in names:
+            fixed = xhtml_fix(plan.replace.get(p) or zf.read(p))
+            if fixed is not None:
+                plan.replace[p] = fixed
+                html_pages.append(p)
+    if html_pages:
+        plan.xhtml_pages = len(html_pages)
+        plan.steps.append(f"{len(html_pages)} page(s) are HTML, not the XHTML the book says (strict readers"
+                          " can't open them) → rewrite them as XHTML, same text")
     path, how = locate_cover(zf, opf, opf_dir)
     if how == "declared" and not missing:
         return plan
@@ -601,7 +841,7 @@ def main() -> int:
     print()
 
     ask_each = not (args.dry_run or args.yes)
-    count = dict.fromkeys(["ok", "marked", "generated", "cleaned", "skipped", "declined", "error"], 0)
+    count = dict.fromkeys(["ok", "marked", "generated", "cleaned", "page", "xhtml", "skipped", "declined", "error"], 0)
     cancelled = 0
     for n, f in enumerate(files):
         try:
@@ -647,10 +887,18 @@ def main() -> int:
             count[plan.cover] += 1
         if plan.cleaned:
             count["cleaned"] += 1
+        if plan.page_fixed:
+            count["page"] += 1
+        if plan.xhtml_pages or plan.mimetype_fixed:
+            count["xhtml"] += 1
 
     verb = "would be " if args.dry_run else ""
     parts = [f"✅ fine {count['ok']}", f"🔧 cover {verb}marked {count['marked']}",
              f"🎨 cover {verb}drawn {count['generated']}", f"🧹 missing files {verb}unlisted {count['cleaned']}"]
+    if count["xhtml"]:
+        parts.append(f"📝 pages / mimetype {verb}made valid {count['xhtml']}")
+    if count["page"]:
+        parts.append(f"🖼  broken cover page {verb}fixed {count['page']}")
     if count["skipped"]:
         parts.append(f"⏭  only reported {count['skipped']}")
     if count["declined"]:
