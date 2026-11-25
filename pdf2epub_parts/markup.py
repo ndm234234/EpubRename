@@ -11,7 +11,7 @@ import re
 from collections import Counter
 
 from pdf2epub import TERMINAL, Block, Toc, TocEntry
-from pdf2epub_parts.merge import Node, Text, parse
+from pdf2epub_parts.merge import Node, Text, parse, plain, serialize
 
 KEEP = {"b": "b", "strong": "b", "i": "i", "em": "i", "sup": "sup", "sub": "sub"}
 CHECKBOX = "☐ "
@@ -224,6 +224,56 @@ def tocs_from_blocks(blocks: list[Block]) -> list[Toc]:
 def _is_running_title(b: Block, toc: Toc) -> bool:
     """The contents' own title repeated at the top of its next page."""
     return re.sub(r"\W|\d", "", b.text.lower()) == re.sub(r"\W|\d", "", toc.title.lower())
+
+
+# ---------------------------------------------------------------- running heads
+
+HEAD_NUMBER = re.compile(r"^\s*(\d{1,4})\b|\b(\d{1,4})\s*$")
+HEAD_WORDS = 10
+HEAD_VOTES = 3             # pages whose running head must agree before any is removed
+
+
+def _edges(page_html: str) -> tuple[Node, list]:
+    root = parse(page_html)
+    kids = [c for c in root.children if isinstance(c, Node)]
+    return root, (kids[:1] + kids[-1:] if len(kids) > 1 else kids)
+
+
+def _head_number(node: Node) -> int | None:
+    """The page number of a short line with a number at its start or end ('22 INTRODUCTION')."""
+    t = " ".join(plain(node).split())
+    if not t or len(t.split()) > HEAD_WORDS or len(t) > 120:
+        return None
+    m = HEAD_NUMBER.search(t)
+    return int(m.group(1) or m.group(2)) if m else None
+
+
+def running_head_offset(pages: dict[int, str]) -> int | None:
+    """printed page number - PDF page number, from the running heads and page numbers at the
+    top or bottom of the pages; None unless at least HEAD_VOTES pages agree on it."""
+    votes = Counter()
+    for n, page_html in pages.items():
+        for node in _edges(page_html)[1]:
+            number = _head_number(node)
+            if number is not None:
+                votes[number - n] += 1
+    if not votes:
+        return None
+    offset, count = votes.most_common(1)[0]
+    return offset if count >= HEAD_VOTES else None
+
+
+def strip_running_heads(page_html: str, page: int, offset: int | None) -> str:
+    """Leave out the running head ('22 INTRODUCTION', 'INTRODUCTION 23') and the bare page
+    number at the top or bottom of a page: the first or last line whose number is this page's."""
+    if offset is None or not page_html.strip():
+        return page_html
+    root, edges = _edges(page_html)
+    drop = [e for e in edges if _head_number(e) == page + offset]
+    if not drop:
+        return page_html
+    root.children = [c for c in root.children if not any(c is d for d in drop)]
+    return serialize(root).strip()
 
 
 # ---------------------------------------------------------------- headings in parts

@@ -17,7 +17,8 @@ from typing import Callable
 import pdf2epub as base
 from pdf2epub import Block
 from pdf2epub_parts.engine import Engine, MarkerError, run_marker, stop_llama_server
-from pdf2epub_parts.markup import fix_drop_cap, join_pages, merge_heading_runs, page_blocks, tocs_from_blocks
+from pdf2epub_parts.markup import (fix_drop_cap, join_pages, merge_heading_runs, page_blocks, running_head_offset,
+                                   strip_running_heads, tocs_from_blocks)
 from pdf2epub_parts.merge import merge_page, needs_retry
 
 ACC_BATCH = 4          # pages per accurate run (the model is loaded once per run)
@@ -168,6 +169,16 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
         for n in wanted:
             keep(n, got.get(n - 1, ""))
 
+    def read(path: Path) -> str:
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def heads_offset() -> int | None:
+        for files in (fast_file, acc_file):
+            offset = running_head_offset({n: read(files(n)) for n in numbers if files(n).exists()})
+            if offset is not None:
+                return offset
+        return None
+
     def done(n: int) -> bool:
         return merged_file(n).exists() and str(n) in report["pages"]
 
@@ -177,6 +188,9 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
         if missing:
             progress(f"⚡ fast recognition of {len(missing)} page(s)…")
             recognise("fast", missing, lambda n, h: _write(fast_file(n), h))
+
+        # running heads ("22 INTRODUCTION") are not text: the page numbers in them tell them apart
+        offset = heads_offset()
 
         # 2. accurate page by page (hours), checked against fast and the text layer
         todo = [n for n in numbers if not done(n)]
@@ -189,8 +203,8 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                 recognise("accurate", need, lambda n, h: _write(acc_file(n), h))
                 recognised += len(need)
             for n in batch:
-                fast_html = fast_file(n).read_text(encoding="utf-8") if fast_file(n).exists() else ""
-                acc_html = acc_file(n).read_text(encoding="utf-8") if acc_file(n).exists() else None
+                fast_html = strip_running_heads(read(fast_file(n)), n, offset)
+                acc_html = strip_running_heads(read(acc_file(n)), n, offset) if acc_file(n).exists() else None
                 if acc_html is None:
                     failing.append(n)
                     if len(failing) >= FAIL_LIMIT:
@@ -212,7 +226,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                         again: dict[int, str] = {}
                         recognise("accurate", [n], again.__setitem__)
                         if again.get(n, "").strip():
-                            second = merge_page(again[n], fast_html, layer[n], digital)
+                            second = merge_page(strip_running_heads(again[n], n, offset), fast_html, layer[n], digital)
                             if (second.looped, -second.coverage, second.extra_run) < \
                                     (result.looped, -result.coverage, result.extra_run):
                                 result = second
@@ -244,7 +258,8 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
     finally:
         stop(engine)
 
-    # 3. the book
+    # 3. the book (pages merged by an earlier version may still have their running heads)
+    offset = heads_offset()
     with tempfile.TemporaryDirectory(prefix="pdf2epub-") as tmp_name:
         tmp = Path(tmp_name)
         cover = base.render_page(pdf, 1, tmp / "cover", base.COVER_HEIGHT)
@@ -255,7 +270,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
             if skip_first and n == 1:
                 continue
             blocks.append(Block("page", level=n, page=n))
-            blocks += page_blocks(merged_file(n).read_text(encoding="utf-8"), n)
+            blocks += page_blocks(strip_running_heads(read(merged_file(n)), n, offset), n)
         blocks = join_pages(blocks)
         fix_drop_cap(blocks)
         blocks = merge_heading_runs(blocks)

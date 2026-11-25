@@ -6,7 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pdf2epub import Block  # noqa: E402
-from pdf2epub_parts.markup import fix_drop_cap, join_pages, page_blocks, tocs_from_blocks  # noqa: E402
+from pdf2epub_parts.markup import (fix_drop_cap, join_pages, page_blocks, running_head_offset,  # noqa: E402
+                                   strip_running_heads, tocs_from_blocks)
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -128,6 +129,32 @@ class TocTest(unittest.TestCase):
         blocks = page_blocks((FIXTURES / "chapter_page.html").read_text(), page=38)
         self.assertEqual(tocs_from_blocks(blocks), [])
 
+
+
+class RunningHeadTest(unittest.TestCase):
+    PAGES = {23: "<h2>22 ВВЕДЕНИЕ</h2><p>ства и только время от времени.</p>",
+             24: "<p>текст страницы продолжается.</p><p>ВВЕДЕНИЕ 23</p>",
+             33: "<h2>32 ВВЕДЕНИЕ</h2><p>дения или развлечения.</p>",
+             53: "<h2>52 ГЛАВА 1</h2><p>шения. Ежедневно.</p>",
+             8: "<h2>ГЛАВА 1. КЛЮЧИ К УСПЕХУ 37</h2><p>Содержание</p>",
+             27: "<p>Текст.</p><p>1 Иногда их называют иначе. — Примеч. перев.</p>",
+             40: "<h1>ГЛАВА 3</h1><p>Начало главы.</p>",
+             60: "<p>Обычная страница без колонтитула.</p><p>59</p>"}
+
+    def test_offset_from_page_numbers(self):
+        self.assertEqual(running_head_offset(self.PAGES), -1)
+
+    def test_no_offset_without_enough_heads(self):
+        self.assertIsNone(running_head_offset({23: self.PAGES[23], 8: self.PAGES[8], 40: self.PAGES[40]}))
+
+    def test_heads_removed_text_kept(self):
+        strip = lambda n: strip_running_heads(self.PAGES[n], n, -1)
+        self.assertEqual(strip(23), "<p>ства и только время от времени.</p>")
+        self.assertEqual(strip(24), "<p>текст страницы продолжается.</p>")
+        self.assertEqual(strip(60), "<p>Обычная страница без колонтитула.</p>")
+        for n in (8, 27, 40):
+            self.assertEqual(strip(n), self.PAGES[n], "contents line, footnote and chapter heading stay")
+        self.assertEqual(strip_running_heads(self.PAGES[23], 23, None), self.PAGES[23])
 
 if __name__ == "__main__":
     unittest.main()

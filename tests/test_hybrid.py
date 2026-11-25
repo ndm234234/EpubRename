@@ -50,7 +50,8 @@ def make_pdf(path: Path, pages=SENTENCES, y=700) -> Path:
 class FakeEngine:
     """Stands in for run_marker: records calls, can fail or be interrupted."""
 
-    def __init__(self, fail_accurate=(), interrupt_on=None, fail_fast=(), loop_accurate=()):
+    def __init__(self, fail_accurate=(), interrupt_on=None, fail_fast=(), loop_accurate=(), fast_heads=False):
+        self.fast_heads = fast_heads
         self.calls, self.fail_accurate, self.interrupt_on = [], set(fail_accurate), interrupt_on
         self.fail_fast, self.loop_accurate = set(fail_fast), set(loop_accurate)
 
@@ -68,7 +69,8 @@ class FakeEngine:
             return {i: f"<h1>Глава {i + 1}</h1><p>{SENTENCES[i]}</p><p>" + " ".join(["и так далее"] * 40) + "</p>"
                     for i in pages}
         tag = "<b>Внимание.</b> " if mode == "accurate" else ""
-        return {i: f"<h1>Глава {i + 1}</h1><p>{tag}{SENTENCES[i]}</p>" for i in pages}
+        head = (lambda i: f"<h2>{i + 11} ТЕСТОВАЯ КНИГА</h2>") if mode == "fast" and self.fast_heads else (lambda i: "")
+        return {i: f"{head(i)}<h1>Глава {i + 1}</h1><p>{tag}{SENTENCES[i]}</p>" for i in pages}
 
     def accurate_pages(self):
         return sorted(p for mode, pages in self.calls if mode == "accurate" for p in pages)
@@ -122,6 +124,14 @@ class HybridTest(unittest.TestCase):
         self.assertEqual(report["pages"]["1"]["source"], "fast")
         self.assertEqual(report["pages"]["2"]["source"], "accurate")
         check_epub(self.out)
+
+    def test_running_heads_left_out(self):
+        self.convert(FakeEngine(fast_heads=True, fail_accurate={0}))
+        with zipfile.ZipFile(self.out) as zf:
+            text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+        self.assertNotIn("ТЕСТОВАЯ КНИГА", text)
+        for s in SENTENCES:
+            self.assertIn(s, text)
 
     def test_fast_failure_split_in_halves(self):
         fake = FakeEngine(fail_fast={1})
