@@ -369,6 +369,8 @@ python3 pdf2epub.py                 # every Pdf/*.pdf -> In/*.epub
 python3 epub_rename.py              # then sort them into Out/ as usual
 ```
 
+Its helper modules live in `pdf2epub_parts/`; run only `pdf2epub.py`.
+
 Like `epub_rename.py`, it takes `Pdf/` and `In/` from the **current folder**. Other options:
 
 ```bash

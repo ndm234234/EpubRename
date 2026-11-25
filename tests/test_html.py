@@ -1,4 +1,4 @@
-"""Tests for pdf2epub_html: Marker HTML -> book blocks."""
+"""Tests for pdf2epub_parts.markup: Marker HTML -> book blocks."""
 
 import sys
 import unittest
@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pdf2epub import Block  # noqa: E402
-from pdf2epub_html import fix_drop_cap, join_pages, page_blocks, tocs_from_blocks  # noqa: E402
+from pdf2epub_parts.markup import fix_drop_cap, join_pages, page_blocks, tocs_from_blocks  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 

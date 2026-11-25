@@ -16,9 +16,9 @@ from typing import Callable
 
 import pdf2epub as base
 from pdf2epub import Block
-from pdf2epub_engine import Engine, MarkerError, run_marker, stop_llama_server
-from pdf2epub_html import fix_drop_cap, join_pages, merge_heading_runs, page_blocks, tocs_from_blocks
-from pdf2epub_merge import merge_page, needs_retry
+from pdf2epub_parts.engine import Engine, MarkerError, run_marker, stop_llama_server
+from pdf2epub_parts.markup import fix_drop_cap, join_pages, merge_heading_runs, page_blocks, tocs_from_blocks
+from pdf2epub_parts.merge import merge_page, needs_retry
 
 ACC_BATCH = 4          # pages per accurate run (the model is loaded once per run)
 FAIL_LIMIT = 8         # accurate failing on this many pages in a row: something is broken, stop the book

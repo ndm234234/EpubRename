@@ -11,7 +11,7 @@ import re
 from collections import Counter
 
 from pdf2epub import TERMINAL, Block, Toc, TocEntry
-from pdf2epub_merge import Node, Text, parse
+from pdf2epub_parts.merge import Node, Text, parse
 
 KEEP = {"b": "b", "strong": "b", "i": "i", "em": "i", "sup": "sup", "sub": "sub"}
 CHECKBOX = "☐ "

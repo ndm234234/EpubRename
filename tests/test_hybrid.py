@@ -1,4 +1,4 @@
-"""Tests for pdf2epub_hybrid: the per-book pipeline with a fake recognition engine."""
+"""Tests for pdf2epub_parts.hybrid: the per-book pipeline with a fake recognition engine."""
 
 import json
 import sys
@@ -9,9 +9,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import pdf2epub_hybrid as hy  # noqa: E402
+import pdf2epub_parts.hybrid as hy  # noqa: E402
 from pdf2epub import check_epub  # noqa: E402
-from pdf2epub_engine import Engine, MarkerError  # noqa: E402
+from pdf2epub_parts.engine import Engine, MarkerError  # noqa: E402
 
 SENTENCES = ["Первая страница рассказывает о том, как дети растут и учатся новому каждый день.",
              "Вторая страница продолжает рассказ о воспитании и о том, что важно родителям.",

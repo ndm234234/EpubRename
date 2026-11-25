@@ -10,7 +10,7 @@ epub_rename.py can then sort the new books into Out/ like any other EPUB.
 The PDF files are only read, never changed.
 
 Every page is recognised from its picture by Marker (free, offline), read twice (fast and
-accurate) and checked against the PDF text layer (pdf2epub_hybrid.py). The first run
+accurate) and checked against the PDF text layer (pdf2epub_parts/). The first run
 installs the engine into ~/.local/share/pdf2epub (about 3 GB, one time); a stopped run goes
 on from the same page. --quick, or a missing engine, uses only the PDF text layer.
 
@@ -1232,7 +1232,7 @@ def main() -> int:
 
     engine = None
     if jobs and not args.quick:
-        from pdf2epub_engine import ensure_engine
+        from pdf2epub_parts.engine import ensure_engine
         engine = ensure_engine(print)
         if engine is None:
             print("⚠️  The recognition engine is not available: using quick mode (the PDF text layer only)")
@@ -1246,7 +1246,7 @@ def main() -> int:
         started = time.time()
         try:
             if engine is not None:
-                from pdf2epub_hybrid import convert_hybrid
+                from pdf2epub_parts.hybrid import convert_hybrid
                 summary = convert_hybrid(pdf, out, title, author, args.lang, engine, args.keep_work,
                                          lambda line: print("   " + line, flush=True))
             else:

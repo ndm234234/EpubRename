@@ -1,4 +1,4 @@
-"""Tests for pdf2epub_merge: checking accurate OCR against fast OCR and the PDF text layer."""
+"""Tests for pdf2epub_parts.merge: checking accurate OCR against fast OCR and the PDF text layer."""
 
 import re
 import sys
@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pdf2epub_merge import coverage, merge_page, needs_retry  # noqa: E402
+from pdf2epub_parts.merge import coverage, merge_page, needs_retry  # noqa: E402
 
 
 def text(html_text: str) -> str:

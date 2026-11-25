@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pdf2epub  # noqa: E402
 from pdf2epub import Block, check_epub, split_chapters, write_epub  # noqa: E402
-from pdf2epub_html import merge_heading_runs  # noqa: E402
+from pdf2epub_parts.markup import merge_heading_runs  # noqa: E402
 
 
 def write(blocks, generator="pdf2epub hybrid"):
@@ -69,7 +69,7 @@ class MainTest(unittest.TestCase):
             pdf = make_pdf(Path(tmp) / "book.pdf", y=400)  # mid-page: not a running header
             out_dir = Path(tmp) / "In"
             stdout = io.StringIO()
-            with mock.patch("pdf2epub_engine.ensure_engine", return_value=None), \
+            with mock.patch("pdf2epub_parts.engine.ensure_engine", return_value=None), \
                     mock.patch.object(sys, "argv", ["pdf2epub.py", str(pdf), "--out", str(out_dir), "--yes"]), \
                     contextlib.redirect_stdout(stdout):
                 code = pdf2epub.main()
@@ -83,7 +83,7 @@ class MainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pdf = make_pdf(Path(tmp) / "book.pdf", y=400)
             stdout = io.StringIO()
-            with mock.patch("pdf2epub_engine.ensure_engine", return_value=None), \
+            with mock.patch("pdf2epub_parts.engine.ensure_engine", return_value=None), \
                     mock.patch.object(pdf2epub, "convert", side_effect=KeyboardInterrupt), \
                     mock.patch.object(sys, "argv", ["pdf2epub.py", str(pdf), "--out", str(Path(tmp) / "In"), "--yes"]), \
                     contextlib.redirect_stdout(stdout):

@@ -1,4 +1,4 @@
-"""Tests for pdf2epub_engine: installing and running the recognition engine."""
+"""Tests for pdf2epub_parts.engine: installing and running the recognition engine."""
 
 import hashlib
 import io
@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import pdf2epub_engine as eng  # noqa: E402
+import pdf2epub_parts.engine as eng  # noqa: E402
 
 
 def fake_tarball() -> bytes:
