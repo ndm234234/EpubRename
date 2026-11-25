@@ -50,8 +50,9 @@ def make_pdf(path: Path, pages=SENTENCES, y=700) -> Path:
 class FakeEngine:
     """Stands in for run_marker: records calls, can fail or be interrupted."""
 
-    def __init__(self, fail_accurate=(), interrupt_on=None, fail_fast=(), loop_accurate=(), fast_heads=False):
-        self.fast_heads = fast_heads
+    def __init__(self, fail_accurate=(), interrupt_on=None, fail_fast=(), loop_accurate=(), fast_heads=False,
+                 notes=False):
+        self.fast_heads, self.notes = fast_heads, notes
         self.calls, self.fail_accurate, self.interrupt_on = [], set(fail_accurate), interrupt_on
         self.fail_fast, self.loop_accurate = set(fail_fast), set(loop_accurate)
 
@@ -70,7 +71,9 @@ class FakeEngine:
                     for i in pages}
         tag = "<b>Внимание.</b> " if mode == "accurate" else ""
         head = (lambda i: f"<h2>{i + 11} ТЕСТОВАЯ КНИГА</h2>") if mode == "fast" and self.fast_heads else (lambda i: "")
-        return {i: f"{head(i)}<h1>Глава {i + 1}</h1><p>{tag}{SENTENCES[i]}</p>" for i in pages}
+        note = (lambda i: f"<p>Ссылка на сноску<sup>{i + 1}</sup> в тексте.</p><p><sup>{i + 1}</sup> Текст сноски {i + 1}.</p>"
+                if mode == "accurate" and self.notes else "")
+        return {i: f"{head(i)}<h1>Глава {i + 1}</h1><p>{tag}{SENTENCES[i]}</p>{note(i)}" for i in pages}
 
     def accurate_pages(self):
         return sorted(p for mode, pages in self.calls if mode == "accurate" for p in pages)
@@ -124,6 +127,16 @@ class HybridTest(unittest.TestCase):
         self.assertEqual(report["pages"]["1"]["source"], "fast")
         self.assertEqual(report["pages"]["2"]["source"], "accurate")
         check_epub(self.out)
+
+    def test_footnotes_are_epub_footnotes(self):
+        self.convert(FakeEngine(notes=True))
+        check_epub(self.out)
+        with zipfile.ZipFile(self.out) as zf:
+            text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+        self.assertIn('<a epub:type="noteref" href="#fn1" id="fnref1"><sup>1</sup></a>', text)
+        self.assertIn('<aside epub:type="footnote" class="note" id="fn1"><p><a href="#fnref1"><sup>1</sup></a> '
+                      'Текст сноски 1.</p></aside>', text)
+        self.assertIn('id="fn3"', text)
 
     def test_running_heads_left_out(self):
         self.convert(FakeEngine(fast_heads=True, fail_accurate={0}))

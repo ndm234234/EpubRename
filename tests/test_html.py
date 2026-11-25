@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pdf2epub import Block  # noqa: E402
-from pdf2epub_parts.markup import (fix_drop_cap, join_pages, page_blocks, running_head_offset,  # noqa: E402
-                                   strip_running_heads, tocs_from_blocks)
+from pdf2epub_parts.markup import (fix_drop_cap, join_pages, page_blocks, place_footnotes,  # noqa: E402
+                                   running_head_offset, strip_running_heads, take_footnotes, tocs_from_blocks)
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -155,6 +155,45 @@ class RunningHeadTest(unittest.TestCase):
         for n in (8, 27, 40):
             self.assertEqual(strip(n), self.PAGES[n], "contents line, footnote and chapter heading stay")
         self.assertEqual(strip_running_heads(self.PAGES[23], 23, None), self.PAGES[23])
+
+    def test_chapter_heading_and_footnote_are_not_heads(self):
+        pages = {n: f"<h1>Глава {n}</h1><p>Текст главы.</p><p><sup>{n}</sup> Сноска.</p>" for n in (1, 2, 3, 4)}
+        self.assertIsNone(running_head_offset(pages))
+        self.assertEqual(strip_running_heads(pages[2], 2, 0), pages[2])
+
+
+class FootnoteTest(unittest.TestCase):
+    def page(self, n, html):
+        return [Block("page", level=n, page=n)] + page_blocks(html, n)
+
+    def book(self):
+        return (self.page(154, "<p>и лечение эффективны в <i>момент исполнения.</i><sup>9</sup></p>"
+                               "<p>Составляйте списки. Когда обычно пишете список</p><p></p>"
+                               "<p><sup>9</sup> Иногда это называют “правилом нужного момента”. — <i>Примеч. перев</i>.</p>")
+                + self.page(155, "<p>“дел”, вы именно так и поступаете.</p>"))
+
+    def test_note_leaves_the_text_and_follows_its_paragraph(self):
+        blocks, notes = take_footnotes(self.book())
+        self.assertEqual(len(notes), 1)
+        blocks = join_pages(blocks)
+        place_footnotes(blocks, notes)
+        kinds = [b.kind for b in blocks if b.kind != "page"]
+        self.assertEqual(kinds, ["p", "note", "p"])
+        body = [b for b in blocks if b.kind != "page"]
+        self.assertIn('<a epub:type="noteref" href="#fn1" id="fnref1"><sup>9</sup></a>', body[0].html)
+        self.assertEqual(body[1].anchor, "fn1")
+        self.assertIn("правилом нужного момента", body[1].html)
+        self.assertIn('href="#fnref1"', body[1].html)
+        self.assertEqual(body[2].text, "Составляйте списки. Когда обычно пишете список “дел”, вы именно так и поступаете.")
+
+    def test_sup_without_a_reference_is_not_a_note(self):
+        blocks = self.page(10, "<p>Площадь 5 м<sup>2</sup> хватит.</p><p><sup>2</sup> м — квадратные метры.</p>")
+        blocks2, notes = take_footnotes(blocks)
+        self.assertEqual(len(notes), 1, "a reference elsewhere on the page makes it a note")
+        blocks = self.page(10, "<p>Обычный текст страницы.</p><p><sup>3</sup> Строка с числом.</p>")
+        blocks2, notes = take_footnotes(blocks)
+        self.assertEqual(notes, [])
+        self.assertEqual(blocks2, blocks)
 
 if __name__ == "__main__":
     unittest.main()

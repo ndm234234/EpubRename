@@ -591,7 +591,7 @@ def anchor_tocs(blocks: list, tocs: list[Toc], offset: int) -> None:
 
 @dataclass
 class Block:
-    kind: str           # p | h | img | page | toc | list | table
+    kind: str           # p | h | img | page | toc | list | table | note (a footnote)
     html: str = ""
     text: str = ""
     level: int = 0
@@ -838,6 +838,9 @@ ul.list { list-style: none; padding-left: 1.2em; margin: 0.5em 0; }
 ul.list li { margin: 0.2em 0; text-indent: -1.2em; padding-left: 1.2em; }
 table { border-collapse: collapse; margin: 1em auto; }
 td { border: 1px solid #999; padding: 0.2em 0.4em; vertical-align: top; }
+aside.note { font-size: 0.85em; margin: 0.4em 0 0.6em; }
+aside.note p { text-indent: 0; }
+a[href^="#fn"], aside.note a { text-decoration: none; }
 """
 
 
@@ -944,6 +947,8 @@ def write_epub(out: Path, title: str, author: str, lang: str, chapters: list[Cha
             id_attr = f' id="{b.anchor}"' if b.anchor else ""
             if b.kind == "p":
                 parts.append(f"<p{id_attr}>{b.html}</p>")
+            elif b.kind == "note":
+                parts.append(f'<aside epub:type="footnote" class="note"{id_attr}><p>{b.html}</p></aside>')
             elif b.kind == "h":
                 tag = "h1" if b.level == 1 else "h2" if b.level == 2 else "h3"
                 parts.append(f"<{tag}{id_attr}>{b.html}</{tag}>")

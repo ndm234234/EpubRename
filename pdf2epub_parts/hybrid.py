@@ -17,8 +17,8 @@ from typing import Callable
 import pdf2epub as base
 from pdf2epub import Block
 from pdf2epub_parts.engine import Engine, MarkerError, run_marker, stop_llama_server
-from pdf2epub_parts.markup import (fix_drop_cap, join_pages, merge_heading_runs, page_blocks, running_head_offset,
-                                   strip_running_heads, tocs_from_blocks)
+from pdf2epub_parts.markup import (fix_drop_cap, join_pages, merge_heading_runs, page_blocks, place_footnotes,
+                                   running_head_offset, strip_running_heads, take_footnotes, tocs_from_blocks)
 from pdf2epub_parts.merge import merge_page, needs_retry
 
 ACC_BATCH = 4          # pages per accurate run (the model is loaded once per run)
@@ -271,7 +271,9 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                 continue
             blocks.append(Block("page", level=n, page=n))
             blocks += page_blocks(strip_running_heads(read(merged_file(n)), n, offset), n)
+        blocks, notes = take_footnotes(blocks)
         blocks = join_pages(blocks)
+        place_footnotes(blocks, notes)
         fix_drop_cap(blocks)
         blocks = merge_heading_runs(blocks)
         tocs = place_tocs(blocks, base.find_tocs(pages, body))

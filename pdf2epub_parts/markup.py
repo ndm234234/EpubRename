@@ -147,6 +147,9 @@ def fix_drop_cap(blocks: list[Block]) -> None:
             setattr(b, attr, value)
 
 
+OPENING = "“„«\"'‘(["               # a quote or bracket before the first word
+
+
 def join_pages(blocks: list[Block]) -> list[Block]:
     """A paragraph cut by a page break goes on in the first paragraph of the next page."""
     out: list[Block] = []
@@ -157,7 +160,7 @@ def join_pages(blocks: list[Block]) -> list[Block]:
             continue
         last = next((x for x in reversed(out) if x.kind != "page"), None)
         if (b.kind == "p" and pending and last is not None and last.kind == "p"
-                and not last.text.rstrip().endswith(TERMINAL) and b.text[:1].islower()):
+                and not last.text.rstrip().endswith(TERMINAL) and b.text.lstrip(OPENING)[:1].islower()):
             if re.search(r"\w[-­]$", last.text):
                 last.html = re.sub(r"[-­](</[bi]>)?$", r"\1", last.html) + b.html
                 last.text = last.text[:-1] + b.text
@@ -226,6 +229,54 @@ def _is_running_title(b: Block, toc: Toc) -> bool:
     return re.sub(r"\W|\d", "", b.text.lower()) == re.sub(r"\W|\d", "", toc.title.lower())
 
 
+# ---------------------------------------------------------------- footnotes
+
+NOTE_START = re.compile(r"^\s*<sup>(\d{1,3})</sup>\s*")
+
+
+def _has_ref(b: Block, number: str) -> bool:
+    mark = f"<sup>{number}</sup>"
+    return mark in b.html or any(mark in i for i in b.items)
+
+
+def take_footnotes(blocks: list[Block]) -> tuple[list[Block], list[Block]]:
+    """Footnotes ('<sup>9</sup> Sometimes called…' at the foot of a page whose text has
+    '<sup>9</sup>') leave the flow, so the paragraph a page break cut joins up again."""
+    notes, keep = [], []
+    for b in blocks:
+        m = NOTE_START.match(b.html) if b.kind == "p" else None
+        if m and any(x is not b and x.page in (b.page, b.page - 1) and _has_ref(x, m.group(1))
+                     and not NOTE_START.match(x.html) for x in blocks):
+            notes.append(b)
+        else:
+            keep.append(b)
+    return keep, notes
+
+
+def place_footnotes(blocks: list[Block], notes: list[Block]) -> None:
+    """Each footnote goes right after the block that refers to it, as an EPUB footnote:
+    the number in the text links to it (readers show it in a pop-up) and it links back."""
+    for k, note in enumerate(notes, 1):
+        number = NOTE_START.match(note.html).group(1)
+        mark = f"<sup>{number}</sup>"
+        refs = [i for i, b in enumerate(blocks) if b.kind != "note" and b.page in (note.page, note.page - 1)
+                and _has_ref(b, number)]
+        link = f'<a epub:type="noteref" href="#fn{k}" id="fnref{k}">{mark}</a>'
+        if refs:
+            i = refs[-1]
+            ref = blocks[i]
+            if mark in ref.html:
+                ref.html = ref.html.replace(mark, link, 1)
+            else:
+                j = next(j for j, x in enumerate(ref.items) if mark in x)
+                ref.items[j] = ref.items[j].replace(mark, link, 1)
+        else:
+            i = max((j for j, b in enumerate(blocks) if b.page <= note.page), default=len(blocks) - 1)
+        body = NOTE_START.sub("", note.html, count=1)
+        back = f'<a href="#fnref{k}">{mark}</a> ' if refs else f"{mark} "
+        blocks.insert(i + 1, Block("note", html=back + body, text=note.text, page=note.page, anchor=f"fn{k}"))
+
+
 # ---------------------------------------------------------------- running heads
 
 HEAD_NUMBER = re.compile(r"^\s*(\d{1,4})\b|\b(\d{1,4})\s*$")
@@ -240,7 +291,10 @@ def _edges(page_html: str) -> tuple[Node, list]:
 
 
 def _head_number(node: Node) -> int | None:
-    """The page number of a short line with a number at its start or end ('22 INTRODUCTION')."""
+    """The page number of a short line with a number at its start or end ('22 INTRODUCTION').
+    A chapter heading (h1, the biggest type) or a footnote (starts with <sup>) is never one."""
+    if node.tag == "h1" or NOTE_START.match(serialize(node)[len(node.start):]):
+        return None
     t = " ".join(plain(node).split())
     if not t or len(t.split()) > HEAD_WORDS or len(t) > 120:
         return None
