@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pdf2epub import Block  # noqa: E402
-from pdf2epub_parts.markup import (fix_drop_cap, join_pages, page_blocks, place_footnotes,  # noqa: E402
+from pdf2epub_parts.markup import (fix_drop_cap, join_pages, link_endnotes, page_blocks, place_footnotes,  # noqa: E402
                                    running_head_offset, strip_running_heads, take_footnotes, tocs_from_blocks)
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -194,6 +194,54 @@ class FootnoteTest(unittest.TestCase):
         blocks2, notes = take_footnotes(blocks)
         self.assertEqual(notes, [])
         self.assertEqual(blocks2, blocks)
+
+
+class EndnoteTest(unittest.TestCase):
+    def blocks(self, pages):
+        out = []
+        for n, html in pages:
+            out += [Block("page", level=n, page=n)] + page_blocks(html, n)
+        return out
+
+    def notes(self, blocks):
+        return [b for b in blocks if b.kind == "endnote"]
+
+    def test_numbers_lost_by_recognition_come_back_in_order(self):
+        blocks = self.blocks([
+            (5, "<p>Текст со ссылкой<sup>[1]</sup> и еще одной<sup>[2]</sup>.</p>"),
+            (6, "<p>Дальше<sup>[3]</sup>, потом<sup>[4]</sup> и<sup>[5]</sup>.</p>"),
+            (9, "<h2>notes</h2><h2>Примечания</h2><p>Первое примечание.</p><p>Второе примечание.</p>"
+                "<h3>3</h3><p>Третье примечание.</p><p>4 Четвертое примечание.</p><p>Пятое примечание.</p>")])
+        self.assertEqual(link_endnotes(blocks), 5)
+        notes = self.notes(blocks)
+        self.assertEqual([b.anchor for b in notes], ["en1", "en2", "en3", "en4", "en5"])
+        self.assertEqual(notes[0].html, '<a href="#enref1">1.</a> Первое примечание.')
+        self.assertEqual(notes[2].html, '<a href="#enref3">3.</a> Третье примечание.')
+        self.assertEqual(notes[3].html, '<a href="#enref4">4.</a> Четвертое примечание.')
+        self.assertIn('Текст со ссылкой<a epub:type="noteref" href="#en1" id="enref1"><sup>[1]</sup></a>', blocks[1].html)
+        headings = [b.text for b in blocks if b.kind == "h"]
+        self.assertEqual(headings, ["Примечания"], "the label and the lone numbers are not headings")
+
+    def test_notes_after_each_chapter(self):
+        blocks = self.blocks([
+            (1, "<h1>Глава 1</h1><p>Раз<sup>1</sup> и два<sup>2</sup>.</p>"),
+            (2, "<h2>Примечания</h2><p>1 Первая глава, первое.</p><p>2 Первая глава, второе.</p>"),
+            (3, "<h1>Глава 2</h1><p>Снова раз<sup>1</sup>.</p>"),
+            (4, "<h2>Примечания</h2><p>1 Вторая глава, первое.</p>"),
+            (5, "<h1>Об авторе</h1><p>1990 год рождения.</p>")])
+        self.assertEqual(link_endnotes(blocks), 3)
+        notes = self.notes(blocks)
+        self.assertEqual([b.text for b in notes],
+                         ["Первая глава, первое.", "Первая глава, второе.", "Вторая глава, первое."])
+        text = " ".join(b.html for b in blocks if b.kind == "p")
+        self.assertIn('Снова раз<a epub:type="noteref" href="#en3" id="enref3"><sup>1</sup></a>', text)
+        self.assertIn("1990 год рождения.", text, "the notes end at the next chapter")
+
+    def test_no_notes_section_changes_nothing(self):
+        blocks = self.blocks([(5, "<p>Площадь 5 м<sup>2</sup> и ссылка<sup>[1]</sup>.</p>")])
+        before = [b.html for b in blocks]
+        self.assertEqual(link_endnotes(blocks), 0)
+        self.assertEqual([b.html for b in blocks], before)
 
 if __name__ == "__main__":
     unittest.main()

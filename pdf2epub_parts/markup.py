@@ -277,6 +277,149 @@ def place_footnotes(blocks: list[Block], notes: list[Block]) -> None:
         blocks.insert(i + 1, Block("note", html=back + body, text=note.text, page=note.page, anchor=f"fn{k}"))
 
 
+# ---------------------------------------------------------------- endnotes
+
+NOTES_TITLE = re.compile(r"(примечани[яе]|комментари[ийя]|сноски|примітки|коментарі|notes?|endnotes)\.?", re.I)
+NOTE_REF = re.compile(r"<sup>(\[?)(\d{1,3})\]?</sup>")
+NUMBER_ONLY = re.compile(r"\[?(\d{1,3})[\].]?")
+NUMBER_LEAD = re.compile(r"^\s*(?:<sup>)?\[?(\d{1,3})[\].]?(?:</sup>)?\s+(?=\S)")
+
+
+def _notes_sections(blocks: list[Block]) -> list[tuple[int, int, int]]:
+    """(label heading, first entry, end) of every 'Notes' section: its entries run until a
+    heading that is not just a number, or anything that is not a paragraph."""
+    sections, i = [], 0
+    while i < len(blocks):
+        b = blocks[i]
+        if b.kind == "h" and NOTES_TITLE.fullmatch(b.text.strip()):
+            j = i + 1
+            while j < len(blocks) and (blocks[j].kind == "page" or (
+                    blocks[j].kind == "h" and NOTES_TITLE.fullmatch(blocks[j].text.strip()))):
+                j += 1
+            k = j
+            while k < len(blocks) and (blocks[k].kind in ("p", "page") or (
+                    blocks[k].kind == "h" and NUMBER_ONLY.fullmatch(blocks[k].text.strip()))):
+                k += 1
+            sections.append((i, j, k))
+            i = k
+        else:
+            i += 1
+    return sections
+
+
+def _runs(items: list, number) -> list[list]:
+    """Split where the numbering starts again (notes numbered chapter by chapter)."""
+    runs: list[list] = []
+    last = None
+    for x in items:
+        n = number(x)
+        if n is not None and last is not None and n < last:
+            runs.append([])
+        if not runs:
+            runs.append([])
+        runs[-1].append(x)
+        last = n if n is not None else last
+    return runs
+
+
+def _number_entries(entries: list[list]) -> None:
+    """entries: [number or None, block, ...]. Numbers the recognition lost come back from the
+    order: the paragraphs between notes 4 and 13 are notes 5 to 12."""
+    i, prev = 0, 0
+    while i < len(entries):
+        if entries[i][0] is not None:
+            prev = entries[i][0]
+            i += 1
+            continue
+        j = i
+        while j < len(entries) and entries[j][0] is None:
+            j += 1
+        nxt = entries[j][0] if j < len(entries) else None
+        gap = (nxt - prev - 1) if nxt is not None else j - i
+        for k in range(i, j):
+            if k - i < gap:
+                entries[k][0] = prev + 1 + (k - i)
+            else:                                   # more paragraphs than numbers: one note goes on
+                entries[k][0] = -1
+        prev = prev + min(gap, j - i)
+        i = j
+
+
+def link_endnotes(blocks: list[Block]) -> int:
+    """Notes collected under a 'Notes' heading (at the end of the book or of each chapter) are
+    linked with their references in the text (<sup>[5]</sup> or <sup>5</sup>), both ways.
+    Returns the number of notes."""
+    sections = _notes_sections(blocks)
+    if not sections:
+        return 0
+    count, drop, start = 0, set(), 0
+    for label, first, end in sections:
+        # references between the previous notes and these: [n] always, a bare n in sequence
+        refs, last = [], 0
+        for bi in range(start, label):
+            b = blocks[bi]
+            if b.kind == "endnote":
+                continue
+            for m in NOTE_REF.finditer(b.html):
+                n = int(m.group(2))
+                if m.group(1) or n in (last, last + 1, 1):
+                    refs.append((bi, m.start(), m.end(), n))
+                    last = n
+        start = end
+        # the entries: "5 Text", or a lone "5" before its text, or text alone
+        entries, pending, lone_numbers = [], None, []
+        for bi in range(first, end):
+            b = blocks[bi]
+            if b.kind == "page":
+                continue
+            lone = NUMBER_ONLY.fullmatch(b.text.strip())
+            if lone:
+                pending = int(lone.group(1))
+                lone_numbers.append(bi)
+                continue
+            lead = NUMBER_LEAD.match(b.html)
+            if pending is not None:
+                entries.append([pending, bi, b.html])
+            elif lead:
+                entries.append([int(lead.group(1)), bi, b.html[lead.end():]])
+            else:
+                entries.append([None, bi, b.html])
+            pending = None
+        if not refs or not entries:
+            continue
+        drop.update(lone_numbers)
+        for group, run in zip(_runs(entries, lambda e: e[0]), _runs(refs, lambda r: r[3])):
+            _number_entries(group)
+            ids: dict[int, int] = {}
+            for e in group:
+                n, bi, body = e
+                if n == -1:                           # a further paragraph of the note before
+                    blocks[bi] = Block("endnote", html=body, text=_text(body), page=blocks[bi].page)
+                    continue
+                count += 1
+                ids[n] = count
+                linked = any(r[3] == n for r in run)
+                mark = f'<a href="#enref{count}">{n}.</a> ' if linked else f"{n}. "
+                blocks[bi] = Block("endnote", html=mark + body, text=_text(body), page=blocks[bi].page,
+                                   anchor=f"en{count}")
+            first_ref = {}
+            for r in run:                             # the first reference gets the way back
+                first_ref.setdefault(r[3], r)
+            for r in sorted(run, key=lambda r: (r[0], -r[1])):
+                bi, s, t, n = r
+                if n not in ids:
+                    continue
+                c = ids[n]
+                id_attr = f' id="enref{c}"' if first_ref[n] is r else ""
+                b = blocks[bi]
+                b.html = b.html[:s] + f'<a epub:type="noteref" href="#en{c}"{id_attr}>{b.html[s:t]}</a>' + b.html[t:]
+        labels = [i for i in range(label, first) if blocks[i].kind == "h"]
+        drop.update(labels[:-1])                      # 'notes' + 'Примечания': one title is enough
+    if drop:
+        blocks[:] = [b for i, b in enumerate(blocks) if i not in drop or b.kind == "page"]
+    return count
+
+
 # ---------------------------------------------------------------- running heads
 
 HEAD_NUMBER = re.compile(r"^\s*(\d{1,4})\b|\b(\d{1,4})\s*$")

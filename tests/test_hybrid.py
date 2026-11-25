@@ -51,8 +51,8 @@ class FakeEngine:
     """Stands in for run_marker: records calls, can fail or be interrupted."""
 
     def __init__(self, fail_accurate=(), interrupt_on=None, fail_fast=(), loop_accurate=(), fast_heads=False,
-                 notes=False):
-        self.fast_heads, self.notes = fast_heads, notes
+                 notes=False, endnotes=False):
+        self.fast_heads, self.notes, self.endnotes = fast_heads, notes, endnotes
         self.calls, self.fail_accurate, self.interrupt_on = [], set(fail_accurate), interrupt_on
         self.fail_fast, self.loop_accurate = set(fail_fast), set(loop_accurate)
 
@@ -73,6 +73,10 @@ class FakeEngine:
         head = (lambda i: f"<h2>{i + 11} ТЕСТОВАЯ КНИГА</h2>") if mode == "fast" and self.fast_heads else (lambda i: "")
         note = (lambda i: f"<p>Ссылка на сноску<sup>{i + 1}</sup> в тексте.</p><p><sup>{i + 1}</sup> Текст сноски {i + 1}.</p>"
                 if mode == "accurate" and self.notes else "")
+        if mode == "accurate" and self.endnotes:
+            end = {0: "<p>Ссылка на примечание<sup>[1]</sup> в тексте.</p>",
+                   2: "<h2>Примечания</h2><p>Текст примечания.</p>"}
+            note = lambda i: end.get(i, "")
         return {i: f"{head(i)}<h1>Глава {i + 1}</h1><p>{tag}{SENTENCES[i]}</p>{note(i)}" for i in pages}
 
     def accurate_pages(self):
@@ -137,6 +141,18 @@ class HybridTest(unittest.TestCase):
         self.assertIn('<aside epub:type="footnote" class="note" id="fn1"><p><a href="#fnref1"><sup>1</sup></a> '
                       'Текст сноски 1.</p></aside>', text)
         self.assertIn('id="fn3"', text)
+
+    def test_endnotes_linked_across_files(self):
+        self.convert(FakeEngine(endnotes=True))
+        check_epub(self.out)
+        with zipfile.ZipFile(self.out) as zf:
+            files = {n: zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml")}
+        ref = next(n for n, t in files.items() if "enref1" in t and "noteref" in t)
+        note = next(n for n, t in files.items() if 'id="en1"' in t)
+        self.assertNotEqual(ref, note)
+        self.assertIn(f'href="{Path(note).name}#en1"', files[ref])
+        self.assertIn(f'href="{Path(ref).name}#enref1"', files[note])
+        self.assertIn('epub:type="endnote"', files[note])
 
     def test_running_heads_left_out(self):
         self.convert(FakeEngine(fast_heads=True, fail_accurate={0}))

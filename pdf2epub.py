@@ -591,7 +591,7 @@ def anchor_tocs(blocks: list, tocs: list[Toc], offset: int) -> None:
 
 @dataclass
 class Block:
-    kind: str           # p | h | img | page | toc | list | table | note (a footnote)
+    kind: str           # p | h | img | page | toc | list | table | note (a footnote) | endnote
     html: str = ""
     text: str = ""
     level: int = 0
@@ -840,6 +840,7 @@ table { border-collapse: collapse; margin: 1em auto; }
 td { border: 1px solid #999; padding: 0.2em 0.4em; vertical-align: top; }
 aside.note { font-size: 0.85em; margin: 0.4em 0 0.6em; }
 aside.note p { text-indent: 0; }
+div.endnote p { text-indent: 0; font-size: 0.9em; margin: 0.3em 0; }
 a[href^="#fn"], aside.note a { text-decoration: none; }
 """
 
@@ -924,6 +925,10 @@ def write_epub(out: Path, title: str, author: str, lang: str, chapters: list[Cha
         spine.append('<itemref idref="cover"/>')
 
     where = {b.anchor: ch.file for ch in chapters for b in ch.blocks if b.anchor}
+    for ch in chapters:                    # places inside the text (the references to notes)
+        for b in ch.blocks:
+            for anchor in re.findall(r'\bid="([\w-]+)"', b.html + "".join(b.items)):
+                where.setdefault(anchor, ch.file)
 
     def href(anchor: str) -> str | None:
         return f"{where[anchor]}#{anchor}" if anchor in where else None
@@ -947,6 +952,8 @@ def write_epub(out: Path, title: str, author: str, lang: str, chapters: list[Cha
             id_attr = f' id="{b.anchor}"' if b.anchor else ""
             if b.kind == "p":
                 parts.append(f"<p{id_attr}>{b.html}</p>")
+            elif b.kind == "endnote":
+                parts.append(f'<div class="endnote" epub:type="endnote"{id_attr}><p>{b.html}</p></div>')
             elif b.kind == "note":
                 parts.append(f'<aside epub:type="footnote" class="note"{id_attr}><p>{b.html}</p></aside>')
             elif b.kind == "h":
@@ -965,7 +972,9 @@ def write_epub(out: Path, title: str, author: str, lang: str, chapters: list[Cha
                 parts.append(f"<table{id_attr}>{rows}</table>")
         if not any(t[2].startswith(ch.file + "#") for t in toc):
             toc.append((1, ch.title, ch.file))
-        files[ch.file] = xhtml(ch.title, "\n".join(parts), lang).encode()
+        body = re.sub(r'href="#([\w-]+)"', lambda m: f'href="{href(m.group(1))}"' if where.get(m.group(1), ch.file)
+                      != ch.file else m.group(0), "\n".join(parts))      # a note in another file
+        files[ch.file] = xhtml(ch.title, body, lang).encode()
         manifest.append(f'<item id="c{n}" href="{ch.file}" media-type="application/xhtml+xml"/>')
         spine.append(f'<itemref idref="c{n}"/>')
     for n, (src, name) in enumerate(images.items(), 1):

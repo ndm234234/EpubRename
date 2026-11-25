@@ -17,7 +17,8 @@ from typing import Callable
 import pdf2epub as base
 from pdf2epub import Block
 from pdf2epub_parts.engine import Engine, MarkerError, run_marker, stop_llama_server
-from pdf2epub_parts.markup import (fix_drop_cap, join_pages, merge_heading_runs, page_blocks, place_footnotes,
+from pdf2epub_parts.markup import (fix_drop_cap, join_pages, link_endnotes, merge_heading_runs, page_blocks,
+                                   place_footnotes,
                                    running_head_offset, strip_running_heads, take_footnotes, tocs_from_blocks)
 from pdf2epub_parts.merge import merge_page, needs_retry
 
@@ -274,6 +275,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
         blocks, notes = take_footnotes(blocks)
         blocks = join_pages(blocks)
         place_footnotes(blocks, notes)
+        link_endnotes(blocks)
         fix_drop_cap(blocks)
         blocks = merge_heading_runs(blocks)
         tocs = place_tocs(blocks, base.find_tocs(pages, body))
