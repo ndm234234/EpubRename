@@ -201,14 +201,26 @@ def run_marker(engine: Engine, pdf: Path, mode: str, pages: list[int], out_dir: 
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _in_use(pid: int) -> bool:
+    """The server's parent is a Marker that is still running (another book is being read)."""
+    try:
+        ppid = int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
+        return b"marker_single" in Path(f"/proc/{ppid}/cmdline").read_bytes()
+    except (OSError, ValueError, IndexError):
+        return False
+
+
 def stop_llama_server(engine: Engine) -> None:
-    """Stop every llama-server started from this engine (Marker may leave one running)."""
+    """Stop the llama-servers of this engine that Marker left running; one a running Marker
+    still talks to (another book converted at the same time) is left alone."""
     target = str(engine.llama_server.resolve()) if engine.llama_server.exists() else str(engine.llama_server)
     for proc in Path("/proc").glob("[0-9]*"):
         try:
             if os.readlink(proc / "exe") != target:
                 continue
             pid = int(proc.name)
+            if _in_use(pid):
+                continue
             os.kill(pid, signal.SIGTERM)
         except (OSError, ValueError):
             continue

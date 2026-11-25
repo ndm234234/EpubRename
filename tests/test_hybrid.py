@@ -51,8 +51,9 @@ class FakeEngine:
     """Stands in for run_marker: records calls, can fail or be interrupted."""
 
     def __init__(self, fail_accurate=(), interrupt_on=None, fail_fast=(), loop_accurate=(), fast_heads=False,
-                 notes=False, endnotes=False):
+                 notes=False, endnotes=False, empty_accurate=(), empty_once=()):
         self.fast_heads, self.notes, self.endnotes = fast_heads, notes, endnotes
+        self.empty_accurate, self.empty_once = set(empty_accurate), set(empty_once)
         self.calls, self.fail_accurate, self.interrupt_on = [], set(fail_accurate), interrupt_on
         self.fail_fast, self.loop_accurate = set(fail_fast), set(loop_accurate)
 
@@ -66,6 +67,10 @@ class FakeEngine:
                 raise MarkerError("boom")
         elif set(pages) & self.fail_fast:
             raise MarkerError("boom")
+        if mode == "accurate" and set(pages) & (self.empty_accurate | self.empty_once):
+            blank = set(pages) & (self.empty_accurate | self.empty_once)
+            self.empty_once -= blank
+            return {i: "" if i in blank else f"<h1>Глава {i + 1}</h1><p>{SENTENCES[i]}</p>" for i in pages}
         if mode == "accurate" and set(pages) & self.loop_accurate:
             return {i: f"<h1>Глава {i + 1}</h1><p>{SENTENCES[i]}</p><p>" + " ".join(["и так далее"] * 40) + "</p>"
                     for i in pages}
@@ -218,6 +223,20 @@ class HybridTest(unittest.TestCase):
         self.convert(second, keep_work=True)
         self.assertEqual(second.accurate_pages(), [], "rebuilt from the cached accurate reading")
         self.assertIn(SENTENCES[1], (self.work() / "merged" / "page-0002.html").read_text())
+
+    def test_empty_accurate_page_read_again(self):
+        fake = FakeEngine(empty_once={1})
+        self.convert(fake, keep_work=True)
+        report = json.loads((self.work() / "report.json").read_text())
+        self.assertEqual(report["pages"]["2"]["source"], "accurate")
+        self.assertEqual(fake.accurate_pages(), [0, 1, 1, 2])
+
+    def test_empty_accurate_page_is_not_kept(self):
+        self.convert(FakeEngine(empty_accurate={1}), keep_work=True)
+        report = json.loads((self.work() / "report.json").read_text())
+        self.assertEqual(report["pages"]["2"]["source"], "fast")
+        self.assertEqual(report["pages"]["2"]["reason"], "accurate found nothing")
+        self.assertFalse((self.work() / "acc" / "page-0002.html").exists(), "a blank reading is a failure, not a result")
 
     def test_summary_names_pages_to_check(self):
         summary = self.convert(FakeEngine(fail_accurate={0}))

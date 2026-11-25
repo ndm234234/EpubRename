@@ -7,6 +7,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import os
+import shutil
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -131,6 +133,32 @@ class EngineInstallTest(unittest.TestCase):
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+class StopServerTest(unittest.TestCase):
+    def test_only_servers_nobody_uses_are_stopped(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        server = tmp / "llama-server"
+        shutil.copy(os.path.realpath(sys.executable), server)      # a real program under that name
+        nap = ["-c", "import time; time.sleep(60)"]
+        # a server another book's Marker is talking to: its parent is a running marker_single
+        busy_parent = subprocess.Popen([sys.executable, "-c",
+                                        "import subprocess,sys,time; p=subprocess.Popen([sys.argv[1],'-c','import time; time.sleep(60)']); "
+                                        "print(p.pid, flush=True); time.sleep(60)", str(server), "marker_single"],
+                                       stdout=subprocess.PIPE, text=True)
+        self.addCleanup(busy_parent.kill)
+        busy = int(busy_parent.stdout.readline())
+        self.addCleanup(lambda: os.kill(busy, 9) if Path(f"/proc/{busy}").exists() else None)
+        # a server left behind by a Marker that has finished
+        left = subprocess.Popen([str(server), *nap])
+        self.addCleanup(left.kill)
+        eng.stop_llama_server(eng.Engine(tmp / "py", tmp / "marker", server))
+        left.wait(timeout=10)
+        self.assertIsNotNone(left.returncode, "a server nobody uses is stopped")
+        state = Path(f"/proc/{busy}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        self.assertNotEqual(state, "Z", "a server a running Marker uses stays")
+        os.kill(busy, 9)
 
 
 class MarkerRunTest(unittest.TestCase):

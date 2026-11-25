@@ -20,12 +20,13 @@ import pdf2epub as base
 from pdf2epub import Block
 from pdf2epub_parts.engine import Engine, MarkerError, run_marker, stop_llama_server
 from pdf2epub_parts.markup import (fix_drop_cap, join_pages, link_endnotes, merge_heading_runs, page_blocks,
-                                   place_footnotes,
+                                   place_footnotes, text_of,
                                    running_head_offset, strip_running_heads, take_footnotes, tocs_from_blocks)
 from pdf2epub_parts.merge import merge_page, needs_retry
 
 ACC_BATCH = 4          # pages per accurate run (the model is loaded once per run)
 FAIL_LIMIT = 8         # accurate failing on this many pages in a row: something is broken, stop the book
+BLANK_SUSPECT = 8          # accurate empty while fast has this many words: the reading failed
 CHECK_COVERAGE = 0.9   # pages checked less well than this are named in the summary
 
 
@@ -247,12 +248,23 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
         todo = [n for n in numbers if not done(n)]
         started, done_now, recognised = time.time(), 0, 0
         failing: list[int] = []                    # pages in a row accurate failed on
+        blank: set[int] = set()                    # pages accurate read as blank (not kept)
         for i in range(0, len(todo), ACC_BATCH):
             batch = todo[i:i + ACC_BATCH]
             need = [n for n in batch if not acc_file(n).exists()]
             if need:
                 recognise("accurate", need, lambda n, h: _write(acc_file(n), h))
                 recognised += len(need)
+                # a blank page where fast read text: the reading failed (e.g. its server died);
+                # read it once more, and if it is still blank, don't keep it
+                for n in need:
+                    if acc_file(n).exists() and not read(acc_file(n)).strip() and \
+                            len(re.findall(r"\w+", text_of(read(fast_file(n))))) >= BLANK_SUSPECT:
+                        log(f"page {n}: accurate came back blank, reading it again")
+                        recognise("accurate", [n], lambda k, h: _write(acc_file(k), h))
+                        if not read(acc_file(n)).strip():
+                            acc_file(n).unlink()
+                            blank.add(n)
             for n in batch:
                 fast_html = strip_running_heads(read(fast_file(n)), n, offset)
                 acc_html = strip_running_heads(read(acc_file(n)), n, offset) if acc_file(n).exists() else None
@@ -288,7 +300,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                         merged, source, info["reason"] = fast_html, "fast", "accurate repeated itself"
                 elif fast_html.strip():
                     merged, source = fast_html, "fast"
-                    info["reason"] = "accurate failed" if acc_html is None else "accurate found nothing"
+                    info["reason"] = "accurate failed" if acc_html is None and n not in blank else "accurate found nothing"
                 elif layer[n].strip():
                     merged, source = f"<p>{_escape(layer[n])}</p>", "layer"
                 else:
