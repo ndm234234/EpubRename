@@ -1593,8 +1593,8 @@ for (const [v, f] of Object.entries(FACES)) {   // a button per font, written in
 }
 if (!FACES[prefs.face]) prefs.face = "book";
 function typoCss() {
-  // Phones, tablets: smaller margins above and below the text than epub.js's 20px, the same on both
-  let css = touchUi.matches ? "body { padding-top: 12px !important; padding-bottom: 12px !important; }\n" : "";
+  // Phones, tablets: the same margin above and below the text, about 20px to the letters
+  let css = touchUi.matches ? "body { padding-top: 17px !important; padding-bottom: 17px !important; }\n" : "";
   if (FACES[prefs.face])   // code and other monospaced text keeps its font
     css += `body, body *:not(pre, code, kbd, samp, tt, pre *, code *) { font-family: ${FACES[prefs.face].stack} !important; }\n`;
   // Plain paragraphs only, and weaker than any class rule: centred titles, epigraphs etc. keep the
