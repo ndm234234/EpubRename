@@ -414,6 +414,10 @@ PAGE = r"""<!DOCTYPE html>
            border-radius: 6px 12px 12px 6px; background: var(--surface-2); box-shadow: var(--shadow-hover); }
   .dbody { min-width: 0; padding-top: 8px; }
   .dbody h3 { margin: 0 0 8px; font-size: 32px; line-height: 1.15; letter-spacing: -.02em; font-weight: 750; }
+  /* The title is a button that copies it: it looks like the heading it is */
+  .dtitle { all: unset; cursor: pointer; border-radius: 6px; overflow-wrap: anywhere; }
+  .dtitle:hover { text-decoration: underline dotted; text-decoration-thickness: 2px; text-underline-offset: 5px; }
+  .dtitle:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
   .dbody .authors { font-size: 17px; white-space: normal; }
   .dbody .meta { margin-top: 6px; font-size: 13px; }
   .dact .short { display: none; }
@@ -762,7 +766,8 @@ function openDetail(b, animate = true) {
   current = b;
   const read = el("a", { class: "btn primary", href: readerUrl(b) }, icon("read"), "Read");
   const body = el("div", { class: "dbody" },
-    el("h3", {}, b.title), authorLinks(b),
+    el("h3", {}, el("button", { class: "dtitle", type: "button", title: "Copy the title", on: () => copyTitle(b.title) }, b.title)),
+    authorLinks(b),
     el("div", { class: "meta" }, metaLine(b)),
     el("div", { class: "dact" }, read, ...(offline ? [offline.bookButton(b), saveLink(b, { class: "btn", "aria-label": "Save the file" }, icon("download"))]
                                            : [saveLink(b, { class: "btn" }, icon("download"), "Save")])),
@@ -1139,6 +1144,23 @@ const offline = (() => {
   const marks = b => (away(b) ? " away" : "") + (onDevice.has(bookUrl(b)) ? " here" : "");
   return { away, marks, panel: openPanel, bookButton, toggleBook };
 })();
+
+// Copy a book's title. The clipboard API needs a secure page (https, localhost or a file);
+// over plain http on the local network the old way, a selected text field, still works.
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  const t = el("textarea", { readonly: "", style: "position: fixed; top: 0; left: -9999px; opacity: 0" });
+  t.value = text;
+  document.body.append(t);
+  t.select();
+  let done = false;
+  try { done = document.execCommand("copy"); } catch {}
+  t.remove();
+  return done;
+}
+function copyTitle(title) {
+  copyText(title).then(done => toast(done ? "Title copied" : "Couldn't copy the title"));
+}
 
 let toastTimer = 0;
 function toast(text) {

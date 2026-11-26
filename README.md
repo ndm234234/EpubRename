@@ -172,7 +172,8 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
   Read saves the EPUB file: Chrome/Edge (via the launcher) show a dialog to choose the folder;
   other browsers download it as usual.
 - The book's page: the cover flies from the shelf to the left and the description slides in on
-  the right (or "This book has no description."), with **Read** and **Save** buttons. `Esc`, the
+  the right (or "This book has no description."), with **Read** and **Save** buttons. A click on
+  the title copies it. `Esc`, the
   **Catalog** button or the browser's Back return to the shelf (the cover flies back); leaving the
   reader brings you back to the book's page. `Ctrl`+click / middle click on a cover opens the reader
   in a new tab. With "reduce motion" turned on in the system there is no animation.
@@ -183,9 +184,13 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
 A single offline page (`reader/reader.html`) built on [epub.js](https://github.com/futurepress/epub.js)
 and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). Nothing is uploaded.
 
-- Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows, mouse wheel / touchpad (one page per notch or swipe). On touch screens: swipe, or tap
-  the lower half of the page (from the middle down to the slider) — right side for the next page,
-  left side for the previous one. Taps in the upper half, on links or while selecting text don't turn pages.
+- Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows, mouse wheel / touchpad (one page per notch or swipe).
+- **Phones and tablets** read with the whole screen for the text: only a thin line at the bottom
+  (page in chapter, % of the book) stays. A tap in the **middle third** of the page brings the
+  toolbar and the slider over the text (the page doesn't move); another tap hides them. A tap in
+  the **left / right third** or a swipe turns the page. The bars hide again after any move in the
+  book (page turn, slider, contents, search, bookmark). Taps on links or while selecting text don't
+  count. With a mouse the bars are always there and taps in the lower half of the page turn pages.
 - Table of contents (`T`), current chapter, page in chapter and % of the book.
 - `Esc` closes an open panel (contents, search, bookmarks), then clears search highlights,
   then closes the book and returns to the catalog, scrolled to where you left it
@@ -224,7 +229,8 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
   A4 sheet (landscape for a wide window, portrait for a tall one), black on white whatever the theme.
 - **Aa** — text settings, remembered for all books:
   - size (also `+` / `−`);
-  - font: *As in book*, or one of the reading fonts that come with the reader — Literata,
+  - font: *As in book* (under it, the font the open chapter is set in: e.g. *Times New Roman*,
+    *Liberation Serif · in the book* for a font the book carries, or *default serif*), or one of the reading fonts that come with the reader — Literata,
     PT Serif, Lora, Merriweather, PT Sans, Inter. Books come with their own fonts (embedded,
     or named like Times New Roman / Arial), and books that name none get the device's
     default, so they all look different. A chosen font shows every book the same way, on
