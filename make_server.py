@@ -503,6 +503,28 @@ PAGE = r"""<!DOCTYPE html>
            background: var(--text); color: var(--bg); box-shadow: 0 12px 30px -10px rgba(0,0,0,.5); }
   footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 20px 32px; opacity: .8; }
 
+  /* Account (sync between devices): same panel as in the reader */
+  #acctPop { gap: 8px; }
+  #acctPop .tabs { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--surface-2); }
+  #acctPop .tabs button { flex: 1; height: 32px; padding: 0 8px; border: 0; border-radius: 8px; font: inherit; font-size: 14px;
+                          color: var(--muted); background: none; cursor: pointer; }
+  #acctPop .tabs button.on { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+  #acctPop [data-pane] { display: none; }
+  #acctPop [data-pane].on, #acctOut { display: grid; gap: 8px; margin-top: 10px; }
+  #acctPop input { height: 36px; min-width: 0; font: inherit; color: var(--text); background: var(--bg);
+                   border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; }
+  #acctPop input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  #acctPop .go { height: 36px; border: 0; border-radius: 10px; font: inherit; font-weight: 600; color: #fff;
+                 background: var(--accent); cursor: pointer; }
+  #acctPop .row { display: flex; gap: 8px; }
+  #acctPop .row button { flex: 1; height: 36px; border: 0; border-radius: 10px; font: inherit; color: var(--text);
+                         background: var(--surface-2); cursor: pointer; }
+  #acctPop .row button.go { color: #fff; background: var(--accent); }
+  #acctPop p { margin: 0 2px; font-size: 12px; color: var(--muted); line-height: 1.35; }
+  #acctErr { font-size: 13px !important; color: var(--danger) !important; }
+  #acctErr:empty { display: none; }
+  @media (max-width: 640px) { #acctPop input { font-size: 16px; } }   /* iPhone zooms in on smaller text fields */
+
   @media (max-width: 640px) {
     header { padding: 10px 16px; }
     main { padding: 20px 16px 48px; }
@@ -564,6 +586,8 @@ PAGE = r"""<!DOCTYPE html>
       <svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><span>Group by author</span></button>
     <button id="offBtn" class="chip" type="button" aria-expanded="false" aria-controls="offPanel" hidden
       title="Books kept on this device"><svg class="ic" aria-hidden="true"><use href="#i-cloud"/></svg><span>Offline</span><b id="offLabel" class="count"></b></button>
+    <button id="acctBtn" class="chip" type="button" aria-expanded="false" aria-controls="acctPop" hidden
+      title="Account: your last-opened books and settings on all your devices"><svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><span>Account</span></button>
     <a id="openFile" class="chip" href="__READER__" title="Open any EPUB file in the reader">
       <svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span>Open file</span></a>
   </div>
@@ -583,6 +607,34 @@ PAGE = r"""<!DOCTYPE html>
   <div id="offInfo" class="popinfo"></div>
   <button id="offClear" class="btn" type="button">Remove all books from this device</button>
 </div>
+<div id="acctPop" class="pop" role="dialog" aria-label="Account" hidden>
+  <div id="acctIn">
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="signin">Sign in</button>
+      <button type="button" role="tab" data-tab="create">Create account</button>
+    </div>
+    <form id="acctSignIn" data-pane="signin" role="tabpanel">
+      <input name="login" placeholder="Login" autocomplete="username" autocapitalize="none" spellcheck="false" aria-label="Login">
+      <input name="password" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password">
+      <button class="go" type="submit">Sign in</button>
+    </form>
+    <form id="acctCreate" data-pane="create" role="tabpanel">
+      <input name="login" placeholder="Login (a–z, 0–9, . _ -)" autocomplete="username" autocapitalize="none" spellcheck="false" aria-label="Login">
+      <input name="password" type="password" placeholder="Password" autocomplete="new-password" aria-label="Password">
+      <input name="password2" type="password" placeholder="Password again" autocomplete="new-password" aria-label="Password again">
+      <input name="code" placeholder="Library code" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Library code">
+      <button class="go" type="submit">Create account</button>
+    </form>
+  </div>
+  <div id="acctOut">
+    <div id="acctWho">Signed in as <b id="acctLogin"></b></div>
+    <p id="acctStatus"></p>
+    <div class="row"><button type="button" id="acctSync" class="go">Sync now</button><button type="button" id="acctSignOut">Sign out</button></div>
+  </div>
+  <p id="acctErr" role="alert"></p>
+  <p>Reading places, bookmarks and settings follow you to your other devices.
+    The library code is shown in the library computer's launcher window.</p>
+</div>
 <div id="netNote" class="note" hidden><svg class="ic" aria-hidden="true"><use href="#i-offline"/></svg>
   <div>No connection to the library. Books on this device can be read; the others are dimmed.</div></div>
 <div id="newNote" class="note" hidden><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>
@@ -593,6 +645,8 @@ PAGE = r"""<!DOCTYPE html>
 <footer>Generated __DATE__ · cover or title: about the book · Read: start reading</footer>
 
 <script id="data" type="application/json">__DATA__</script>
+<script src=".index/reader/sync-merge.js"></script>
+<script src=".index/reader/sync.js"></script>
 <script>
 "use strict";
 const books = JSON.parse(document.getElementById("data").textContent);
@@ -614,12 +668,25 @@ let openedAt = openedTimes();
 
 // Settings survive page reloads (the app keeps its own)
 const PREFS = inApp ? "epubIndex:app" : "epubIndex";
-const saved = (() => { try { return JSON.parse(localStorage.getItem(PREFS)) || {}; } catch { return {}; } })();
-$("sort").value = saved.sort || (inApp ? "opened" : "author");
-if (!$("sort").value) $("sort").value = "author";
-if (saved.group === true) $("group").setAttribute("aria-pressed", "true");
-const save = () => { try { localStorage.setItem(PREFS, JSON.stringify(
-  { sort: $("sort").value, group: $("group").getAttribute("aria-pressed") === "true" })); } catch {} };
+function applyPrefs() {
+  const saved = (() => { try { return JSON.parse(localStorage.getItem(PREFS)) || {}; } catch { return {}; } })();
+  $("sort").value = saved.sort || (inApp ? "opened" : "author");
+  if (!$("sort").value) $("sort").value = "author";
+  $("group").setAttribute("aria-pressed", saved.group === true);
+}
+applyPrefs();
+const save = () => {
+  try {
+    localStorage.setItem(PREFS, JSON.stringify({ sort: $("sort").value, group: $("group").getAttribute("aria-pressed") === "true" }));
+    localStorage.setItem(PREFS + ":time", String(Date.now()));
+  } catch {}
+  Sync.changed();
+};
+// Sync between devices (sync.js); a stand-in that does nothing if it isn't there
+const Sync = window.LibrarySync || { available: () => false, signedIn: () => false, account: () => null,
+  lastSync: () => null, changed() {}, onRemoteChange() {},
+  syncNow: async () => "signed-out", logout: async () => ({ ok: true }),
+  login: async () => ({ ok: false, error: "offline" }), register: async () => ({ ok: false, error: "offline" }) };
 
 const NS = "http://www.w3.org/2000/svg";
 function icon(name) {
@@ -1189,6 +1256,119 @@ addEventListener("beforeinstallprompt", e => e.preventDefault());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) ping(); });
   addEventListener("pagehide", () => { try { navigator.sendBeacon("/__bye"); } catch {} });
 })();
+
+// Account: sign in / create one; signed in: last sync, "Sync now", "Sign out". Errors show here only.
+let acctTab = "signin", syncResult = "", acctBusy = false;
+const ACCT_ERR = {
+  "wrong-code": "Wrong library code. It is shown in the library computer's launcher window.",
+  taken: "This login is taken: choose another one.",
+  "bad-login": "Login: 2 to 32 characters, a–z, 0–9 and . _ -",
+  "wrong-password": "Wrong login or password.",
+  wait: "Too many tries. Try again later.",
+  offline: "Can't reach the library computer.",
+};
+const acctError = text => { $("acctErr").textContent = text || ""; };
+function syncedAt(t) {
+  const d = new Date(t), now = new Date();
+  if (now - d < 60000) return "just now";
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toDateString() === now.toDateString() ? "at " + time : d.toLocaleDateString() + " " + time;
+}
+function showAcct() {
+  const on = Sync.signedIn(), a = Sync.account();
+  $("acctIn").hidden = on;
+  $("acctOut").hidden = !on;
+  for (const e of $("acctPop").querySelectorAll("[data-tab], [data-pane]")) {
+    const sel = (e.dataset.tab || e.dataset.pane) === acctTab;
+    e.classList.toggle("on", sel);
+    if (e.dataset.tab) e.setAttribute("aria-selected", sel);
+  }
+  if (!on) {
+    for (const f of [$("acctSignIn"), $("acctCreate")]) if (a && !f.elements.login.value) f.elements.login.value = a.login;
+    return;
+  }
+  $("acctLogin").textContent = a ? a.login : "";
+  const t = Sync.lastSync();
+  $("acctStatus").textContent = syncResult === "busy" ? "Syncing…"
+    : syncResult === "offline" || !t ? "Waiting for the library computer" + (t ? ` · last synced ${syncedAt(t)}` : "")
+    : "Last synced " + syncedAt(t);
+}
+function toggleAcct(open = $("acctPop").hidden) {
+  $("acctPop").hidden = !open;
+  $("acctBtn").setAttribute("aria-expanded", open);
+  if (open) { acctError(""); showAcct(); }
+}
+async function syncFromPanel() {
+  syncResult = "busy"; showAcct();
+  syncResult = await Sync.syncNow();
+  if (syncResult === "signed-out") acctError("Signed out by the library computer. Sign in again.");
+  showAcct();
+}
+async function acctAuth(form, call) {
+  if (acctBusy) return;
+  acctBusy = true;
+  acctError("");
+  for (const b of form.querySelectorAll("button")) b.disabled = true;
+  try {
+    const r = await call();
+    if (!r.ok) {
+      acctError(r.error === "wait" && r.wait ? `Too many tries. Try again in ${Math.ceil(r.wait / 60)} min.` : ACCT_ERR[r.error] || ACCT_ERR.offline);
+      return;
+    }
+    for (const i of form.querySelectorAll("input[type=password]")) i.value = "";
+    await syncFromPanel();   // the first sync merges this device's data with the account's: nothing is lost
+  } finally {
+    acctBusy = false;
+    for (const b of form.querySelectorAll("button")) b.disabled = false;
+  }
+}
+$("acctSignIn").onsubmit = e => {
+  e.preventDefault();
+  const f = e.target, login = f.elements.login.value.trim(), pw = f.elements.password.value;
+  if (!login || !pw) return acctError("Enter your login and password.");
+  acctAuth(f, () => Sync.login(login, pw));
+};
+$("acctCreate").onsubmit = e => {
+  e.preventDefault();
+  const f = e.target, login = f.elements.login.value.trim(), pw = f.elements.password.value, code = f.elements.code.value.trim();
+  if (!login || !pw) return acctError("Enter a login and a password.");
+  if (pw !== f.elements.password2.value) return acctError("The passwords don't match.");
+  if (!code) return acctError("Enter the library code: it is shown in the library computer's launcher window.");
+  acctAuth(f, () => Sync.register(login, pw, code));
+};
+$("acctPop").querySelector(".tabs").addEventListener("click", e => {
+  const b = e.target.closest("[data-tab]");
+  if (b) { acctTab = b.dataset.tab; acctError(""); showAcct(); }
+});
+$("acctPop").addEventListener("keydown", e => {
+  e.stopPropagation();   // typing here never reaches the catalog's shortcuts
+  if (e.key === "Escape") { e.preventDefault(); toggleAcct(false); $("acctBtn").focus(); }
+});
+$("acctSync").onclick = () => { acctError(""); syncFromPanel(); };
+$("acctSignOut").onclick = async () => { await Sync.logout(); syncResult = ""; acctError(""); showAcct(); };
+$("acctBtn").onclick = e => { e.stopPropagation(); toggleAcct(); };
+document.addEventListener("click", e => {   // a click elsewhere closes the panel
+  if (!$("acctPop").hidden && !$("acctPop").contains(e.target) && !$("acctBtn").contains(e.target)) toggleAcct(false);
+});
+if (Sync.available()) $("acctBtn").hidden = false;   // secure pages only: a password never crosses the Wi-Fi in the clear
+
+// Signed in: what other devices opened and chose comes in at start (never waiting longer than 2 s
+// for the library computer), when the page comes back to the front, and whenever a sync brings news.
+{
+  const refresh = () => {
+    openedAt = openedTimes();
+    applyPrefs();
+    render();
+    if (!$("acctPop").hidden) showAcct();
+  };
+  Sync.onRemoteChange(r => { if (r.opened || r.prefs) refresh(); });
+  if (Sync.signedIn()) {
+    Sync.syncNow({ timeoutMs: 2000 }).then(r => { syncResult = r; refresh(); });
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && Sync.signedIn()) Sync.syncNow().then(r => { syncResult = r; refresh(); });
+    });
+  }
+}
 
 // Came back to a book page (reload, or the reader's Back): show it without the flight
 { const key = history.state && history.state.book, b = key && books.find(x => x.href === key);

@@ -8,8 +8,15 @@
 // - the account button: shown on a secure page (http://127.0.0.1), hidden on plain http with a host
 //   name (http://lib.test, mapped to 127.0.0.1); signed out the reader sends nothing to /__sync
 // - the panel: a wrong library code shows an error in the panel; the right one signs in and syncs
-import { readFileSync } from "node:fs";
+// Part 2: the catalog (index.html made by make_server.py from two books copied under made-up names
+// into a temp library, served by its own library_sync.py): the account button; a book opened on one
+// device comes first under "Recently opened" on another (installed-app mode stubbed through
+// matchMedia); catalog settings of the app and of a browser tab sync separately; a sync that hangs
+// never holds the catalog back.
+import { readFileSync, mkdtempSync, mkdirSync, copyFileSync, readdirSync, statSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
 import { launch, sleep } from "./cdp.mjs";
 const [BASE, BOOK, ROOT = "."] = process.argv.slice(2);
 const INSECURE = BASE.replace("127.0.0.1", "lib.test");
@@ -180,5 +187,99 @@ ok(!(await p.eval(BTN)), "insecure page: account button hidden");
 ok(await syncCalls(p) === 0, "insecure page: nothing sent to /__sync");
 
 p.close();
+
+// ======== part 2: the catalog
+const epubs = dir => readdirSync(dir).flatMap(n => { const f = join(dir, n);
+  return statSync(f).isDirectory() ? epubs(f) : n.endsWith(".epub") ? [f] : []; });
+const mine = join(ROOT, "Out", BOOK);
+const two = [mine, epubs(join(ROOT, "Out")).find(f => f !== mine)];
+const LIB = mkdtempSync(join(tmpdir(), "epub-catalog-sync-"));
+const NAMES = ["Jane Doe/Jane Doe - A Quiet Harbour.epub", "John Roe/John Roe - Second Tide.epub"];
+two.forEach((src, i) => { mkdirSync(join(LIB, NAMES[i].split("/")[0]), { recursive: true }); copyFileSync(src, join(LIB, NAMES[i])); });
+const built = spawnSync("python3", [join(ROOT, "make_server.py"), LIB], { encoding: "utf8" });
+ok(built.status === 0, "catalog built for the check");
+const PORT2 = 9800 + Math.floor(Math.random() * 150);
+const srv = spawn("python3", [join(ROOT, "launchers/library_sync.py"), "--serve", LIB, "--port", String(PORT2)], { stdio: "ignore" });
+process.on("exit", () => { try { srv.kill(); rmSync(LIB, { recursive: true, force: true }); } catch {} });
+await sleep(1500);
+const B2 = `http://127.0.0.1:${PORT2}`, CAT = B2 + "/index.html";
+const CODE2 = readFileSync(join(LIB, ".sync", "code.txt"), "utf8").trim();
+const APP = `(() => { const mm = matchMedia.bind(window);
+  window.matchMedia = q => /display-mode/.test(q) ? { matches: true, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : mm(q); })()`;
+const device = async (app, extra = []) => {
+  const d = await launch({ width: W, height: H, touch: true, args: extra });
+  if (app) await d.send("Page.addScriptToEvaluateOnNewDocument", { source: APP });
+  return d;
+};
+const first = d => d.eval(`(document.querySelector('#list .title') || {}).textContent || ''`);
+const catalog = async (d, url = CAT) => { await d.goto("about:blank"); await d.goto(url); await d.waitFor("document.querySelectorAll('#list .title').length > 0", 20000); };
+const calls2 = d => d.eval("performance.getEntriesByType('resource').filter(e => e.name.includes('/__sync')).length");
+const login = (d, who) => d.eval(`LibrarySync.login(${JSON.stringify(who)}, "secret-pw").then(r => r.ok)`);
+{
+  // signed out: as before
+  const t = await device(false, ["--host-resolver-rules=MAP lib.test 127.0.0.1"]);
+  await catalog(t);
+  ok(await t.eval("getComputedStyle(document.getElementById('acctBtn')).display !== 'none'"), "catalog, secure page: account button shown");
+  ok(await calls2(t) === 0, "catalog, signed out: nothing sent to /__sync");
+  await catalog(t, CAT.replace("127.0.0.1", "lib.test"));
+  ok(await t.eval("getComputedStyle(document.getElementById('acctBtn')).display === 'none'"), "catalog, plain http with a host name: account button hidden");
+  ok(await calls2(t) === 0, "catalog, insecure page: nothing sent to /__sync");
+  t.close();
+}
+const A = await device(false);
+await A.goto(CAT);
+const reg = JSON.parse(await A.eval(`LibrarySync.register("cat" + Math.floor(Math.random() * 1e9), "secret-pw", ${JSON.stringify(CODE2)}).then(r => JSON.stringify(Object.assign(r, { login: LibrarySync.account() && LibrarySync.account().login })))`));
+ok(reg.ok, "device A: account created");
+const LOGIN2 = reg.login;
+await catalog(A);
+await A.eval("document.getElementById('acctBtn').click(); 0");
+await sleep(300);
+ok(await A.eval("!document.getElementById('acctPop').hidden"), "catalog: the button opens the panel");
+ok(await A.eval(SHOWN("#acctOut")) && (await A.eval("document.getElementById('acctLogin').textContent")) === LOGIN2, "catalog panel: signed in as the account");
+await A.eval("document.getElementById('acctBtn').click(); 0");
+// A reads the second book in the reader
+await A.goto("about:blank");
+await A.goto(`${B2}/.index/reader/reader.html#book=${encodeURIComponent("../../" + NAMES[1].split("/").map(encodeURIComponent).join("/"))}`);
+await A.waitFor(READY, 30000); await settle(A);
+ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: opened the second book and synced");
+{
+  // B: a fresh installed app, signed in
+  const Bd = await device(true);
+  await Bd.goto(CAT);
+  ok(await login(Bd, LOGIN2), "device B: signed in");
+  await catalog(Bd);
+  const want = await Bd.eval(`books.find(b => /Second Tide/.test(b.file)).title`);
+  await Bd.waitFor(`document.querySelector('#list .title').textContent === ${JSON.stringify(want)}`, 10000).catch(() => {});
+  ok(await Bd.eval("document.getElementById('sort').value") === "opened", "device B (app): sorted by recently opened");
+  ok(await first(Bd) === want, `device B (app): the book A opened is first`);
+  await Bd.eval(`(() => { const s = document.getElementById('sort'); s.value = 'title'; s.dispatchEvent(new Event('change')); document.getElementById('group').click(); })(); 0`);
+  ok(await Bd.eval("+localStorage.getItem('epubIndex:app:time') > 0"), "device B: the app's settings have a time");
+  ok(await Bd.eval("LibrarySync.syncNow()") === "ok", "device B: synced its settings");
+  Bd.close();
+}
+{
+  // D: another fresh app gets B's settings; a browser tab (A) none of them
+  const D = await device(true);
+  await D.goto(CAT);
+  await login(D, LOGIN2);
+  await catalog(D);
+  await D.waitFor("document.getElementById('sort').value === 'title'", 10000).catch(() => {});
+  ok(await D.eval("document.getElementById('sort').value") === "title", "device D (app): B's sort comes along");
+  ok(await D.eval("document.getElementById('group').getAttribute('aria-pressed')") === "true", "device D (app): and B's grouping");
+  D.close();
+  await catalog(A);
+  await sleep(1500);
+  ok(await A.eval("document.getElementById('sort').value") === "author" && await A.eval("document.getElementById('group').getAttribute('aria-pressed')") === "false",
+     "browser tab: keeps its own settings (the app's don't reach it)");
+  // a sync that never answers does not hold the catalog back
+  await A.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const f = fetch.bind(window);
+    window.fetch = (u, o) => String(u).includes('/__sync') ? new Promise(() => {}) : f(u, o); })()` });
+  const t0 = Date.now();
+  await A.goto("about:blank"); await A.goto(CAT);
+  await A.waitFor("document.querySelectorAll('#list .title').length > 0", 5000);
+  ok(Date.now() - t0 < 4000, `a hanging sync: the catalog is listed without waiting (${Date.now() - t0} ms)`);
+  A.close();
+}
+srv.kill();
 console.log(fails ? `${fails} FAILED` : "ALL OK");
 process.exit(fails ? 1 : 0);
