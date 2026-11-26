@@ -7,7 +7,8 @@
 //      pages, go back: the same book is at the same height (or the list is at its top with it first)
 //   2. installed app: search, scroll, open a book; the reader in a fresh load, "Catalog": the
 //      search text is back and the same book is at the top
-//   3. browser tab: the back button keeps the scroll; and the place is kept per kind of device
+//   3. browser tab: "Recently opened" is the default there too (the book read moves to the front);
+//      a chosen sort wins; the back button keeps the scroll; the place is kept per kind of device
 import { mkdtempSync, mkdirSync, copyFileSync, readdirSync, statSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -146,18 +147,36 @@ const settled = async (d, want, what) => {   // the wanted book is where it was 
   d.close();
 }
 
-// ======== 3. browser tab: the back button as before; its own place
+// ======== 3. browser tab: "Recently opened" by default too; the back button; its own place
 {
   const d = await device(false);
   await catalog(d);
+  ok(await d.eval("[...document.getElementById('sort').options].map(o => o.value).join()") === "opened,author,title,added,size",
+     "browser tab: \"Recently opened\" is offered, first");
+  ok(await d.eval("document.getElementById('sort').value") === "opened", "browser tab: sorted by recently opened by default");
+  ok(await d.eval("localStorage.getItem('epubIndex:app')") === null, "browser tab: the app's settings are not touched");
   await scrollToBook(d, 14);
   const before = await top(d);
   await saved(d, before.key);
   ok(await d.eval("localStorage.getItem('epubIndex:app:place')") === null, "browser tab: the app's place is not touched");
+  const first = await d.eval("document.querySelector('#list .book').dataset.key");
   await openBook(d, before.key);
   await d.eval("history.back()");
   await d.waitFor(LISTED, 20000);
-  await settled(d, before, "browser tab, back button");
+  try { await d.waitFor(`document.querySelector('#list .book').dataset.key === ${JSON.stringify(before.key)}`, 6000); } catch {}
+  ok(first !== before.key && await d.eval(`document.querySelector('#list .book').dataset.key === ${JSON.stringify(before.key)}`),
+     "browser tab, back button: the book just read moved to the front");
+  // an explicitly chosen sort wins over the default, and the back button keeps the scroll
+  await d.eval("(() => { const s = document.getElementById('sort'); s.value = 'author'; s.dispatchEvent(new Event('change')); })()");
+  await catalog(d);
+  ok(await d.eval("document.getElementById('sort').value") === "author", "browser tab: a chosen sort (Author) stays after a reload");
+  await scrollToBook(d, 14);
+  const mid = await top(d);
+  await saved(d, mid.key);
+  await openBook(d, mid.key);
+  await d.eval("history.back()");
+  await d.waitFor(LISTED, 20000);
+  await settled(d, mid, "browser tab, Author, back button");
   d.close();
 }
 

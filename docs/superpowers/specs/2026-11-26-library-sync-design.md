@@ -30,7 +30,7 @@ computer only; `.sh` twins of both do the same in Python on Linux/Mac. The launc
   phone, not to the tablet or a desktop browser:
   - reader settings (`epubReader:prefs`: theme, font, face, layout, typoTab);
   - catalog sort and grouping, kept apart for a browser tab (`epubIndex`) and the installed app
-    (`epubIndex:app`, which alone has "Recently opened"), as today.
+    (`epubIndex:app`), as today. "Recently opened" is offered, and the default, in both.
 - Automatic, no chores. Works offline: changes wait on the device and go when the server is back.
 - All four launchers serve sync; Windows still needs nothing installed.
 

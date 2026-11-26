@@ -337,8 +337,8 @@ ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: opened the second 
   D.close();
   await catalog(A);
   await sleep(1500);
-  ok(await A.eval("document.getElementById('sort').value") === "author" && await A.eval("document.getElementById('group').getAttribute('aria-pressed')") === "false",
-     "browser tab: keeps its own settings (the app's don't reach it)");
+  ok(await A.eval("document.getElementById('sort').value") === "opened" && await A.eval("document.getElementById('group').getAttribute('aria-pressed')") === "false",
+     "browser tab: keeps its own settings, the default \"Recently opened\" (the app's don't reach it)");
   // E signs in from the catalog's own panel (no reload): back in front, it syncs and gets news
   const E = await device(false);
   await catalog(E);

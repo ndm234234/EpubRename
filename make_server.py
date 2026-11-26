@@ -577,6 +577,7 @@ PAGE = r"""<!DOCTYPE html>
     <div class="select" title="Sort">
       <svg class="ic" aria-hidden="true"><use href="#i-sort"/></svg>
       <select id="sort" aria-label="Sort">
+        <option value="opened">Recently opened</option>
         <option value="author">Author</option>
         <option value="title">Title</option>
         <option value="added">Recently added</option>
@@ -658,11 +659,10 @@ const authorLine = b => b.authors.length ? b.authors.join(", ") : "Unknown Autho
 const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB";
 books.forEach(b => b._search = norm([b.title, authorLine(b), b.series, b.description, b.file].join(" ")));
 
-// Installed as an app (started from its icon): the books opened last come first, and the library
-// can be kept on the device (see "Offline library" below). In a browser tab neither.
+// Installed as an app (started from its icon): the library can be kept on the device (see
+// "Offline library" below) and the settings are its own. In a browser tab neither.
 const inApp = navigator.standalone === true ||
   matchMedia("(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)").matches;
-if (inApp) $("sort").prepend(new Option("Recently opened", "opened"));
 // When each book was last opened in the reader: {href: time}, written by reader.html
 const openedTimes = () => { try { return JSON.parse(localStorage.getItem("epubLibrary:opened")) || {}; } catch { return {}; } };
 let openedAt = openedTimes();
@@ -671,8 +671,8 @@ let openedAt = openedTimes();
 const PREFS = inApp ? "epubIndex:app" : "epubIndex";
 function applyPrefs() {
   const saved = (() => { try { return JSON.parse(localStorage.getItem(PREFS)) || {}; } catch { return {}; } })();
-  $("sort").value = saved.sort || (inApp ? "opened" : "author");
-  if (!$("sort").value) $("sort").value = "author";
+  $("sort").value = saved.sort || "opened";   // the books read last first, unless a sort was chosen
+  if (!$("sort").value) $("sort").value = "opened";
   $("group").setAttribute("aria-pressed", saved.group === true);
 }
 applyPrefs();
@@ -1255,8 +1255,8 @@ function toast(text) {
   toastTimer = setTimeout(() => $("toast").hidden = true, 3500);
 }
 
-// Back from the reader in the app: the book just read moves to the front
-if (inApp) {
+// Back from the reader (app or browser tab): the book just read moves to the front
+{
   const fresh = () => { if (JSON.stringify(openedTimes()) !== JSON.stringify(openedAt) && $("sort").value === "opened") render(true); };
   addEventListener("pageshow", e => { if (e.persisted) fresh(); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) fresh(); });

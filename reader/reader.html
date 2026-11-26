@@ -540,7 +540,7 @@ const params = new URLSearchParams(location.hash.slice(1));
 const src = params.get("book");
 if (src) {
   $("back").classList.remove("hidden");
-  // The installed app's catalog lists the books opened last first: {href from the catalog: time}
+  // The catalog lists the books opened last first (app and browser tab): {href from the catalog: time}
   try {
     const k = "epubLibrary:opened", m = JSON.parse(localStorage.getItem(k)) || {};
     m[src.replace(/^(\.\.\/)+/, "")] = Date.now();

@@ -166,7 +166,9 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
 - Instant search across title, authors, series, description and file path
   (case-insensitive, `ё` = `е`, all words must match). `/` focuses search, `Esc` clears it.
 - Click an author to see all their books.
-- Sort by author, title, recently added or size; optional grouping by author.
+- Sort by recently opened (the default, in the app and in a browser tab alike: the book read last
+  comes first, then books not opened yet; with an account, on every device), author, title,
+  recently added or size; optional grouping by author. A sort you choose is kept.
   Settings are remembered.
 - One rule for every book: the **cover** (or the **title**) shows the book's page, the **Read**
   button under it starts reading straight away (one tap on a phone). The download icon next to
@@ -391,8 +393,6 @@ no address bar. The browser doesn't push it; it's in the browser's menu — Chro
   port) the same, e.g. a fixed address for it in the router. The server is needed for the first start
   and for updates; after that the app also works without it (below).
 - `make_server.py` writes the app description to `.index/manifest.webmanifest`, named after the library.
-- In the app the catalog is sorted by **Recently opened** by default: the book read last comes first,
-  then books not opened yet. The other orders are in the same menu. In a browser tab nothing changes.
 
 #### Offline: the library on the device
 
