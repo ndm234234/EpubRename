@@ -67,6 +67,17 @@ window.__wordAt = function (cfi) {
   return { href: v.section.href, k: a, t: ws[a].t };
 };
 window.__place = () => JSON.parse(localStorage.getItem(bookKey));
+window.__inset = function () {   // the text's left and right margins on screen (px), visible lines only
+  const box = __box(); let l = 1e9, r = -1e9;
+  for (const v of __views()) {
+    const fr = v.iframe.getBoundingClientRect(), doc = v.contents.document;
+    for (const x of __ws(doc)) { const b = __wr(doc, x); if (!b) continue;
+      const L = b.left + fr.left, R = b.right + fr.left, T = b.top + fr.top;
+      if (L < box.left - 1 || R > box.right + 1 || T < box.top || T > box.bottom - b.height) continue;
+      l = Math.min(l, L); r = Math.max(r, R); }
+  }
+  return { left: Math.round(l), right: Math.round(innerWidth - r) };
+};
 window.__flow = () => rendition.manager.isPaginated ? "paginated" : "scrolled";
 0`;
 // the word at the top (± one line): fully visible, its top within the first line and a half
@@ -97,6 +108,7 @@ for (const phone of [true, false]) {
   ok(await p.eval("!!document.querySelector('#typo [data-pane=layout] #scrollText')"), "a \"Scroll text\" checkbox in Aa → Layout");
   ok(/Scroll text/.test(await p.eval("(e => e && e.closest('label') ? e.closest('label').textContent : '')(document.getElementById('scrollText'))")), "labelled \"Scroll text\"");
   ok(await p.eval("(e => !!e && e.checked === false)(document.getElementById('scrollText'))"), "unchecked by default");
+  const in0 = await J(p, "__inset()");
   const A0 = await p.eval("anchor"), w0 = await J(p, "__wordAt(anchor)"), t0 = (await J(p, "__place()")).time;
 
   // 1. paged → scroll: the first word of the page is at the top
@@ -106,6 +118,8 @@ for (const phone of [true, false]) {
   ok(await p.eval("__flow()") === "scrolled", "the checkbox: scroll mode");
   ok((await J(p, "JSON.parse(localStorage.getItem('epubReader:prefs'))")).scroll === true, "kept as prefs.scroll in epubReader:prefs (synced with the other reader settings)");
   { const l = await sameWord(p, w0); ok(atTop(l), `scroll mode: the page's first word at the top (${fmt(l)})` + (l ? "" : await p.eval(`JSON.stringify({ w0: ${JSON.stringify(w0)}, anchor, settling, at: placeBox(anchor), views: shownViews().map(v => v.section.href + ":" + Math.round(v.iframe.getBoundingClientRect().top) + "/" + Math.round(v.iframe.getBoundingClientRect().height)) })`))); }
+  if (phone) { const in1 = await J(p, "__inset()");
+    ok(Math.abs(in1.left - in0.left) <= 3 && Math.abs(in1.right - in0.right) <= 12, `phone: the same side margins as on pages (pages ${in0.left}/${in0.right}px, scroll ${in1.left}/${in1.right}px)`); }
   ok((await J(p, "__place()")).time === t0, "switching keeps the place's time");
   ok(await p.eval("rendition.manager.container.scrollHeight > rendition.manager.container.clientHeight + 100"), "the text scrolls");
   { const where = await p.eval("document.getElementById('where').textContent"), pct = await p.eval("document.getElementById('pct').textContent");
@@ -116,7 +130,10 @@ for (const phone of [true, false]) {
   await scrollBox(p, false); await settle(p);
   { const v = await J(p, `__vis(${JSON.stringify(A0)})`);
     ok(await p.eval("__flow()") === "paginated" && v.at === v.page, `back to pages: the word on the page shown (page ${v.page}, word on ${v.at})`); }
+  const hooks0 = await p.eval("book.spine.hooks.content.list().length");
   await scrollBox(p, true); await settle(p);
+  await scrollBox(p, false); await settle(p); await scrollBox(p, true); await settle(p);
+  ok(await p.eval("book.spine.hooks.content.list().length") === hooks0, "switching modes leaves no extra content hooks");
 
   // 3. the reader scrolls (finger / wheel): the place follows, with a newer time
   const C = JSON.parse(await p.eval("JSON.stringify(__box())"));
@@ -238,6 +255,22 @@ for (const phone of [true, false]) {
     await sleep(800);
     const d = await travel(f);
     ok(d === 0 && await p.eval("anchor") === a, `taps: no jump (${d}px)`);
+  }
+
+  // 9b. phone: real taps in Aa (bigger, smaller, a face, back) are not the reader's scroll:
+  // the place keeps its time and stays at the top
+  if (phone) {
+    const f = await J(p, "__first()"), t = (await J(p, "__place()")).time, n0 = await p.eval("readerScrolls");
+    const tapOn = async sel => { const c = await J(p, `(r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 }))(document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect())`);
+      await p.tap(c.x, c.y); await sleep(150); await settle(p); };
+    await p.tap(W / 2, H * 0.4); await sleep(300);
+    await tapOn("#typoBtn"); await sleep(300);
+    for (const sel of ["#bigger", "#smaller", "#faceSeg button:nth-child(2)", "#faceSeg button:nth-child(1)"]) await tapOn(sel);
+    await sleep(1200); await settle(p);
+    ok(await p.eval("readerScrolls") === n0, `taps in Aa: not counted as the reader's scroll (${n0} → ${await p.eval("readerScrolls")})`);
+    ok((await J(p, "__place()")).time === t, "taps in Aa: the place keeps its time");
+    { const l = await sameWord(p, f); ok(atTop(l), `taps in Aa: place kept (${fmt(l)})`); }
+    await p.eval("toggleTypo(false); setBars(false); 0"); await settle(p);
   }
 
   // 10. contents: the chapter's start at the top

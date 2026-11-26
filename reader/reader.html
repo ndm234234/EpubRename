@@ -659,7 +659,12 @@ async function openBook(data, fileName) {
 let quiet = false;   // opening at the start: not a move of the reader's
 let scrollMode = false;   // the rendition on the screen scrolls (prefs.scroll when it was made)
 const atStart = async () => { quiet = true; try { await rendition.display(); } finally { quiet = false; } };
+// The book's own content hooks before any rendition: each rendition adds its own there and
+// destroy() leaves them, so a new one starts from these (no dead hooks after mode switches)
+let bookHooks = null;
 function makeRendition() {
+  const hooks = book.spine.hooks.content.hooks;
+  if (bookHooks) hooks.splice(0, hooks.length, ...bookHooks); else bookHooks = hooks.slice();
   scrollMode = !!prefs.scroll;
   rendition = book.renderTo("viewer", scrollMode
     ? { width: "100%", height: "100%", flow: "scrolled", manager: "continuous", spread: "none", allowScriptedContent: false }
@@ -674,6 +679,7 @@ function makeRendition() {
     // Taps on the text are heard here, not through epub.js: it listens passively, so the browser
     // would ignore "this tap is the reader's" and act on it too (Chrome's "Touch to Search" sheet)
     contents.document.addEventListener("touchstart", touchStart, { passive: true });
+    contents.document.addEventListener("touchmove", touchMove, { passive: true });
     contents.document.addEventListener("touchend", touchEnd, { passive: false });
     // The chapter grew or shrank after it was shown (a font or a picture loaded late): page numbers
     // anew; scrolling, the reading place back to the top (unless the reader is scrolling)
@@ -1922,8 +1928,11 @@ function onTouchUi() {
 touchUi.addEventListener("change", onTouchUi);
 onTouchUi();
 
+// Scrolling: only a finger that moves the text counts as the reader's scroll (a tap never moves;
+// a touch on a panel scrolls the panel, not the book)
+const PANELS = "#toc, #search, #marks, #typo, #acct";
+function touchMove(e) { if (!(e.target.closest && e.target.closest(PANELS))) readerInput(); }
 function touchStart(e) {
-  readerInput();   // scrolling: a finger moves the text
   const t = e.changedTouches[0];
   touch = { x: t.screenX, y: t.screenY, time: Date.now() };
 }
@@ -1960,6 +1969,7 @@ function touchEnd(e) {
 }
 // Taps on the page margins (outside the book's iframe) count too
 $("stage").addEventListener("touchstart", e => { if (!e.target.closest("iframe")) touchStart(e); }, { passive: true });
+$("stage").addEventListener("touchmove", e => { if (!e.target.closest("iframe")) touchMove(e); }, { passive: true });
 $("stage").addEventListener("touchend", e => { if (!e.target.closest("iframe") && $("viewer").contains(e.target)) touchEnd(e); });
 
 // Mouse wheel / touchpad: down or right — next page, up or left — previous. One page per
@@ -1969,9 +1979,10 @@ let wheelSum = 0, wheelQuiet = 0, wheelBusy = false;
 function onWheel(e) {
   if (!rendition || e.ctrlKey) return;   // Ctrl+wheel is the browser's zoom
   if (scrollMode) {   // the browser scrolls the text; over the margins and arrows, so does this
+    if (e.target.closest && e.target.closest(PANELS)) return;   // a panel scrolls itself
     readerInput();
     const c = scroller();
-    if (c && !c.contains(e.target) && e.currentTarget === $("stage") && !e.target.closest("#toc, #search, #marks, #typo, #acct")) {
+    if (c && !c.contains(e.target) && e.currentTarget === $("stage")) {
       e.preventDefault();
       c.scrollBy(0, (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? c.clientHeight : 1) * e.deltaY);
     }
@@ -2066,7 +2077,10 @@ function typoCss() {
   // Phones, tablets: the same margin above and below the text, about 20px to the letters
   let css = touchUi.matches ? "body { padding-top: 17px !important; padding-bottom: 17px !important; }\n" : "";
   // Scrolling on a wide screen: lines of a readable length, not across the whole window
-  if (scrollMode) css += "body { max-width: 44em !important; margin-left: auto !important; margin-right: auto !important; }\n";
+  // scrolling: epub.js pads the text by 1/12 of the width on each side, the pages by half their
+  // column gap (1/12 of the width): the same side margins as on pages, so 1/24 a side
+  if (scrollMode) css += "body { max-width: 44em !important; margin-left: auto !important; margin-right: auto !important;"
+    + " padding-left: calc(100vw / 24) !important; padding-right: calc(100vw / 24) !important; }\n";
   if (FACES[prefs.face])   // code and other monospaced text keeps its font
     css += `body, body *:not(pre, code, kbd, samp, tt, pre *, code *) { font-family: ${FACES[prefs.face].stack} !important; }\n`;
   // Plain paragraphs only, and weaker than any class rule: centred titles, epigraphs etc. keep the
