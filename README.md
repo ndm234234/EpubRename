@@ -319,11 +319,9 @@ Optional. Without an account everything works as before, each device on its own.
 phone, tablet and computer share what you read. The account lives in the library itself, on the
 computer that runs the launcher; nothing goes to the internet.
 
-- **Create an account** on any device: the **account button** in the catalog's header, then a
-  login, a password and the **library code**. The code (four words and two digits, like
-  `river-paper-cold-moon-47`) is printed in the launcher window at every start and kept in
-  `.sync/code.txt` in the library folder; it stops strangers who reach the address from making
-  accounts. On the other devices sign in with the same login and password.
+- **An account is an email and a password.** The email only names the account (it is not case
+  sensitive); the library never sends mail, so nothing is verified and there is no "reset by mail".
+  How to add and remove accounts: below.
 - **What is synced:** reading places, bookmarks (with their names and notes) and the recently
   opened books are the same on all devices. The reader and catalog settings are shared only between
   devices of the same kind (phone, tablet, computer), since what suits one screen doesn't suit
@@ -338,18 +336,47 @@ computer that runs the launcher; nothing goes to the internet.
   https as for installing the app, above.
 - **Wrong codes and passwords are slowed down:** after 5 wrong in a row the library answers
   "try later" for a minute, longer with each further mistake.
-- **Forgotten password:** the owner deletes `.sync/accounts/<login>.json` in the library folder.
-  The person registers again with the same login and the library code, and gets their data back
-  (it is kept in `.sync/data/<login>.json`).
+- **Forgotten password:** the owner deletes `.sync/accounts/<email>.json` in the library folder
+  (and keeps `.sync/data/<email>.json`). The person registers again with the same email and the
+  library code, and gets their data back.
 - **Shared devices:** signing in merges the places and bookmarks already on that device into the
   account being signed in, and signing out leaves them on the device — so on a family tablet, after
   one person signs out, the next person's sign-in takes the previous person's places and bookmarks
   into their own account.
 - **Signing out while the library computer is unreachable** signs the device out, but its token
   stays valid on the library computer until the account file is reset (the owner deletes
-  `.sync/accounts/<login>.json`, as for a forgotten password).
+  `.sync/accounts/<email>.json`, as for a forgotten password).
 - **Back up `.sync/`** with the library: it holds the code, the accounts and everyone's data. It is
   never served to the network, `make_server.py` never touches it, and it is in `.gitignore`.
+
+##### Add an account
+
+The person whose account it is makes it, on their own device (the owner can't make one for
+someone else):
+
+1. Open the catalog or the reader on the library's **https** address and tap the **account
+   button** (in the catalog's header or the reader's toolbar).
+2. **Create account**: their email, a password twice, and the **library code**. The code (four
+   words and two digits, like `river-paper-cold-moon-47`) is printed in the launcher window at
+   every start and kept in `.sync/code.txt` in the library folder.
+3. On their other devices: **Sign in** with the same email and password (no code needed).
+
+Giving someone the code is how you let them in: it stops strangers who reach the address from
+making accounts. To stop new accounts with a code you gave out, edit `.sync/code.txt` (or delete it,
+and a new random code is made); it applies at once, existing accounts keep working, and the
+launcher window shows the new code from its next start.
+
+##### Remove an account
+
+No need to stop the launcher: the servers read the account files on every request. In the
+library folder, for the account `jane.doe@example.com`:
+
+- delete `.sync/accounts/jane.doe@example.com.json`: the password no longer works and all their
+  devices are signed out (on their next sync). Their devices keep their own copy of the places and
+  bookmarks;
+- also delete `.sync/data/jane.doe@example.com.json` to delete what they synced. Keep it, and
+  whoever registers again with that email (and the library code) gets the data back — that is how
+  a forgotten password is reset.
 
 #### Installing as an app
 

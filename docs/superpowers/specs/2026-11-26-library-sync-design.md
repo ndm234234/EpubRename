@@ -108,8 +108,10 @@ Files, in the library folder (`<library>/.sync/`, never served as static files):
   Passwords: PBKDF2-SHA256 with a random salt (both PowerShell/.NET and Python have it). Tokens:
   random 32 bytes, stored only as their hash.
 - `data/<login>.json` — `{version, doc}`.
-- Logins: letters, digits, `.-_`, 2–32 characters, case-insensitive (stored lower-case) — they
-  name files.
+- Logins are the person's **email** (changed from a free login name): case-insensitive (trimmed,
+  stored lower-case), at most 128 characters, `local@domain` with `a–z 0–9 . _ + -` before the `@`
+  and dot-separated `a–z 0–9 -` labels after it (see `library_sync.py`) — they name files. The JSON
+  field is still called `login`. No mail is ever sent (nothing is verified).
 - **Password reset without an admin page:** the owner deletes `accounts/<login>.json` (that signs
   out all of that person's devices). The person registers again with the same login and the code
   and gets their data back (`data/<login>.json` is kept). Documented in README and in the window.
