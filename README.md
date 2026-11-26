@@ -194,7 +194,9 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
   page doesn't move); another tap hides them. A tap in
   the **left / right third** or a swipe turns the page. The bars hide again after any move in the
   book (page turn, slider, contents, search, bookmark). Taps on links or while selecting text don't
-  count. With a mouse the bars are always there and taps in the lower half of the page turn pages.
+  count. A short tap belongs to the reader alone, so Chrome's "Touch to Search" sheet doesn't pop
+  up over a page turn; a long press still selects a word, with the browser's menu and search.
+  With a mouse the bars are always there and taps in the lower half of the page turn pages.
 - Table of contents (`T`), current chapter, page in chapter, page in the book and % of the book.
   Pages in the whole book are an estimate for this screen and text size (laying out every
   chapter would take long): the book's length over the text a page holds in the chapters read so
@@ -503,6 +505,27 @@ PDF's text layer: page layout is turned into flowing text by guessing, so
 tables, multi-column pages and side notes can come out in the wrong order, and a badly
 recognised scan gives badly recognised text. Formulas and drawings made of lines (not
 pictures) are lost on pages that also have text.
+
+## Reader checks (tests/reader)
+
+End-to-end checks of the reader in headless Chrome, a touch phone by default (Node 22+ and
+`google-chrome`, no packages). They open real books from `Out/` and look where the text really
+is on the screen:
+
+```bash
+tests/reader/run.sh "Jane Doe/Jane Doe - A Quiet Harbour.epub" "John Roe/John Roe - Paper Lanterns.epub"
+FULL=1 tests/reader/run.sh "Jane Doe/Jane Doe - A Quiet Harbour.epub"   # every font at 80/100/150/200%
+```
+
+- `nav.mjs` — every page forward, then back: no page skipped or shown twice, the status line
+  matches the real page count, no clipped lines, the reading place on the page shown;
+- `place.mjs` — the place kept through every font and size, quick changes, reopening, window
+  resizes; bookmarks and search matches land on the page shown, also after a font change;
+- `hits.mjs` — every search match (or an even spread of them) is on the page shown;
+- `touch.mjs`, `status.mjs`, `typo.mjs` — taps and bars, the status line, the Aa panel.
+
+Several books run side by side; the output keeps only failures and each check's verdict.
+`W`/`H` set the screen, `TOUCH=0` a desktop, `SHOTS=dir` saves screenshots.
 
 ## Notes and limitations
 
