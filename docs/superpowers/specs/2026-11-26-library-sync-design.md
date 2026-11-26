@@ -20,7 +20,7 @@ computer only; `.sh` twins of both do the same in Python on Linux/Mac. The launc
 
 ## Goals
 
-- Accounts: anyone who knows the **library code** can create an account (login, password) from the
+- Accounts: anyone who knows the **library code** can create an account (email, password) from the
   catalog or the reader; then sign in once per device, which stays signed in until "Sign out".
 - Synced, shared by all devices of an account:
   - the reading place of every book (`epubReader:book:<id>`: cfi, pct, title, time);
@@ -173,8 +173,8 @@ Files, in the library folder (`<library>/.sync/`, never served as static files):
 
 - Reader: an account button. Catalog: the logo and library name at the top left are the account
   button, with a second line under the name ("Sign in to sync", or the email and the last sync).
-  Signed out: "Sign in" (login, password) and "Create
-  account" (login, password twice, library code). Signed in: the login, the time of the last sync
+  Signed out: "Sign in" (email, password) and "Create
+  account" (email, password twice, library code). Signed in: the email, the time of the last sync
   (or "waiting for the library computer"), "Sync now", "Sign out".
 - Signing out keeps the device's local data; nothing is deleted on the server.
 - First sign-in on a device merges its local data with the account's (nothing lost on either side).

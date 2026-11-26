@@ -1332,6 +1332,7 @@ function syncedAt(t) {
   return d.toDateString() === now.toDateString() ? "at " + time : d.toLocaleDateString() + " " + time;
 }
 // Under the library name: the account and its last sync (one line), or "Sign in to sync"
+setInterval(() => { if (!document.hidden) showBrand(); }, 60000);   // "synced 14:05" stays true while the page stays open
 function showBrand() {
   if (!Sync.available()) return;
   const a = Sync.signedIn() && Sync.account(), t = Sync.lastSync();
