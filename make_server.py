@@ -924,7 +924,14 @@ const sorters = {
   size:   (a, b) => b.size - a.size,
 };
 
-function render() {
+// keep: the book row at the top of the screen stays at the same height (the list was re-made while
+// the person was reading it: other order, other books); if that book is gone, the scroll stays
+function render(keep) {
+  const anchor = keep ? topRow() : null;
+  renderList();
+  if (anchor) placeRow(anchor);
+}
+function renderList() {
   $("searchBox").classList.toggle("filled", !!$("q").value);   // hides the "/" hint
   const words = norm($("q").value).split(/\s+/).filter(Boolean);
   openedAt = openedTimes();
@@ -952,6 +959,32 @@ function render() {
     list.append(el("div", { class: "grid" }, ...shown.map(card)));
   }
 }
+
+// ------------------------------------------------------------ Where you were (this device only)
+// <PREFS>:place = {href, offset, q, time}: the book row at the top of the screen (its key in the
+// library), its distance from the top of the window, the search text. Kept for the catalog to come
+// back to it (after the reader, after a restart on a book); never part of what is synced.
+const PLACE = PREFS + ":place";
+const topRow = () => {
+  const h = document.querySelector("header").getBoundingClientRect().bottom;   // the header sticks
+  for (const a of document.querySelectorAll("#list .book")) {
+    const r = a.getBoundingClientRect();
+    if (r.bottom > h + 1) return { href: a.dataset.key, offset: Math.round(r.top) };
+  }
+  return null;
+};
+function placeRow(p) {
+  const a = p && p.href && [...document.querySelectorAll("#list .book")].find(x => x.dataset.key === p.href);
+  if (a) scrollTo(0, Math.max(0, a.getBoundingClientRect().top + scrollY - p.offset));
+}
+let placeTimer = 0;
+function savePlace() {
+  clearTimeout(placeTimer); placeTimer = 0;
+  const r = topRow();
+  try { localStorage.setItem(PLACE, JSON.stringify({ href: r ? r.href : "", offset: r ? r.offset : 0, q: $("q").value, time: Date.now() })); } catch {}
+}
+addEventListener("scroll", () => { if (!placeTimer) placeTimer = setTimeout(savePlace, 300); }, { passive: true });
+addEventListener("pagehide", savePlace);
 
 // ------------------------------------------------------------ Offline library (installed app)
 // The app keeps the catalog, the reader and the books in the site's own storage on the device
@@ -1223,13 +1256,13 @@ function toast(text) {
 
 // Back from the reader in the app: the book just read moves to the front
 if (inApp) {
-  const fresh = () => { if (JSON.stringify(openedTimes()) !== JSON.stringify(openedAt) && $("sort").value === "opened") render(); };
+  const fresh = () => { if (JSON.stringify(openedTimes()) !== JSON.stringify(openedAt) && $("sort").value === "opened") render(true); };
   addEventListener("pageshow", e => { if (e.persisted) fresh(); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) fresh(); });
 }
 
 if (location.protocol === "file:") $("fileNote").hidden = false;
-$("q").addEventListener("input", render);
+$("q").addEventListener("input", () => { render(); savePlace(); });
 $("sort").addEventListener("change", () => { save(); render(); });
 $("group").addEventListener("click", e => {
   const b = e.currentTarget; b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") !== "true");
@@ -1241,7 +1274,16 @@ document.addEventListener("keydown", e => {
   if (e.key === "/" && document.activeElement !== $("q")) { e.preventDefault(); $("q").focus(); }
   if (e.key === "Escape") { $("q").value = ""; render(); }
 });
-render();
+// Opened again (not by Back/Forward): the search is back; and the book that was at the top is there
+// again, whatever the browser would scroll to (the order may have changed meanwhile)
+{
+  let p = null; try { p = JSON.parse(localStorage.getItem(PLACE)); } catch {}
+  const nav = performance.getEntriesByType("navigation")[0];
+  if (p && typeof p.q === "string" && !(nav && nav.type === "back_forward")) $("q").value = p.q;
+  try { history.scrollRestoration = "manual"; } catch {}
+  render();
+  placeRow(p);
+}
 // Can be installed as an app (browser menu → "Install app" / "Add to Home screen"), but the browser
 // is not to suggest it by itself
 addEventListener("beforeinstallprompt", e => e.preventDefault());
@@ -1358,7 +1400,7 @@ if (Sync.available()) $("acctBtn").hidden = false;   // secure pages only: a pas
   const refresh = () => {
     openedAt = openedTimes();
     applyPrefs();
-    render();
+    render(true);
     if (!$("acctPop").hidden) showAcct();
   };
   Sync.onRemoteChange(r => { if (r.opened || r.prefs) refresh(); });

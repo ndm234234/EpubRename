@@ -96,6 +96,8 @@ function seedLocal() {
   put('epubIndex', { sort: 'title' });
   put('epubIndex:time', '600');
   put('epubReader:loc:' + BOOK, 'cached-positions');
+  put('epubIndex:place', { href: 'x.epub', offset: 5, q: 'PLACE-MARK', time: 1 });   // where the catalog was: stays on the device
+  put('epubIndex:app:place', { href: 'y.epub', offset: 6, q: 'PLACE-MARK', time: 2 });
 }
 
 beforeEach(() => mock.timers.reset());
@@ -129,6 +131,7 @@ test('collect then apply leaves localStorage byte-identical; only synced keys up
   assert.equal(doc.prefs.computer.catalogTabTime, 600);
   assert.equal(doc.prefs.computer.catalogApp, undefined);
   assert.ok(!JSON.stringify(doc).includes('cached-positions'));
+  assert.ok(!JSON.stringify(doc).includes('PLACE-MARK'), 'the catalog place is not synced');
   const rep = S.applyLocal(doc);
   assert.equal(JSON.stringify([...ls.m]), before);
   assert.deepEqual(rep, { places: [], marks: [], prefs: false, opened: false });
