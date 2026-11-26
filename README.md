@@ -341,6 +341,13 @@ computer that runs the launcher; nothing goes to the internet.
 - **Forgotten password:** the owner deletes `.sync/accounts/<login>.json` in the library folder.
   The person registers again with the same login and the library code, and gets their data back
   (it is kept in `.sync/data/<login>.json`).
+- **Shared devices:** signing in merges the places and bookmarks already on that device into the
+  account being signed in, and signing out leaves them on the device — so on a family tablet, after
+  one person signs out, the next person's sign-in takes the previous person's places and bookmarks
+  into their own account.
+- **Signing out while the library computer is unreachable** signs the device out, but its token
+  stays valid on the library computer until the account file is reset (the owner deletes
+  `.sync/accounts/<login>.json`, as for a forgotten password).
 - **Back up `.sync/`** with the library: it holds the code, the accounts and everyone's data. It is
   never served to the network, `make_server.py` never touches it, and it is in `.gitignore`.
 
