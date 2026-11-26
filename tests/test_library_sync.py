@@ -24,12 +24,12 @@ def call(store, method, path, body=None, token=None, raw=None):
     return status, (json.loads(out) if out else None)
 
 
-def register(store, login="Ann", password="pw123456", code=None):
+def register(store, login="Ann@example.com", password="pw123456", code=None):
     return call(store, "POST", "/__sync/register",
                 {"login": login, "password": password, "code": code or store.code()})
 
 
-def new_token(store, login="Ann"):
+def new_token(store, login="Ann@example.com"):
     status, body = register(store, login)
     assert status == 200
     return body["token"]
@@ -47,7 +47,7 @@ def test_register_login_data_roundtrip(store):
     assert call(store, "GET", "/__sync/data", token=token) == (200, {"version": 0, "doc": None})
     assert call(store, "PUT", "/__sync/data", {"version": 0, "doc": {"v": 1}}, token) == (200, {"version": 1})
     assert call(store, "GET", "/__sync/data", token=token) == (200, {"version": 1, "doc": {"v": 1}})
-    status, body = call(store, "POST", "/__sync/login", {"login": "ANN", "password": "pw123456"})
+    status, body = call(store, "POST", "/__sync/login", {"login": "ANN@example.com", "password": "pw123456"})
     assert status == 200 and body["token"] != token
     assert call(store, "GET", "/__sync/data", token=body["token"]) == (200, {"version": 1, "doc": {"v": 1}})
 
@@ -67,40 +67,70 @@ def test_put_with_stale_version_is_409_with_current(store):
 
 def test_wrong_code_403_then_throttled_429(store):
     for _ in range(5):
-        assert register(store, "bob", code="nope")[0] == 403
-    status, body = register(store, "bob")
+        assert register(store, "bob@example.com", code="nope")[0] == 403
+    status, body = register(store, "bob@example.com")
     assert status == 429 and body["wait"] > 0
     store._now = lambda t=store._now(): t + 61
-    assert register(store, "bob")[0] == 200
+    assert register(store, "bob@example.com")[0] == 200
 
 
 def test_code_is_compared_trimmed_and_case_insensitive(store):
-    assert register(store, "bob", code="  " + store.code().upper() + "\n")[0] == 200
+    assert register(store, "bob@example.com", code="  " + store.code().upper() + "\n")[0] == 200
 
 
 def test_wrong_password_throttled_per_login(store):
-    register(store, "ann")
-    register(store, "cat")
+    register(store, "ann@example.com")
+    register(store, "cat@example.com")
     for _ in range(5):
-        assert call(store, "POST", "/__sync/login", {"login": "ann", "password": "bad"})[0] == 401
-    assert call(store, "POST", "/__sync/login", {"login": "ann", "password": "pw123456"})[0] == 429
-    assert call(store, "POST", "/__sync/login", {"login": "cat", "password": "pw123456"})[0] == 200
+        assert call(store, "POST", "/__sync/login", {"login": "ann@example.com", "password": "bad"})[0] == 401
+    assert call(store, "POST", "/__sync/login", {"login": "ann@example.com", "password": "pw123456"})[0] == 429
+    assert call(store, "POST", "/__sync/login", {"login": "cat@example.com", "password": "pw123456"})[0] == 200
     store._now = lambda t=store._now(): t + 61
-    assert call(store, "POST", "/__sync/login", {"login": "ann", "password": "pw123456"})[0] == 200
+    assert call(store, "POST", "/__sync/login", {"login": "ann@example.com", "password": "pw123456"})[0] == 200
 
 
 def test_unknown_login_is_401(store):
-    assert call(store, "POST", "/__sync/login", {"login": "nobody", "password": "x"})[0] == 401
+    assert call(store, "POST", "/__sync/login", {"login": "nobody@example.com", "password": "x"})[0] == 401
 
 
 def test_login_taken_409_case_insensitive(store):
-    assert register(store, "Ann")[0] == 200
-    assert register(store, "aNN")[0] == 409
+    assert register(store, "jane.doe@example.com")[0] == 200
+    assert register(store, "JANE.DOE@Example.COM")[0] == 409
+    assert register(store, "  Jane.Doe@example.com\n")[0] == 409   # trimmed, then lower-cased
 
 
-@pytest.mark.parametrize("login", ["a", "x" * 33, "../x", "a/b", "a b", "", "con", "NUL", "aux", "prn", "com1", "lpt9", "con.x", "nul.txt.y"])
+def test_email_is_trimmed_and_lower_cased(store, tmp_path):
+    assert register(store, " Jane.Doe+books@Example.COM ")[0] == 200
+    acc = tmp_path / ".sync" / "accounts" / "jane.doe+books@example.com.json"
+    assert json.loads(acc.read_text())["login"] == "jane.doe+books@example.com"
+    assert call(store, "POST", "/__sync/login",
+                {"login": "jane.doe+books@example.com", "password": "pw123456"})[0] == 200
+
+
+@pytest.mark.parametrize("login", [
+    "j@example.com", "jane_doe-1@mail.example.co.uk", "a@b.cd", "x@1-2.example", "con@example.com",
+    "nul@example.com", "l" * 64 + "@example.com", "a@" + "d" * 63 + ".com",
+    "l" * 64 + "@" + "d" * 59 + ".com",   # 128 characters, the longest allowed
+])
+def test_good_emails(store, login):
+    assert register(store, login)[0] == 200
+
+
+@pytest.mark.parametrize("login", [
+    "", "a", "no-at-sign", "two@@example.com", "a@b@example.com", "x@localhost", "@example.com", "jane@",
+    "../x@example.com", "a/b@example.com", "a\\b@example.com", "a b@example.com", "a:b@example.com",
+    "a*b@example.com", "a?b@example.com", 'a"b@example.com', "a<b@example.com", "a|b@example.com",
+    "a%b@example.com", "jane@exa_mple.com", "jane@example..com", "jane@.example.com", "jane@example.com.",
+    "jane@-example.com", "jane@example-.com", ".jane@example.com", "jane.@example.com", "ja..ne@example.com",
+    "l" * 65 + "@example.com", "a@" + "d" * 64 + ".com", "l" * 64 + "@" + "d" * 60 + ".com",
+    "x" * 243 + "@example.com",   # 255 characters
+    "j\u00e9@example.com", "\u212ate@example.com", "jane@\u00e9xample.com", "jane@example.com\njoe@example.com",
+    "CON", "con", "NUL", "con.smith@example.com", "nul.x@example.com", "lpt9.a@example.com",
+])
 def test_bad_logins_400(store, login):
     assert register(store, login)[0] == 400
+    assert call(store, "POST", "/__sync/login", {"login": login, "password": "pw123456"})[0] == 400
+    assert not (store.dir / "accounts").exists() or not any((store.dir / "accounts").iterdir())
 
 
 def test_malformed_json_400(store):
@@ -110,7 +140,7 @@ def test_malformed_json_400(store):
 
 def test_logout_forgets_only_that_token(store):
     t1 = new_token(store)
-    t2 = call(store, "POST", "/__sync/login", {"login": "ann", "password": "pw123456"})[1]["token"]
+    t2 = call(store, "POST", "/__sync/login", {"login": "ann@example.com", "password": "pw123456"})[1]["token"]
     status, ctype, body = store.handle("POST", "/__sync/logout", {"Authorization": f"Bearer {t1}"}, b"")
     assert status == 204 and body == b""
     assert call(store, "GET", "/__sync/data", token=t1)[0] == 401
@@ -120,7 +150,7 @@ def test_logout_forgets_only_that_token(store):
 def test_deleted_account_file_keeps_data(store, tmp_path):
     token = new_token(store)
     call(store, "PUT", "/__sync/data", {"version": 0, "doc": {"v": 1, "x": 7}}, token)
-    (tmp_path / ".sync" / "accounts" / "ann.json").unlink()
+    (tmp_path / ".sync" / "accounts" / "ann@example.com.json").unlink()
     assert call(store, "GET", "/__sync/data", token=token)[0] == 401
     token2 = new_token(store)
     assert call(store, "GET", "/__sync/data", token=token2) == (200, {"version": 1, "doc": {"v": 1, "x": 7}})
@@ -187,7 +217,7 @@ def test_body_limit_413_through_respond(store):
 
 
 def test_respond_writes_answer(store):
-    body = json.dumps({"login": "nobody", "password": "x"}).encode()
+    body = json.dumps({"login": "nobody@example.com", "password": "x"}).encode()
 
     class Fake:
         command, path = "POST", "/__sync/login"
@@ -219,10 +249,10 @@ def test_is_private():
 
 def test_passwords_and_tokens_not_stored_plain(store, tmp_path):
     token = new_token(store)
-    text = (tmp_path / ".sync" / "accounts" / "ann.json").read_text()
+    text = (tmp_path / ".sync" / "accounts" / "ann@example.com.json").read_text()
     assert "pw123456" not in text and token not in text
     acc = json.loads(text)
-    assert acc["login"] == "ann" and acc["iterations"] == 200000
+    assert acc["login"] == "ann@example.com" and acc["iterations"] == 200000
     assert len(bytes.fromhex(acc["salt"])) == 16 and len(acc["tokens"]) == 1
 
 
@@ -234,11 +264,11 @@ def test_word_list_is_big_and_distinct():
 
 def test_concurrent_wrong_logins_cannot_beat_the_throttle(store):
     import threading
-    register(store, "ann")
+    register(store, "ann@example.com")
     statuses = []
 
     def go():
-        statuses.append(call(store, "POST", "/__sync/login", {"login": "ann", "password": "bad"})[0])
+        statuses.append(call(store, "POST", "/__sync/login", {"login": "ann@example.com", "password": "bad"})[0])
 
     threads = [threading.Thread(target=go) for _ in range(20)]
     [t.start() for t in threads]
@@ -252,7 +282,7 @@ def test_concurrent_wrong_codes_cannot_beat_the_throttle(store):
     statuses = []
 
     def go():
-        statuses.append(register(store, "bob", code="nope")[0])
+        statuses.append(register(store, "bob@example.com", code="nope")[0])
 
     threads = [threading.Thread(target=go) for _ in range(20)]
     [t.start() for t in threads]
@@ -264,19 +294,19 @@ def test_bom_files_are_read(store, tmp_path):
     token = new_token(store)
     d = tmp_path / ".sync"
     (d / "data").mkdir(exist_ok=True)
-    (d / "data" / "ann.json").write_bytes(b"\xef\xbb\xbf" + json.dumps({"version": 3, "doc": {"v": 1}}).encode())
+    (d / "data" / "ann@example.com.json").write_bytes(b"\xef\xbb\xbf" + json.dumps({"version": 3, "doc": {"v": 1}}).encode())
     assert call(store, "GET", "/__sync/data", token=token) == (200, {"version": 3, "doc": {"v": 1}})
-    acc = d / "accounts" / "ann.json"
+    acc = d / "accounts" / "ann@example.com.json"
     acc.write_bytes(b"\xef\xbb\xbf" + acc.read_bytes())
-    assert call(store, "POST", "/__sync/login", {"login": "ann", "password": "pw123456"})[0] == 200
+    assert call(store, "POST", "/__sync/login", {"login": "ann@example.com", "password": "pw123456"})[0] == 200
     (d / "code.txt").write_bytes(b"\xef\xbb\xbfriver-paper-cold-moon-47\r\n")
     assert store.code() == "river-paper-cold-moon-47"
-    assert register(store, "bob", code="river-paper-cold-moon-47")[0] == 200
+    assert register(store, "bob@example.com", code="river-paper-cold-moon-47")[0] == 200
 
 
 def test_corrupt_data_file_is_500_and_never_overwritten(store, tmp_path):
     token = new_token(store)
-    f = tmp_path / ".sync" / "data" / "ann.json"
+    f = tmp_path / ".sync" / "data" / "ann@example.com.json"
     f.parent.mkdir(exist_ok=True)
     f.write_text("{broken", encoding="utf-8")
     assert call(store, "GET", "/__sync/data", token=token)[0] == 500
@@ -287,9 +317,9 @@ def test_corrupt_data_file_is_500_and_never_overwritten(store, tmp_path):
 
 def test_corrupt_account_file_is_500_not_a_crash(store, tmp_path):
     new_token(store)
-    acc = tmp_path / ".sync" / "accounts" / "ann.json"
-    acc.write_text(json.dumps({"login": "ann", "salt": "zz", "hash": "\u00e9", "iterations": 1, "tokens": []}))
-    assert call(store, "POST", "/__sync/login", {"login": "ann", "password": "pw123456"})[0] == 500
+    acc = tmp_path / ".sync" / "accounts" / "ann@example.com.json"
+    acc.write_text(json.dumps({"login": "ann@example.com", "salt": "zz", "hash": "\u00e9", "iterations": 1, "tokens": []}))
+    assert call(store, "POST", "/__sync/login", {"login": "ann@example.com", "password": "pw123456"})[0] == 500
 
 
 def test_respond_turns_exceptions_into_500(store):
@@ -320,7 +350,7 @@ def test_invalid_utf8_files_are_corrupt_not_crashes(store, tmp_path):
     d = tmp_path / ".sync"
     (d / "accounts" / "aaa.json").write_bytes(b'{"x":"\xff"}')
     assert call(store, "GET", "/__sync/data", token=token)[0] == 200
-    f = d / "data" / "ann.json"
+    f = d / "data" / "ann@example.com.json"
     f.parent.mkdir(exist_ok=True)
     f.write_bytes("{}".encode("utf-16"))
     assert call(store, "GET", "/__sync/data", token=token)[0] == 500

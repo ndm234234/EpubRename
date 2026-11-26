@@ -408,13 +408,13 @@
         <button role="tab" data-tab="signin">Sign in</button>
         <button role="tab" data-tab="create">Create account</button>
       </div>
-      <form id="acctSignIn" data-pane="signin" role="tabpanel">
-        <input name="login" placeholder="Login" autocomplete="username" autocapitalize="none" spellcheck="false" aria-label="Login">
+      <form id="acctSignIn" novalidate data-pane="signin" role="tabpanel">
+        <input name="login" type="email" inputmode="email" placeholder="Email" autocomplete="email" autocapitalize="none" spellcheck="false" aria-label="Email">
         <input name="password" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password">
         <button class="go" type="submit">Sign in</button>
       </form>
-      <form id="acctCreate" data-pane="create" role="tabpanel">
-        <input name="login" placeholder="Login (a–z, 0–9, . _ -)" autocomplete="username" autocapitalize="none" spellcheck="false" aria-label="Login">
+      <form id="acctCreate" novalidate data-pane="create" role="tabpanel">
+        <input name="login" type="email" inputmode="email" placeholder="Email" autocomplete="email" autocapitalize="none" spellcheck="false" aria-label="Email">
         <input name="password" type="password" placeholder="Password" autocomplete="new-password" aria-label="Password">
         <input name="password2" type="password" placeholder="Password again" autocomplete="new-password" aria-label="Password again">
         <input name="code" placeholder="Library code" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Library code">
@@ -2049,9 +2049,9 @@ addEventListener("pagehide", sendPlace);
 let acctTab = "signin", syncResult = "", acctBusy = false;
 const ACCT_ERR = {
   "wrong-code": "Wrong library code. It is shown in the library computer's launcher window.",
-  taken: "This login is taken: choose another one.",
-  "bad-login": "Login: 2 to 32 characters, a–z, 0–9 and . _ - (not a reserved name: con, aux, nul, prn, com1…, lpt1…)",
-  "wrong-password": "Wrong login or password.",
+  taken: "There is already an account with this email. Sign in instead.",
+  "bad-login": "Enter a valid email address.",
+  "wrong-password": "Wrong email or password.",
   wait: "Too many tries. Try again later.",
   offline: "Can't reach the library computer.",
   "server-error": "The library computer had a problem (see its window / the .sync folder).",
@@ -2115,13 +2115,13 @@ async function acctAuth(form, call) {
 $("acctSignIn").onsubmit = e => {
   e.preventDefault();
   const f = e.target, login = f.elements.login.value.trim(), pw = f.elements.password.value;
-  if (!login || !pw) return acctError("Enter your login and password.");
+  if (!login || !pw) return acctError("Enter your email and password.");
   acctAuth(f, () => Sync.login(login, pw));
 };
 $("acctCreate").onsubmit = e => {
   e.preventDefault();
   const f = e.target, login = f.elements.login.value.trim(), pw = f.elements.password.value, code = f.elements.code.value.trim();
-  if (!login || !pw) return acctError("Enter a login and a password.");
+  if (!login || !pw) return acctError("Enter an email and a password.");
   if (pw !== f.elements.password2.value) return acctError("The passwords don't match.");
   if (!code) return acctError("Enter the library code: it is shown in the library computer's launcher window.");
   acctAuth(f, () => Sync.register(login, pw, code));

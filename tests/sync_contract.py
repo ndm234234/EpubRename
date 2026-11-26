@@ -5,7 +5,7 @@
 
 The code comes from the second argument (a code.txt) or from env LIBRARY_CODE. Prints ok/FAIL
 lines, exits 0 when everything passed. Importable: run_contract(base_url, code=None) -> failures.
-Safe on a long-lived server: logins are random per run and at most one wrong code is sent.
+Safe on a long-lived server: logins (emails) are random per run and at most one wrong code is sent.
 """
 
 import http.client
@@ -77,7 +77,7 @@ def run_contract(base_url, code=None, log=None):
         if not ok:
             failures.append(name)
 
-    login, other = "c" + secrets.token_hex(6), "c" + secrets.token_hex(6)
+    login, other = (f"c{secrets.token_hex(6)}@example.com" for _ in range(2))
     pw = "pw-" + secrets.token_hex(6)
     reg = lambda lg, c, p=pw: _call(base, "POST", "/__sync/register", {"login": lg, "password": p, "code": c})
 
@@ -123,8 +123,24 @@ def run_contract(base_url, code=None, log=None):
     check("login (any case) is 200 + token", s == 200 and bool(token2))
     s, _ = _call(base, "POST", "/__sync/login", {"login": login, "password": pw + "x"})
     check("login with wrong password is 401", s == 401)
-    s, _ = _call(base, "POST", "/__sync/register", {"login": "A", "password": pw, "code": code})
-    check("register with a bad login is 400", s == 400)
+    s, _ = reg("  " + login.upper() + "\n", code)
+    check("register of a taken login (trimmed, any case) is 409", s == 409)
+    bad = ["A", "no-at-sign", "two@@example.com", "x@localhost", "../x@example.com", "a/b@example.com",
+           "a\\b@example.com", "a:b@example.com", "a%b@example.com", "ja..ne@example.com", ".jane@example.com",
+           "jane@example..com", "jane@-example.com", "j\u00e9@example.com", "\u212ate@example.com",
+           "x" * 243 + "@example.com", "l" * 64 + "@" + "d" * 60 + ".com", "CON", "con.smith@example.com"]
+    statuses = [reg(lg, code)[0] for lg in bad]
+    check("register with a bad email is 400 (" + ", ".join(f"{lg[:20]!r}: {st}" for lg, st in zip(bad, statuses)
+                                                 if st != 400) + ")", statuses == [400] * len(bad))
+    s, _ = _call(base, "POST", "/__sync/login", {"login": "x@localhost", "password": pw})
+    check("login with a bad email is 400", s == 400)
+    # a Windows device name before the "@" (not before a "."), "+" and the longest email: real files
+    rnd = secrets.token_hex(4)
+    for lg in (f"con@c{rnd}.example.com", f"jane+{rnd}@example.com", "l" * 56 + rnd + "@" + "d" * 59 + ".com"):
+        s, b = reg(lg, code)
+        t = b.get("token") if s == 200 and isinstance(b, dict) else None
+        s2, b2 = _call(base, "GET", "/__sync/data", token=t) if t else (None, None)
+        check(f"an account {lg[:24]}... ({len(lg)} chars) works", s == 200 and s2 == 200)
 
     if token:
         s, b = _call(base, "GET", "/__sync/data", token=token)

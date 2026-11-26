@@ -42,10 +42,11 @@ with `python3 make_server.py <folder>`), so `library-sync.ps1` sits next to the 
 
 ## 4. Cross-check with the Python store on the same folder
 
-1. Register an account on the `.bat` (contract run or the catalog), e.g. login `jane.doe`.
+1. Register an account on the `.bat` (contract run or the catalog), e.g. `jane.doe@example.com`; also `con@example.com` (a
+   device name before the `@` is fine: the file `con@example.com.json` must appear and work).
 2. Stop the `.bat`. In WSL (or Python for Windows), on the same folder:
    `python3 <library>/library_sync.py --serve <library> --port 8765`
-3. Sign in to `jane.doe` there (`POST /__sync/login`) and `GET /__sync/data`: the same version and
+3. Sign in as `jane.doe@example.com` there (`POST /__sync/login`) and `GET /__sync/data`: the same version and
    document as written through the `.bat`.
 4. Write through Python (`PUT /__sync/data`), stop it, start the `.bat` again, sign in there:
    it sees Python's version and document. Both accept each other's `accounts\*.json` (same salt,
@@ -57,13 +58,13 @@ On the library computer (WSL or Python for Windows), with each `.bat` running in
 
     python3 tests/sync_timing.py http://127.0.0.1:<port> <library>/.sync/code.txt
 
-It creates an account (a random `timing-...` login), uploads a document of about 1 MB (thousands
+It creates an account (a random `timing-...@example.com` email), uploads a document of about 1 MB (thousands
 of bookmarks with notes, made-up books), then times `GET /__sync/data`, `PUT /__sync/data` and
 `POST /__sync/place` three times each. Expected on a normal PC: each `ok`, the slowest of each well
 under 1 s, last line `all under 1 s`. (A third argument sets another size in KB, e.g. `4096`.)
-Then sign in on a phone (over https) with the login and password the script printed and open a
+Then sign in on a phone (over https) with the email and password the script printed and open a
 book: it still opens within about 2 s; turn a page, lock the phone, unlock it: no error shown.
-Afterwards delete `.sync/accounts/timing-*.json` and `.sync/data/timing-*.json`.
+Afterwards delete `.sync/accounts/timing-*@example.com.json` and `.sync/data/timing-*@example.com.json`.
 
 ## 6. Old .NET (only if a machine has .NET Framework older than 4.7.2)
 

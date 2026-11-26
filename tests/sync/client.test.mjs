@@ -30,7 +30,7 @@ function fakeStorage() {
 
 // In-memory server with the real API's semantics (versions, 409, tokens).
 function fakeServer() {
-  const s = { version: 0, doc: M.emptyDoc(), calls: [], puts: 0, beforePut: null, down: false, hang: false, token: 'tok1', accounts: { ann: 'pw' }, code: 'river-paper-cold-moon-47' };
+  const s = { version: 0, doc: M.emptyDoc(), calls: [], puts: 0, beforePut: null, down: false, hang: false, token: 'tok1', accounts: { 'ann@example.com': 'pw' }, code: 'river-paper-cold-moon-47' };
   const res = (status, body) => ({ status, ok: status < 400, json: async () => body });
   s.fetch = (url, opts = {}) => {
     s.calls.push({ url, opts });
@@ -41,14 +41,15 @@ function fakeServer() {
     const authed = auth === 'Bearer ' + s.token;
     if (s.broken && /register|login/.test(url)) return Promise.resolve(res(s.broken, {}));
     if (url === '/__sync/register') {
-      if (!/^[a-z0-9._-]{2,32}$/.test(body.login)) return Promise.resolve(res(400, {}));
+      body.login = body.login.trim().toLowerCase();   // as the servers do
+      if (!/^[a-z0-9._+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(body.login)) return Promise.resolve(res(400, {}));
       if (body.code !== s.code) return Promise.resolve(res(403, {}));
       if (s.accounts[body.login]) return Promise.resolve(res(409, {}));
       s.accounts[body.login] = body.password;
       return Promise.resolve(res(200, { token: s.token }));
     }
     if (url === '/__sync/login') {
-      if (body.login === 'slow') return Promise.resolve(res(429, { wait: 60 }));
+      if (body.login === 'slow@example.com') return Promise.resolve(res(429, { wait: 60 }));
       return Promise.resolve(s.accounts[body.login] === body.password ? res(200, { token: s.token }) : res(401, {}));
     }
     if (url === '/__sync/logout') return Promise.resolve(res(204, null));
@@ -79,7 +80,7 @@ function env({ kind = 'computer', signedIn = true } = {}) {
   globalThis.screen = { width: kind === 'phone' ? 390 : 800, height: kind === 'phone' ? 800 : 1200 };
   delete globalThis.LibrarySync;
   load('sync.js');
-  if (signedIn) ls.setItem('librarySync:account', JSON.stringify({ login: 'ann', token: 'tok1' }));
+  if (signedIn) ls.setItem('librarySync:account', JSON.stringify({ login: 'ann@example.com', token: 'tok1' }));
   return globalThis.LibrarySync;
 }
 const put = (k, v) => ls.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
@@ -141,22 +142,22 @@ test('collect then apply leaves localStorage byte-identical; only synced keys up
 test('account: register / login / logout and error mapping', async () => {
   const S = env({ signedIn: false });
   assert.equal(S.account(), null);
-  assert.deepEqual(await S.register('ann2', 'pw', 'wrong'), { ok: false, error: 'wrong-code' });
-  assert.deepEqual(await S.register('A', 'pw', srv.code), { ok: false, error: 'bad-login' });
-  assert.deepEqual(await S.register('ann', 'pw', srv.code), { ok: false, error: 'taken' });
-  assert.deepEqual(await S.login('ann', 'nope'), { ok: false, error: 'wrong-password' });
-  const w = await S.login('slow', 'x');
+  assert.deepEqual(await S.register('ann2@example.com', 'pw', 'wrong'), { ok: false, error: 'wrong-code' });
+  assert.deepEqual(await S.register('not-an-email', 'pw', srv.code), { ok: false, error: 'bad-login' });
+  assert.deepEqual(await S.register('ann@example.com', 'pw', srv.code), { ok: false, error: 'taken' });
+  assert.deepEqual(await S.login('ann@example.com', 'nope'), { ok: false, error: 'wrong-password' });
+  const w = await S.login('slow@example.com', 'x');
   assert.equal(w.error, 'wait');
   assert.equal(w.wait, 60);
-  assert.deepEqual(await S.register('bob', 'pw', srv.code), { ok: true });
-  assert.deepEqual(S.account(), { login: 'bob' });
+  assert.deepEqual(await S.register(' Bob@Example.COM ', 'pw', srv.code), { ok: true });
+  assert.deepEqual(S.account(), { login: 'bob@example.com' });   // stored as the servers store it
   assert.equal(get('librarySync:account').token, 'tok1');
   assert.deepEqual(await S.logout(), { ok: true });
   assert.equal(S.account(), null);
-  assert.deepEqual(await S.login('ann', 'pw'), { ok: true });
-  assert.equal(S.account().login, 'ann');
+  assert.deepEqual(await S.login('ann@example.com', 'pw'), { ok: true });
+  assert.equal(S.account().login, 'ann@example.com');
   srv.down = true;
-  assert.deepEqual(await S.login('ann', 'pw'), { ok: false, error: 'offline' });
+  assert.deepEqual(await S.login('ann@example.com', 'pw'), { ok: false, error: 'offline' });
   // logout while offline still signs out locally
   assert.deepEqual(await S.logout(), { ok: true });
   assert.equal(S.account(), null);
@@ -259,8 +260,8 @@ test('401 drops the token, keeps login and local data', async () => {
   srv.token = 'other';
   const before = ls.getItem('epubReader:book:' + BOOK);
   assert.equal(await S.syncNow(), 'signed-out');
-  assert.deepEqual(get('librarySync:account'), { login: 'ann' });
-  assert.deepEqual(S.account().login, 'ann');
+  assert.deepEqual(get('librarySync:account'), { login: 'ann@example.com' });
+  assert.deepEqual(S.account().login, 'ann@example.com');
   assert.equal(ls.getItem('epubReader:book:' + BOOK), before);
   const n = srv.calls.length;
   assert.equal(await S.syncNow(), 'signed-out');
@@ -334,10 +335,10 @@ test('default mark order: marks already on the device keep their order, new ones
 test('a library computer error (5xx) on sign-in or create is server-error, not offline', async () => {
   const S = env({ signedIn: false });
   srv.broken = 500;
-  assert.deepEqual(await S.login('ann', 'pw'), { ok: false, error: 'server-error' });
-  assert.deepEqual(await S.register('bob', 'pw', srv.code), { ok: false, error: 'server-error' });
+  assert.deepEqual(await S.login('ann@example.com', 'pw'), { ok: false, error: 'server-error' });
+  assert.deepEqual(await S.register('bob@example.com', 'pw', srv.code), { ok: false, error: 'server-error' });
   srv.broken = 503;
-  assert.deepEqual(await S.login('ann', 'pw'), { ok: false, error: 'server-error' });
+  assert.deepEqual(await S.login('ann@example.com', 'pw'), { ok: false, error: 'server-error' });
 });
 
 test('concurrent syncNow share one in-flight run', async () => {
@@ -422,7 +423,7 @@ test('signedIn and lastSync', async () => {
   srv.token = 'other';   // the server forgot this device: 401
   assert.equal(await S.syncNow(), 'signed-out');
   assert.equal(S.signedIn(), false);
-  assert.deepEqual(S.account(), { login: 'ann' });
+  assert.deepEqual(S.account(), { login: 'ann@example.com' });
 });
 
 test('a failed PUT still announces what applyLocal changed (else nobody ever would)', async () => {

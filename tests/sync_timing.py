@@ -3,7 +3,7 @@
 
   python3 tests/sync_timing.py http://127.0.0.1:48765 [path/to/library/.sync/code.txt] [size in KB]
 
-Creates a new account (random login), PUTs a document of about the given size (default 1024 KB),
+Creates a new account (a random email), PUTs a document of about the given size (default 1024 KB),
 then times GET /__sync/data, PUT /__sync/data and POST /__sync/place three times each and prints
 the slowest of each, and the test account's login and password (to sign in on a phone). Exits 1 if a request fails or the slowest one takes 1 s or more.
 The code comes from the second argument (a code.txt) or from env LIBRARY_CODE.
@@ -48,7 +48,7 @@ def timed(fn):
 def run(base, code, kb=1024, log=print):
     """[(what, status, slowest seconds)]."""
     base = base.rstrip("/")
-    login, password = "timing-" + secrets.token_hex(4), "pw-" + secrets.token_hex(8)
+    login, password = f"timing-{secrets.token_hex(4)}@example.com", "pw-" + secrets.token_hex(8)
     s, b = _call(base, "POST", "/__sync/register", {"login": login, "password": password, "code": code})
     if s != 200:
         log(f"FAIL register: {s} {b}")

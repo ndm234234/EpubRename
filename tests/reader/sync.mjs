@@ -9,13 +9,13 @@
 // - prefs keep a "changed at" time
 // - the account button: shown on a secure page (http://127.0.0.1), hidden on plain http with a host
 //   name (http://lib.test, mapped to 127.0.0.1); signed out the reader sends nothing to /__sync
-// - the panel: a reserved login, a 500 from the library computer and a wrong library code each show
+// - the panel: not an email, a 500 from the library computer and a wrong library code each show
 //   their own error in the panel; the right code signs in and syncs
 // Part 2: the catalog (index.html made by make_server.py from two books copied under made-up names
 // into a temp library, served by its own library_sync.py): the account button; a book opened on one
 // device comes first under "Recently opened" on another (installed-app mode stubbed through
 // matchMedia); catalog settings of the app and of a browser tab sync separately; signed in from the
-// catalog's panel (a 500 and a reserved login told apart first), coming back to the front syncs
+// catalog's panel (a 500 and not an email told apart first), coming back to the front syncs
 // without a reload; a sync that hangs never holds the catalog back.
 // Part 3: two phones and a tablet on one account (a temp library with the book under a made-up name,
 // its own server, stopped and started again): A's place, bookmark with note and font reach B; a
@@ -160,7 +160,8 @@ ok(await p.eval("!!document.getElementById('acct') && document.getElementById('a
 const R = JSON.parse(await p.eval("JSON.stringify((document.getElementById('acct') || document.body).getBoundingClientRect())"));
 ok(Math.abs(R.top - 52) <= 1 && R.left === 0 && R.width === W, `phone: a sheet under the toolbar, full width (${[R.top, R.left, R.width]})`);
 ok(await p.eval(SHOWN("#acctIn")) && !(await p.eval(SHOWN("#acctOut"))), "signed out: the sign-in forms");
-const LOGIN = "t" + Math.floor(Math.random() * 1e9);
+const LOGIN = "t" + Math.floor(Math.random() * 1e9) + "@example.com";
+ok(await p.eval("[...document.querySelectorAll('#acct [name=login]')].every(i => i.type === 'email' && i.autocomplete === 'email' && i.placeholder === 'Email')"), "the panel asks for an email");
 const fill = (form, vals) => p.eval(`(() => { const f = document.getElementById('${form}');
   ${Object.entries(vals).map(([k, v]) => `f.elements['${k}'].value = ${JSON.stringify(v)};`).join(" ")}
   f.requestSubmit(); })(); 0`).catch(e => console.log("  (form: " + e.message + ")"));
@@ -169,8 +170,8 @@ await fill("acctCreate", { login: LOGIN, password: "secret-pw", password2: "othe
 await sleep(300);
 ok(/match/i.test(await text("#acctErr")), `passwords that differ: error in the panel ("${await text("#acctErr")}")`);
 await fill("acctCreate", { login: "con", password: "secret-pw", password2: "secret-pw", code: "x" });
-await p.waitFor("document.getElementById('acctErr').textContent.includes('reserved')", 10000).catch(() => {});
-ok(/reserved.*con/.test(await text("#acctErr")), `a reserved login (con): the error says so ("${await text("#acctErr")}")`);
+await p.waitFor("document.getElementById('acctErr').textContent.includes('valid email')", 10000).catch(() => {});
+ok(/valid email/.test(await text("#acctErr")), `not an email (con): the error says so ("${await text("#acctErr")}")`);
 await p.eval(`window.__f = fetch; window.fetch = (u, o) => String(u).includes('/__sync/') ? Promise.resolve(new Response("{}", { status: 500 })) : __f(u, o); 0`);
 await fill("acctCreate", { login: LOGIN, password: "secret-pw", password2: "secret-pw", code: "x" });
 await p.waitFor("/had a problem/.test(document.getElementById('acctErr').textContent)", 10000).catch(() => {});
@@ -295,7 +296,7 @@ const login = (d, who) => d.eval(`LibrarySync.login(${JSON.stringify(who)}, "sec
 }
 const A = await device(false);
 await A.goto(CAT);
-const reg = JSON.parse(await A.eval(`LibrarySync.register("cat" + Math.floor(Math.random() * 1e9), "secret-pw", ${JSON.stringify(CODE2)}).then(r => JSON.stringify(Object.assign(r, { login: LibrarySync.account() && LibrarySync.account().login })))`));
+const reg = JSON.parse(await A.eval(`LibrarySync.register("cat" + Math.floor(Math.random() * 1e9) + "@example.com", "secret-pw", ${JSON.stringify(CODE2)}).then(r => JSON.stringify(Object.assign(r, { login: LibrarySync.account() && LibrarySync.account().login })))`));
 ok(reg.ok, "device A: account created");
 const LOGIN2 = reg.login;
 await catalog(A);
@@ -348,8 +349,9 @@ ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: opened the second 
   ok(/had a problem/.test(await E.eval("document.getElementById('acctErr').textContent")), "catalog: a 500 from the library computer is told apart from \"can't reach\"");
   await E.eval("window.fetch = __f; 0");
   await E.eval(`(() => { const f = document.getElementById('acctSignIn'); f.elements.login.value = "con"; f.elements.password.value = "x"; f.requestSubmit(); })(); 0`);
-  await E.waitFor("document.getElementById('acctErr').textContent.includes('reserved')", 10000).catch(() => {});
-  ok(/reserved.*con/.test(await E.eval("document.getElementById('acctErr').textContent")), "catalog: a reserved login (con): the error says so");
+  await E.waitFor("document.getElementById('acctErr').textContent.includes('valid email')", 10000).catch(() => {});
+  ok(/valid email/.test(await E.eval("document.getElementById('acctErr').textContent")), "catalog: not an email (con): the error says so");
+  ok(await E.eval("[...document.querySelectorAll('#acctPop [name=login]')].every(i => i.type === 'email' && i.autocomplete === 'email' && i.placeholder === 'Email')"), "catalog: the panel asks for an email");
   await E.eval(`(() => { const f = document.getElementById('acctSignIn');
     f.elements.login.value = ${JSON.stringify(LOGIN2)}; f.elements.password.value = "secret-pw"; f.requestSubmit(); })(); 0`);
   await E.waitFor("/Last synced/.test(document.getElementById('acctStatus').textContent)", 10000).catch(() => {});
@@ -386,7 +388,7 @@ await stopServer(srv);
   let S = await startServer(LIB3);
   const PORT3 = S.port, B3 = S.url;
   const CODE3 = readFileSync(join(LIB3, ".sync", "code.txt"), "utf8").trim();
-  const LOGIN3 = "e2e" + Math.floor(Math.random() * 1e9);
+  const LOGIN3 = "e2e" + Math.floor(Math.random() * 1e9) + "@example.com";
   const dataFile = () => join(LIB3, ".sync", "data", LOGIN3 + ".json");
   const serverDoc = () => { try { return JSON.parse(readFileSync(dataFile(), "utf8")).doc || {}; } catch { return {}; } };
   const URL3 = `${B3}/reader/reader.html#book=${encodeURIComponent("../" + FILE3)}`;

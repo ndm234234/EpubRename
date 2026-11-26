@@ -33,6 +33,9 @@ $global:SyncZeroSalt = New-Object byte[] 16
 $global:SyncReserved = @('con', 'prn', 'aux', 'nul', 'com1', 'com2', 'com3', 'com4', 'com5', 'com6',
                          'com7', 'com8', 'com9', 'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7',
                          'lpt8', 'lpt9')
+# the account's email (lower-case): the same pattern string as EMAIL_PATTERN in library_sync.py
+$global:SyncEmailPattern = '(?=[^@]{1,64}@)[a-z0-9_+-]+(?:\.[a-z0-9_+-]+)*@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+'
+$global:SyncEmailMax = 128
 # One JSON token (after optional whitespace) per match; \G makes the matches back to back, so the
 # text is valid only if they reach its end. NaN/Infinity are accepted, as Python's json does.
 $global:SyncJsonRe = [regex]::new(
@@ -697,15 +700,18 @@ function ConvertFrom-SyncBody([byte[]]$body) {
   return @{ Text = $text; Node = $node }
 }
 
-# @{ Body; Login (lower-case); Password } or $null for a 400
+# @{ Body; Login (the email, trimmed and lower-case); Password } or $null for a 400
 function Get-SyncCredentials([byte[]]$body) {
   $b = ConvertFrom-SyncBody $body
   if ($null -eq $b) { return $null }
   $l = Get-SyncMember $b.Node 'login'
   $p = Get-SyncMember $b.Node 'password'
   if ($null -eq $l -or $l.K -cne 's' -or $null -eq $p -or $p.K -cne 's') { return $null }
-  $login = (ConvertFrom-SyncJsonString $l.R).ToLowerInvariant()
-  if ($login -cnotmatch '^[a-z0-9._-]{2,32}\z') { return $null }
+  $login = ConvertFrom-SyncJsonString $l.R
+  if ($login -cmatch '[^\x00-\x7f]') { return $null }   # so lowering can't make ASCII of it
+  $login = $login.Trim([char[]]@(' ', "`t", "`r", "`n")).ToLowerInvariant()
+  if ($login.Length -lt 3 -or $login.Length -gt $global:SyncEmailMax) { return $null }
+  if ($login -cnotmatch ('^(?:' + $global:SyncEmailPattern + ')\z')) { return $null }
   if ($global:SyncReserved -ccontains $login.Split('.')[0]) { return $null }   # reserved device names on Windows
   $password = ConvertFrom-SyncJsonString $p.R
   $chars = $password.Length - [regex]::Matches($password, '[\uD800-\uDBFF][\uDC00-\uDFFF]').Count   # code points

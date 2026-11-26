@@ -10,7 +10,13 @@ The server is a dumb store: all merging happens in the browser. Files, in <libra
   lock                  exclusive lock file for every read-check-write of accounts/ and data/
 
 On-disk format, shared with the PowerShell twin:
-  * login: lower-case, ^[a-z0-9._-]{2,32}$ (it names the files).
+  * login: the person's email, trimmed (spaces, tabs, CR, LF) and lower-cased; it names the files.
+    Valid: at most 128 characters (so the file and temp-file names fit Windows and Linux limits);
+    EMAIL_PATTERN as a whole (the PowerShell twin holds the same string): local part 1-64 of
+    [a-z0-9_+-] in dot-separated runs (no leading, trailing or double dot), one "@", then at least
+    two dot-separated labels of [a-z0-9-] (1-63 each, no leading or trailing "-"); "%" is left out
+    on purpose (cmd.exe expands it). The part before the first "." must not be a Windows device
+    name (con, nul, com1, ...). The JSON field stays `login` on the wire and in the account file.
   * password: PBKDF2-HMAC-SHA256 over the password's UTF-8 bytes, 200000 iterations, random
     16-byte salt; `salt` and `hash` (32 bytes) are lower-case hex strings.
   * device token: 32 random bytes, sent to the device as a 64-char lower-case hex string. The
@@ -41,7 +47,10 @@ from urllib.parse import unquote
 
 ITERATIONS = 200000
 BODY_LIMIT = 8 * 1024 * 1024
-LOGIN_RE = re.compile(r"[a-z0-9._-]{2,32}")
+EMAIL_PATTERN = (r"(?=[^@]{1,64}@)[a-z0-9_+-]+(?:\.[a-z0-9_+-]+)*"
+                 r"@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+")
+EMAIL_RE = re.compile(EMAIL_PATTERN)
+EMAIL_MAX = 128
 RESERVED = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
 TOKEN_RE = re.compile(r"[0-9a-f]{64}")
 JSON_TYPE = "application/json; charset=utf-8"
@@ -348,12 +357,15 @@ class SyncStore:
         if obj is None:
             return None
         login, password = obj.get("login"), obj.get("password")
-        if not isinstance(login, str) or not LOGIN_RE.fullmatch(login.lower()) \
-                or login.lower().split(".")[0] in RESERVED:   # reserved device names on Windows
+        if not isinstance(login, str) or not login.isascii():   # so lower() can't make ASCII of it
+            return None
+        login = login.strip(" \t\r\n").lower()
+        if not 3 <= len(login) <= EMAIL_MAX or not EMAIL_RE.fullmatch(login) \
+                or login.split(".")[0] in RESERVED:   # reserved device names on Windows
             return None
         if not isinstance(password, str) or not 0 < len(password) <= 1024:
             return None
-        return obj, login.lower(), password
+        return obj, login, password
 
     def _register(self, method, headers, body):
         cred = self._credentials(body)

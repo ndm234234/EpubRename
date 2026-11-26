@@ -107,7 +107,22 @@ def test_ps1_matches_python_constants():
     assert "$global:SyncBodyLimit = 8 * 1024 * 1024" in text
     assert "$global:SyncFreeWrong = 5" in text and "$global:SyncFirstPause = 60" in text
     assert "$global:SyncMaxPause = 3600" in text
-    assert "'^[a-z0-9._-]{2,32}\\z'" in text and "'^[0-9a-f]{64}\\z'" in text
+    assert "'^[0-9a-f]{64}\\z'" in text
+
+
+def test_ps1_checks_the_email_as_python_does():
+    from library_sync import EMAIL_MAX, EMAIL_PATTERN, RESERVED
+    text = PS1.read_text(encoding="ascii")
+    assert f"$global:SyncEmailPattern = '{EMAIL_PATTERN}'" in text
+    assert f"$global:SyncEmailMax = {EMAIL_MAX}" in text
+    reserved = re.search(r"\$global:SyncReserved = @\(([^)]*)\)", text).group(1)
+    assert set(re.findall(r"'([a-z0-9]+)'", reserved)) == RESERVED
+    cred = re.search(r"(?ms)^function Get-SyncCredentials\b.*?^}", text).group(0)
+    assert "if ($login -cmatch '[^\\x00-\\x7f]') { return $null }" in cred
+    assert """$login.Trim([char[]]@(' ', "`t", "`r", "`n")).ToLowerInvariant()""" in cred
+    assert "$login.Length -lt 3 -or $login.Length -gt $global:SyncEmailMax" in cred
+    assert "$login -cnotmatch ('^(?:' + $global:SyncEmailPattern + ')\\z')" in cred
+    assert "$global:SyncReserved -ccontains $login.Split('.')[0]" in cred
     for name in ("New-SyncStore", "Invoke-SyncRequest", "Test-SyncPrivate", "Get-SyncCode"):
         assert re.search(rf"(?m)^function {name}\b", text), name
 
@@ -144,9 +159,9 @@ def test_ps1_reads_the_stored_version_without_parsing_the_document(tmp_path):
     from library_sync import SyncStore
     store = SyncStore(tmp_path)
     _, _, out = store.handle("POST", "/__sync/register", {}, json.dumps(
-        {"login": "ann", "password": "pw123456", "code": store.code()}).encode())
+        {"login": "ann@example.com", "password": "pw123456", "code": store.code()}).encode())
     auth = {"Authorization": "Bearer " + json.loads(out)["token"]}
-    path = tmp_path / ".sync" / "data" / "ann.json"
+    path = tmp_path / ".sync" / "data" / "ann@example.com.json"
     doc = {"v": 1, "marks": {"Jane Doe - A Quiet Harbour": {"x": {"note": '"doc": {} }'}}}}
     assert store.handle("PUT", "/__sync/data", auth, json.dumps({"version": 0, "doc": doc}).encode())[0] == 200
     stored = path.read_text(encoding="utf-8")
