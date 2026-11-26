@@ -1,21 +1,29 @@
 // Minimal Chrome DevTools driver: launch headless Chrome, one page, send commands.
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export async function launch({ width = 390, height = 844, touch = true } = {}) {
+const atExit = [];   // one "exit" listener for all the browsers of a check
+process.on("exit", () => atExit.forEach(f => f()));
+export async function launch({ width = 390, height = 844, touch = true, args = [] } = {}) {
   const profile = mkdtempSync(join(tmpdir(), "epub-reader-test-"));
-  const port = 9300 + Math.floor(Math.random() * 500);
-  const proc = spawn("google-chrome", ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
-    "--no-first-run", "--no-default-browser-check", "--disable-gpu", "about:blank"], { stdio: "ignore", detached: true });
+  // port 0: Chrome takes a free one and writes it into the profile (DevToolsActivePort), so
+  // browsers started side by side never collide
+  const proc = spawn("google-chrome", ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
+    "--no-first-run", "--no-default-browser-check", "--disable-gpu", ...args, "about:blank"], { stdio: "ignore", detached: true });
   // the browser and all its helper processes, at once (a closing browser would write the profile again)
   const kill = () => { try { process.kill(-proc.pid, "SIGKILL"); } catch {} };
-  process.on("exit", () => {   // the browser and its throwaway profile go with the check
+  atExit.push(() => {   // the browser and its throwaway profile go with the check
     kill();
     try { rmSync(profile, { recursive: true, force: true }); } catch {}
   });
-  let targets;
+  let port = 0, targets;
+  for (let i = 0; i < 150 && !port; i++) {
+    try { port = +readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0] || 0; } catch {}
+    if (!port) await sleep(100);
+  }
+  if (!port) throw new Error("Chrome did not start (no DevToolsActivePort)");
   for (let i = 0; i < 50; i++) {
     try { targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); if (targets.length) break; } catch {}
     await sleep(200);

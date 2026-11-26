@@ -4,7 +4,7 @@ Small Python scripts to tidy up an EPUB collection:
 
 - **`epub_rename.py`** — copies books from `In/` into `Out/<Author>/<Author> - <Title>.epub`,
   using the author and title stored inside each book, and verifies every copy.
-- **`make_index.py`** — builds `index.html`, an offline catalog of a book folder
+- **`make_server.py`** — builds `index.html`, an offline catalog of a book folder
   with covers, search, sorting and a built-in reader. It runs automatically at the end of `epub_rename.py`
   and can also be used on its own for any folder.
 - **`fix_cover.py`** — makes sure every book has a cover that readers and catalogs can find:
@@ -134,10 +134,10 @@ Constants at the top of `epub_rename.py`:
 | `MAX_AUTHORS_SHOWN` | `2`                | more authors than this → shortened        |
 | `ET_AL`             | `" и др."`         | suffix for shortened author lists         |
 
-## make_index.py
+## make_server.py
 
 ```bash
-python3 make_index.py [FOLDER] [--title "My Library"]
+python3 make_server.py [FOLDER] [--title "My Library"]
 ```
 
 Scans `FOLDER` (default: `Out` in the current folder) recursively and writes:
@@ -147,7 +147,8 @@ Scans `FOLDER` (default: `Out` in the current folder) recursively and writes:
   removed books are cleaned up);
 - `FOLDER/.index/reader/` — the reader (copied from `reader/` next to the script);
 - `FOLDER/Open Library.bat`, `FOLDER/Open Library.sh` and their `(network)` versions —
-  launchers (from `launchers/`).
+  launchers (from `launchers/`), with `library_sync.py` and `library-sync.ps1`, the code
+  behind accounts and sync (below).
 
 EPUB files are only read. Keep `.index/` next to `index.html` when moving the catalog.
 
@@ -165,7 +166,9 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
 - Instant search across title, authors, series, description and file path
   (case-insensitive, `ё` = `е`, all words must match). `/` focuses search, `Esc` clears it.
 - Click an author to see all their books.
-- Sort by author, title, recently added or size; optional grouping by author.
+- Sort by recently opened (the default, in the app and in a browser tab alike: the book read last
+  comes first, then books not opened yet; with an account, on every device), author, title,
+  recently added or size; optional grouping by author. A sort you choose is kept.
   Settings are remembered.
 - One rule for every book: the **cover** (or the **title**) shows the book's page, the **Read**
   button under it starts reading straight away (one tap on a phone). The download icon next to
@@ -178,6 +181,9 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
   reader brings you back to the book's page. `Ctrl`+click / middle click on a cover opens the reader
   in a new tab. With "reduce motion" turned on in the system there is no animation.
 - **Open file** opens any EPUB from disk in the reader.
+- The catalog returns to where you were: after reading it shows the same place in the shelf, and
+  after the browser or app is restarted on a book's page it opens that page again. This is kept
+  on the device only, it is not synced.
 
 ### Reader
 
@@ -270,7 +276,13 @@ For one-click reading, open the catalog with the launcher placed next to `index.
 The launcher starts a tiny web server on this computer only (`localhost:48765`; if another
 program uses that port, the next free one up to 48784) and opens the catalog in the browser. Close the window (or `Ctrl+C`) to stop it; the Linux one
 also stops after 3 hours without use. Running it again while it works just opens the browser.
-Reading places are stored per address, so keep using the launcher to keep them.
+Reading places are stored per address, so keep using the launcher to keep them (or use an
+account to have them on every device, below). The window shows the library code for accounts.
+
+The Windows launchers share `launchers/library-sync.ps1`, the Linux ones `launchers/library_sync.py`;
+both keep the same files in `.sync/`, so a `.bat` and a `.sh` can serve one library. To try the
+sync store on its own: `python3 launchers/library_sync.py --serve FOLDER --port 8000` (this
+computer only, no browser). The manual check for Windows is `tests/windows-sync-checklist.md`.
 
 #### Reading on a phone or tablet (home Wi-Fi)
 
@@ -286,8 +298,9 @@ address to type on the phone, e.g. `http://192.168.1.64:48865/`.
 - Windows asks once whether PowerShell may use the network: allow it for **Private** networks
   (and check the Wi-Fi is set as a Private network). No administrator rights needed.
   On Linux a firewall (`ufw`, `firewalld`) may need to allow the port.
+- The window also shows the **library code** (see Accounts, below).
 - It uses its own ports (48865–48884), so both launchers can run at the same time. Reading places
-  and bookmarks are kept separately on each device.
+  and bookmarks are kept separately on each device, unless you use an account (below).
 - The window logs who uses the library: each device (address, computer name when the router
   knows it, system and browser), the book it opens, and when it leaves, with the number of
   connected devices:
@@ -302,6 +315,73 @@ address to type on the phone, e.g. `http://192.168.1.64:48865/`.
   browser in the background, out of Wi-Fi) is shown as gone, and comes back as connected
   when it reports in again. Refused outside addresses are logged once each.
 
+#### Accounts: the same place on every device
+
+Optional. Without an account everything works as before, each device on its own. With one, your
+phone, tablet and computer share what you read. The account lives in the library itself, on the
+computer that runs the launcher; nothing goes to the internet.
+
+- **An account is an email and a password.** The email only names the account (it is not case
+  sensitive); the library never sends mail, so nothing is verified and there is no "reset by mail".
+  How to add and remove accounts: below.
+- **What is synced:** reading places, bookmarks (with their names and notes) and the recently
+  opened books are the same on all devices. The reader and catalog settings are shared only between
+  devices of the same kind (phone, tablet, computer), since what suits one screen doesn't suit
+  another.
+- **What is not synced:** the books themselves and the offline copies on a device.
+- **Offline is fine:** changes are kept on the device and sent when the library is reachable again.
+  The reader syncs when a book is opened, when you come back to the page and when you leave it;
+  while you read, changes go out at most once every 30 seconds. Changes made on two devices are
+  merged, and a deleted bookmark stays deleted.
+- **Use the https address.** On a plain `http://192.168.…` address there is no account (the
+  catalog's logo is just a title, without "Sign in to sync"; the reader has no account button):
+  browsers allow it only on https (or on `localhost`, the same computer). Put the library behind
+  https as for installing the app, above.
+- **Wrong codes and passwords are slowed down:** after 5 wrong in a row the library answers
+  "try later" for a minute, longer with each further mistake.
+- **Forgotten password:** the owner deletes `.sync/accounts/<email>.json` in the library folder
+  (and keeps `.sync/data/<email>.json`). The person registers again with the same email and the
+  library code, and gets their data back.
+- **Shared devices:** signing in merges the places and bookmarks already on that device into the
+  account being signed in, and signing out leaves them on the device — so on a family tablet, after
+  one person signs out, the next person's sign-in takes the previous person's places and bookmarks
+  into their own account.
+- **Signing out while the library computer is unreachable** signs the device out, but its token
+  stays valid on the library computer until the account file is reset (the owner deletes
+  `.sync/accounts/<email>.json`, as for a forgotten password).
+- **Back up `.sync/`** with the library: it holds the code, the accounts and everyone's data. It is
+  never served to the network, `make_server.py` never touches it, and it is in `.gitignore`.
+
+##### Add an account
+
+The person whose account it is makes it, on their own device (the owner can't make one for
+someone else):
+
+1. Open the catalog or the reader on the library's **https** address and open the account
+   panel: in the catalog tap the **blue book logo and library name** at the top left (it says
+   "Sign in to sync" under the name); in the reader, the account button in the toolbar.
+2. **Create account**: their email, a password twice, and the **library code**. The code (four
+   words and two digits, like `river-paper-cold-moon-47`) is printed in the launcher window at
+   every start and kept in `.sync/code.txt` in the library folder.
+3. On their other devices: **Sign in** with the same email and password (no code needed).
+
+Giving someone the code is how you let them in: it stops strangers who reach the address from
+making accounts. To stop new accounts with a code you gave out, edit `.sync/code.txt` (or delete it,
+and a new random code is made); it applies at once, existing accounts keep working, and the
+launcher window shows the new code from its next start.
+
+##### Remove an account
+
+No need to stop the launcher: the servers read the account files on every request. In the
+library folder, for the account `jane.doe@example.com`:
+
+- delete `.sync/accounts/jane.doe@example.com.json`: the password no longer works and all their
+  devices are signed out (on their next sync). Their devices keep their own copy of the places and
+  bookmarks;
+- also delete `.sync/data/jane.doe@example.com.json` to delete what they synced. Keep it, and
+  whoever registers again with that email (and the library code) gets the data back — that is how
+  a forgotten password is reset.
+
 #### Installing as an app
 
 The library can be installed as an app on a phone, tablet or computer: its own icon, full screen,
@@ -314,9 +394,7 @@ no address bar. The browser doesn't push it; it's in the browser's menu — Chro
 - The app opens the library at the address it was installed from: keep the computer's address (and
   port) the same, e.g. a fixed address for it in the router. The server is needed for the first start
   and for updates; after that the app also works without it (below).
-- `make_index.py` writes the app description to `.index/manifest.webmanifest`, named after the library.
-- In the app the catalog is sorted by **Recently opened** by default: the book read last comes first,
-  then books not opened yet. The other orders are in the same menu. In a browser tab nothing changes.
+- `make_server.py` writes the app description to `.index/manifest.webmanifest`, named after the library.
 
 #### Offline: the library on the device
 
@@ -346,7 +424,7 @@ the whole library is on the device, blue while downloading) opens the settings:
   don't come back by themselves.
 
 The app checks the library when it starts, when it comes back to the screen and when the connection
-returns. `make_index.py` writes the list for this to `.index/library.json`, so run it after changing
+returns. `make_server.py` writes the list for this to `.index/library.json`, so run it after changing
 the books, as always:
 
 - a new book is downloaded (in *All books* mode);
@@ -357,7 +435,7 @@ the books, as always:
 
 The storage is the browser's site data for the library's address. Clearing it (e.g. *Clear data* in
 the site settings, or removing the app) removes the books too. The service worker `sw.js` next to
-`index.html` is written by `make_index.py`.
+`index.html` is written by `make_server.py`.
 
 ## fix_cover.py
 
@@ -403,7 +481,7 @@ terminal), `--dry-run` only prints what would be done.
 Only the package file (OPF) is edited, as text, so everything else in the book stays
 byte for byte; the fixed file is checked (opens, nothing lost, every listed file present,
 cover found) before it replaces the old one, and keeps the old file's date. Running it
-again changes nothing. Run `make_index.py` afterwards to see the covers in the catalog.
+again changes nothing. Run `make_server.py` afterwards to see the covers in the catalog.
 
 ## pdf2epub.py
 
@@ -526,6 +604,16 @@ FULL=1 tests/reader/run.sh "Jane Doe/Jane Doe - A Quiet Harbour.epub"   # every 
 
 Several books run side by side; the output keeps only failures and each check's verdict.
 `W`/`H` set the screen, `TOUCH=0` a desktop, `SHOTS=dir` saves screenshots.
+
+## Sync checks
+
+```bash
+python3 -m pytest -q tests                     # servers, merge, launchers
+node --test 'tests/sync/*.test.mjs'            # the browser side of sync
+python3 tests/sync_contract.py http://host:port FOLDER/.sync/code.txt   # a running server, any launcher
+```
+
+The reader checks above (`tests/reader/run.sh "<book>"`) cover the reader itself.
 
 ## Notes and limitations
 

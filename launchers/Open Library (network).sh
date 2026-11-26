@@ -7,9 +7,15 @@
 # 3 hours without use. Needs python3 (installed on most Linux systems).
 cd "$(dirname "$0")" || exit 1
 exec python3 - "$PWD" <<'PY'
-import functools, http.server, ipaddress, posixpath, socket, subprocess, sys, threading, time, urllib.parse, urllib.request, webbrowser
+import functools, http.server, ipaddress, os, posixpath, socket, subprocess, sys, threading, time, urllib.parse, urllib.request, webbrowser
 
 ROOT, IDLE_HOURS = sys.argv[1], 3
+sys.path.insert(0, ROOT)
+import library_sync                       # accounts and reading-place sync, stored in .sync/
+store = library_sync.SyncStore(ROOT)
+def open_browser(url):
+    if not os.environ.get("LIBRARY_NO_BROWSER"):
+        webbrowser.open(url)
 PORTS = range(48865, 48885)   # own range, so this and the computer-only launcher can run together
 last_use = time.time()
 
@@ -112,6 +118,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path = urllib.parse.unquote(self.path.split("?")[0])
         if path != "/__library_root":
             seen(plain_ip(self.client_address[0]), self.headers.get("User-Agent"), path)
+        if library_sync.is_private(path):
+            self.send_error(404)
+            return
+        if self.path.startswith("/__sync/"):
+            self.sync()
+            return
         if path == "/__alive":                # "still here" from the catalog / reader
             self.send_response(204)
             self.end_headers()
@@ -126,11 +138,35 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         else:
             super().do_GET()
 
+    def do_HEAD(self):
+        if library_sync.is_private(self.path):
+            self.send_error(404)
+        else:
+            super().do_HEAD()
+
+    sync_status = 0
+
+    def send_response(self, code, message=None):
+        self.sync_status = code
+        super().send_response(code, message)
+
+    def sync(self):
+        """Sync routes; sign-ins and registrations are shown in the window (never passwords)."""
+        path = self.path.split("?")[0]
+        library_sync.respond(self, store)
+        if path in ("/__sync/register", "/__sync/login"):
+            ip = plain_ip(self.client_address[0])
+            what = "registration" if path.endswith("register") else "sign-in"
+            ok = self.sync_status == 200
+            say(f"🔑 {ip} · {device_kind(self.headers.get('User-Agent'))} — {what} {'ok' if ok else 'refused'} ({self.sync_status})")
+
     def list_directory(self, path):          # no folder listings on the network
         self.send_error(404)
 
     def do_POST(self):
-        if self.path.split("?")[0] == "/__bye":   # the page is closing
+        if self.path.startswith("/__sync/"):
+            self.sync()
+        elif self.path.split("?")[0] == "/__bye":   # the page is closing
             bye(plain_ip(self.client_address[0]), self.headers.get("User-Agent"))
             self.send_response(204)
             self.end_headers()
@@ -138,8 +174,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_error(405)
 
     def do_PUT(self):
+        if self.path.split("?")[0] == "/__sync/data":
+            self.sync()
+        else:
+            self.send_error(405)
+
+    def do_DELETE(self):
         self.send_error(405)
-    do_DELETE = do_PUT
 
     def log_message(self, *args):
         global last_use
@@ -193,7 +234,7 @@ def home_addresses():
 server = None
 for port in PORTS:
     if is_this_library(port):             # already running: just open the catalog
-        webbrowser.open(f"http://localhost:{port}/index.html")
+        open_browser(f"http://localhost:{port}/index.html")
         sys.exit(0)
     try:
         server = Server(("::", port), functools.partial(Handler, directory=ROOT))
@@ -220,12 +261,14 @@ else:
     print("  This computer doesn't seem to be in a home network (no 192.168.x.x / 10.x.x.x address).")
 print(f"\n  On this computer:  http://localhost:{port}/\n  Folder:            {ROOT}\n")
 print("  The phone can't connect? Check that a firewall (ufw, firewalld) allows port", port)
-print("  Anyone on this Wi-Fi who knows the address can open the library (read only).")
+print("  Anyone on this Wi-Fi who knows the address can open the library; only reading places are written")
+print("  (to the .sync folder), and only by signed-in devices.")
+print(f"  Library code (to create an account on a new device): {store.code()}")
 print("  Press Ctrl+C or close this window to stop.", flush=True)
 print("\n  Devices using the library:", flush=True)
 threading.Thread(target=stop_when_idle, daemon=True).start()
 threading.Thread(target=watch_devices, daemon=True).start()
-threading.Timer(0.3, webbrowser.open, [f"http://localhost:{port}/index.html"]).start()
+threading.Timer(0.3, open_browser, [f"http://localhost:{port}/index.html"]).start()
 try:
     server.serve_forever()
 except KeyboardInterrupt:

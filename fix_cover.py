@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from pathlib import Path
 
-from make_index import NS, locate_cover, text_of, zip_path
+from make_server import NS, locate_cover, text_of, zip_path
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -908,7 +908,7 @@ def main() -> int:
     parts.append(f"❌ errors {count['error']}")
     print("\n✨ Done:  " + "  ·  ".join(parts))
     if (count["marked"] or count["generated"]) and not args.dry_run:
-        print("📖 Run make_index.py to see the new covers in the catalog")
+        print("📖 Run make_server.py to see the new covers in the catalog")
     return 2 if count["error"] else 0
 
 

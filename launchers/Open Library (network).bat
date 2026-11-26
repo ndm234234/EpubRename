@@ -2,7 +2,8 @@
 rem Opens the book catalog (index.html in this folder) for this computer AND your home network,
 rem so you can read on a phone or tablet connected to the same Wi-Fi.
 rem Only devices with home-network addresses (192.168.x.x, 10.x.x.x, 172.16-31.x.x) get an answer;
-rem files are only read, nothing can be changed. Anyone on your Wi-Fi who knows the address can open it.
+rem files are only read; signed-in devices save their reading places in the .sync folder (library-sync.ps1,
+rem next to this file). Anyone on your Wi-Fi who knows the address can open it.
 rem The first time, Windows asks whether PowerShell may use the network: allow it for Private networks.
 rem Close this window to stop. Uses PowerShell, which is part of Windows: nothing to install.
 set "LIB_SELF=%~f0"
@@ -13,6 +14,11 @@ exit /b
 
 #POWERSHELL
 $root = [IO.Path]::GetFullPath($env:LIB_ROOT)
+# Accounts and reading-place sync, stored in .sync\ (loaded from text, like this script)
+$syncScript = [IO.Path]::Combine($root, 'library-sync.ps1')
+if (-not [IO.File]::Exists($syncScript)) { Write-Host "Could not start: library-sync.ps1 is missing in $root"; exit 1 }
+. ([ScriptBlock]::Create([IO.File]::ReadAllText($syncScript)))
+$store = New-SyncStore $root
 $types = @{ '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8';
             '.css' = 'text/css'; '.json' = 'application/json'; '.jpg' = 'image/jpeg';
             '.jpeg' = 'image/jpeg'; '.png' = 'image/png'; '.gif' = 'image/gif';
@@ -112,20 +118,139 @@ function Plain($stream, $status, $text, $headOnly) {
   if (-not $headOnly) { $stream.Write($bytes, 0, $bytes.Length) }
 }
 
+# Reading a request: one deadline per request (a client sending a byte now and then can't hold
+# this one-at-a-time server), the head read in chunks, the bytes after it kept as the body's start.
+$requestSeconds = 25
+
+# Up to $count bytes into $buf at $off; 0 at the end of the stream; throws past the deadline
+function ReadSome($rq, [byte[]]$buf, [int]$off, [int]$count) {
+  $left = ($rq.Deadline - [DateTime]::UtcNow).TotalMilliseconds
+  if ($left -le 0) { throw 'request too slow' }
+  $rq.Client.ReceiveTimeout = [int][Math]::Max(1, [Math]::Min(5000, $left))
+  return $rq.Stream.Read($buf, $off, $count)
+}
+
+# The request line and headers up to the empty line (CRLFCRLF or LFLF, at most 64 KB) as text;
+# the bytes read after it go to $rq.Rest. $null if the connection ends first or the head is too long.
+function ReadHead($rq) {
+  $buf = New-Object byte[] 65536
+  $len = 0
+  while ($true) {
+    if ($len -ge $buf.Length) { return $null }
+    $n = ReadSome $rq $buf $len ($buf.Length - $len)
+    if ($n -le 0) { return $null }
+    $i = [Math]::Max(0, $len - 2)   # an end of head may straddle the previous chunk
+    $len += $n
+    $end = -1
+    while ($end -lt 0) {
+      $i = [Array]::IndexOf($buf, [byte]10, $i, $len - $i)
+      if ($i -lt 0) { break }
+      if (($i -ge 1 -and $buf[$i - 1] -eq 10) -or ($i -ge 2 -and $buf[$i - 1] -eq 13 -and $buf[$i - 2] -eq 10)) { $end = $i + 1 }
+      $i++
+    }
+    if ($end -ge 0) {
+      $rest = New-Object byte[] ($len - $end)
+      [Array]::Copy($buf, $end, $rest, 0, $rest.Length)
+      $rq.Rest = $rest
+      return [Text.Encoding]::GetEncoding(28591).GetString($buf, 0, $end)
+    }
+  }
+}
+
+# Content-Length as a number: 0 if missing, -1 if not a number, more than any limit if huge
+function BodyLength($headers) {
+  $cl = ''
+  foreach ($k in @($headers.Keys)) { if ($k -eq 'Content-Length') { $cl = ([string]$headers[$k]).Trim() } }
+  if ($cl -eq '') { return [long]0 }
+  if ($cl -cmatch '^\+?0*([0-9]{1,15})\z') { return [long]$Matches[1] }
+  if ($cl -cmatch '^\+?[0-9]+\z') { return [long]$SyncBodyLimit + 1 }   # more digits than any limit
+  return [long]-1
+}
+
+# The body: the bytes already read after the head, then the rest from the stream (shorter if the
+# connection ends early)
+function ReadBody($rq, [long]$length) {
+  $body = New-Object byte[] ([int]$length)
+  $off = [int][Math]::Min($length, $rq.Rest.Length)
+  [Array]::Copy($rq.Rest, 0, $body, 0, $off)
+  while ($off -lt $body.Length) {
+    $n = ReadSome $rq $body $off ($body.Length - $off)
+    if ($n -le 0) { break }
+    $off += $n
+  }
+  if ($off -lt $body.Length) { $short = New-Object byte[] $off; [Array]::Copy($body, $short, $off); $body = $short }
+  return ,$body
+}
+
+# Before an answer that ignores the body: read it away (closing with unread bytes makes Windows
+# reset the connection, and the client may never see the answer); a body over the limit is left
+# to Linger after the answer
+function SkipBody($rq) {
+  $length = BodyLength $rq.Headers
+  if ($length -gt $SyncBodyLimit) { $rq.Linger = $true }
+  elseif ($length -gt 0) { [void](ReadBody $rq $length) }
+}
+
+# After answering without reading a big body: say we are done sending, then read and drop what
+# still comes for a moment (bounded by the deadline), so the answer arrives before the close
+function Linger($rq) {
+  try {
+    $rq.Client.Client.Shutdown([Net.Sockets.SocketShutdown]::Send)
+    $until = [DateTime]::UtcNow.AddSeconds(2)
+    if ($until -lt $rq.Deadline) { $rq.Deadline = $until }
+    $scratch = New-Object byte[] 65536
+    while ((ReadSome $rq $scratch 0 $scratch.Length) -gt 0) { }
+  } catch {}
+}
+
+$reasons = @{ 200 = 'OK'; 204 = 'No Content'; 400 = 'Bad Request'; 401 = 'Unauthorized'; 403 = 'Forbidden';
+              404 = 'Not Found'; 405 = 'Method Not Allowed'; 409 = 'Conflict'; 413 = 'Payload Too Large';
+              429 = 'Too Many Requests'; 500 = 'Internal Server Error' }
+
+# A /__sync/ request: body by Content-Length (413 over the limit: left unread, then Linger),
+# answer from the store
+function ServeSync($rq, $method, $target) {
+  $stream = $rq.Stream
+  $length = BodyLength $rq.Headers
+  if ($length -lt 0) { $answer = New-SyncError 400 'bad request'; $rq.Linger = $true }
+  elseif ($length -gt $SyncBodyLimit) { $answer = New-SyncError 413 'too large'; $rq.Linger = $true }
+  else {
+    $body = ReadBody $rq $length
+    try { $answer = Invoke-SyncRequest $store $method $target $rq.Headers $body }
+    catch { $answer = New-SyncError 500 'server error' }
+  }
+  $status = [int]$answer.Status
+  $h = "HTTP/1.1 $status $($reasons[$status])`r`n"
+  if ($status -ne 204) { $h += "Content-Type: $($answer.Type)`r`n" }
+  $h += "Content-Length: $($answer.Body.Length)`r`nCache-Control: no-store`r`nConnection: close`r`n`r`n"
+  $bytes = [Text.Encoding]::ASCII.GetBytes($h)
+  $stream.Write($bytes, 0, $bytes.Length)
+  if ($answer.Body.Length -gt 0) { $stream.Write($answer.Body, 0, $answer.Body.Length) }
+  return $status
+}
+
 # One request per connection: read it, answer, close
 function Serve($client) {
+  $rq = $null
   try {
     $client.ReceiveTimeout = 5000
     $client.SendTimeout = 120000
     $stream = $client.GetStream()
-    $reader = New-Object IO.StreamReader($stream, [Text.Encoding]::ASCII)
-    $line = $reader.ReadLine()
-    $ua = ''
-    while ($true) {
-      $h = $reader.ReadLine(); if ($h -eq $null -or $h -eq '') { break }
-      if ($h -match '^User-Agent:\s*(.*)$') { $ua = $Matches[1] }
+    $rq = @{ Client = $client; Stream = $stream; Rest = ([byte[]]@()); Headers = @{}; Linger = $false
+             Deadline = [DateTime]::UtcNow.AddSeconds($requestSeconds) }
+    $head = ReadHead $rq
+    if ($null -eq $head) { return }
+    $lines = @($head -split '\r?\n' | Where-Object { $_ -ne '' })
+    if ($lines.Count -eq 0) { return }
+    $line = $lines[0]
+    $ua = ''; $headers = $rq.Headers
+    foreach ($h in ($lines | Select-Object -Skip 1)) {
+      $c = $h.IndexOf(':')
+      if ($c -le 0) { continue }
+      $name = $h.Substring(0, $c).Trim(); $value = $h.Substring($c + 1).Trim()
+      $headers[$name] = $value
+      if ($name -eq 'User-Agent') { $ua = $value }
     }
-    if (-not $line) { return }
     $parts = $line.Split(' ')
     $method = $parts[0]; $headOnly = $method -eq 'HEAD'
     $addr = $client.Client.RemoteEndPoint.Address
@@ -136,9 +261,29 @@ function Serve($client) {
     }
     $ip = PlainIp $addr
     if ($parts.Length -ge 2 -and $method -eq 'POST' -and $parts[1].Split('?')[0] -eq '/__bye') {   # the page is closing
-      Bye $ip $ua; Head $stream '204 No Content' 'text/plain' 0; return
+      SkipBody $rq; Bye $ip $ua; Head $stream '204 No Content' 'text/plain' 0; return
     }
-    if ($parts.Length -lt 2 -or ($method -ne 'GET' -and -not $headOnly)) { Plain $stream '405 Method Not Allowed' 'Method not allowed' $headOnly; return }
+    if ($parts.Length -lt 2 -or @('GET', 'HEAD', 'POST', 'PUT') -cnotcontains $method) {
+      SkipBody $rq; Plain $stream '405 Method Not Allowed' 'Method not allowed' $headOnly; return
+    }
+    $target = $parts[1]
+    $isSync = $target.StartsWith('/__sync/', [StringComparison]::Ordinal)
+    if (($method -ceq 'POST' -and $isSync) -or ($method -ceq 'PUT' -and $target.Split('?')[0] -ceq '/__sync/data') -or
+        ($method -ceq 'GET' -and $isSync -and -not (Test-SyncPrivate $target))) {
+      if ($method -ceq 'GET') { Seen $ip $ua ([Uri]::UnescapeDataString($target.Split('?')[0]).TrimStart('/')) }
+      $status = ServeSync $rq $method $target
+      $what = $target.Split('?')[0]
+      if ($what -ceq '/__sync/register' -or $what -ceq '/__sync/login') {   # shown here, never the password
+        if ($what -ceq '/__sync/register') { $what = 'registration' } else { $what = 'sign-in' }
+        if ($status -eq 200) { $how = 'ok' } else { $how = 'refused' }
+        Say "@ $ip · $(DeviceKind $ua) — $what $how ($status)"
+      }
+      return
+    }
+    if ($method -ceq 'POST' -or $method -ceq 'PUT') {
+      SkipBody $rq; Plain $stream '405 Method Not Allowed' 'Method not allowed' $headOnly; return
+    }
+    if (Test-SyncPrivate $target) { Plain $stream '404 Not Found' 'Not found' $headOnly; return }   # .sync\ is never served
     # Raw path, decoded here: a '#' in a file name arrives as %23 and must stay part of the name
     $rel = [Uri]::UnescapeDataString($parts[1].Split('?')[0]).TrimStart('/')
     if ($rel -eq '__library_root') { Plain $stream '200 OK' $root $headOnly; return }   # lets a launcher recognise this library
@@ -146,7 +291,8 @@ function Serve($client) {
     if ($rel -eq '__alive') { Head $stream '204 No Content' 'text/plain' 0; return }   # "still here" from the catalog / reader
     if ($rel -eq '') { $rel = 'index.html' }
     $path = [IO.Path]::GetFullPath([IO.Path]::Combine($root, $rel))
-    if (-not ($path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -and [IO.File]::Exists($path))) {
+    if (-not ($path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -and [IO.File]::Exists($path)) -or
+        (Test-SyncPrivateFile $root $path)) {
       Plain $stream '404 Not Found' 'Not found' $headOnly; return
     }
     $type = $types[[IO.Path]::GetExtension($path).ToLower()]
@@ -158,6 +304,7 @@ function Serve($client) {
     } finally { $file.Close() }
   } catch {
   } finally {
+    if ($null -ne $rq -and $rq.Linger) { Linger $rq }
     try { $client.Close() } catch {}
   }
 }
@@ -222,7 +369,10 @@ Write-Host "  Folder:            $root"
 Write-Host ""
 Write-Host "  The phone can't connect? Allow PowerShell in the Windows Firewall question" -ForegroundColor DarkGray
 Write-Host "  (Private networks), and check that this Wi-Fi is set as a Private network." -ForegroundColor DarkGray
-Write-Host "  Anyone on this Wi-Fi who knows the address can open the library (read only)." -ForegroundColor DarkGray
+Write-Host "  Anyone on this Wi-Fi who knows the address can open the library; only reading places are written" -ForegroundColor DarkGray
+Write-Host "  (to the .sync folder), and only by signed-in devices." -ForegroundColor DarkGray
+try { $code = Get-SyncCode $store } catch { $code = "(can't read .sync\code.txt: $($_.Exception.Message))" }
+Write-Host "  Library code (to create an account on a new device): $code"
 Write-Host "  Close this window to stop."
 Write-Host ""
 Write-Host "  Devices using the library:"

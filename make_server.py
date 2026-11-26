@@ -2,14 +2,15 @@
 """Build index.html — a browsable catalog of all EPUB books in a folder.
 
 Usage:
-    python3 make_index.py [FOLDER]        (default: ./Out)
+    python3 make_server.py [FOLDER]        (default: ./Out)
 
 The folder is scanned recursively. The catalog shows covers, authors, titles,
 descriptions, has search, sorting and grouping by author; clicking a title
 opens the book in the built-in reader (epub.js, offline). Works offline; no internet or server needed.
 
 Written files:  FOLDER/index.html, small cover copies in  FOLDER/.index/covers/
-the reader in  FOLDER/.index/reader/, the "Open Library" launchers and sw.js (offline app) in  FOLDER/
+the reader in  FOLDER/.index/reader/, the "Open Library" launchers (with library_sync.py and
+library-sync.ps1, the account/sync store) and sw.js (offline app) in  FOLDER/
 (they open the catalog through a tiny local web server, so books open with a click).
 EPUB files are only read, never modified.
 Pillow (optional) is used to shrink covers; without it covers are copied as is.
@@ -315,7 +316,16 @@ PAGE = r"""<!DOCTYPE html>
            -webkit-backdrop-filter: saturate(1.6) blur(16px); backdrop-filter: saturate(1.6) blur(16px);
            border-bottom: 1px solid var(--line); padding: 12px 28px; }
   .bar { max-width: 1400px; margin: 0 auto; display: flex; gap: 10px 14px; flex-wrap: wrap; align-items: center; }
-  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; margin-right: 6px; }
+  .brand { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; margin-right: 6px; }
+  .brand .names { display: grid; min-width: 0; }
+  /* With sync: the whole logo + name block is the account button (a button laid over it, so the
+     h1 stays a heading), with the account's state on a second line */
+  #acctBrand { position: absolute; inset: -4px -6px; z-index: 1; padding: 0; border: 0; border-radius: 12px;
+               background: none; cursor: pointer; }
+  #acctBrand:hover, #acctBrand[aria-expanded=true] { background: var(--accent-soft); }
+  .brand:has(#acctBrand:not([hidden])) h1 { line-height: 1.2; }
+  #acctLine { font-size: 12px; line-height: 1.25; color: var(--muted); white-space: nowrap; overflow: hidden;
+              text-overflow: ellipsis; }
   .logo { width: 34px; height: 34px; padding: 7px; border-radius: 10px; color: #fff; stroke-width: 2;
           background: linear-gradient(135deg, #5b8cff, #3563e9); box-shadow: 0 4px 12px -4px rgba(53,99,233,.6); }
   h1 { font-size: 19px; font-weight: 700; letter-spacing: -.01em; margin: 0; white-space: nowrap;
@@ -503,11 +513,34 @@ PAGE = r"""<!DOCTYPE html>
            background: var(--text); color: var(--bg); box-shadow: 0 12px 30px -10px rgba(0,0,0,.5); }
   footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 20px 32px; opacity: .8; }
 
+  /* Account (sync between devices): same panel as in the reader */
+  #acctPop { gap: 8px; right: auto; left: max(16px, calc((100vw - 1400px) / 2 + 28px)); }   /* under the logo */
+  #acctPop .tabs { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--surface-2); }
+  #acctPop .tabs button { flex: 1; height: 32px; padding: 0 8px; border: 0; border-radius: 8px; font: inherit; font-size: 14px;
+                          color: var(--muted); background: none; cursor: pointer; }
+  #acctPop .tabs button.on { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+  #acctPop [data-pane] { display: none; }
+  #acctPop [data-pane].on, #acctOut { display: grid; gap: 8px; margin-top: 10px; }
+  #acctPop input { height: 36px; min-width: 0; font: inherit; color: var(--text); background: var(--bg);
+                   border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; }
+  #acctPop input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  #acctPop .go { height: 36px; border: 0; border-radius: 10px; font: inherit; font-weight: 600; color: #fff;
+                 background: var(--accent); cursor: pointer; }
+  #acctPop .row { display: flex; gap: 8px; }
+  #acctPop .row button { flex: 1; height: 36px; border: 0; border-radius: 10px; font: inherit; color: var(--text);
+                         background: var(--surface-2); cursor: pointer; }
+  #acctPop .row button.go { color: #fff; background: var(--accent); }
+  #acctPop p { margin: 0 2px; font-size: 12px; color: var(--muted); line-height: 1.35; }
+  #acctErr { font-size: 13px !important; color: var(--danger) !important; }
+  #acctErr:empty { display: none; }
+  @media (max-width: 640px) { #acctPop input { font-size: 16px; } }   /* iPhone zooms in on smaller text fields */
+
   @media (max-width: 640px) {
     header { padding: 10px 16px; }
     main { padding: 20px 16px 48px; }
     .note { margin: 12px 16px 0; }
     .pop { right: 16px; }
+    #acctPop { right: auto; left: 16px; }
     .search { order: 3; flex-basis: 100%; }
     .brand { flex: 1; }
     .chip span { display: none; }
@@ -542,8 +575,10 @@ PAGE = r"""<!DOCTYPE html>
 <header><div class="bar">
   <div class="brand">
     <svg class="ic logo" aria-hidden="true"><use href="#i-library"/></svg>
-    <h1>__TITLE__</h1>
+    <div class="names"><h1>__TITLE__</h1><span id="acctLine" hidden></span></div>
     <span id="count" class="badge"></span>
+    <button id="acctBrand" type="button" aria-expanded="false" aria-controls="acctPop" aria-label="Account" hidden
+      title="Account: your last-opened books and settings on all your devices"></button>
   </div>
   <label class="search" id="searchBox">
     <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
@@ -554,6 +589,7 @@ PAGE = r"""<!DOCTYPE html>
     <div class="select" title="Sort">
       <svg class="ic" aria-hidden="true"><use href="#i-sort"/></svg>
       <select id="sort" aria-label="Sort">
+        <option value="opened">Recently opened</option>
         <option value="author">Author</option>
         <option value="title">Title</option>
         <option value="added">Recently added</option>
@@ -583,6 +619,34 @@ PAGE = r"""<!DOCTYPE html>
   <div id="offInfo" class="popinfo"></div>
   <button id="offClear" class="btn" type="button">Remove all books from this device</button>
 </div>
+<div id="acctPop" class="pop" role="dialog" aria-label="Account" hidden>
+  <div id="acctIn">
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="signin">Sign in</button>
+      <button type="button" role="tab" data-tab="create">Create account</button>
+    </div>
+    <form id="acctSignIn" novalidate data-pane="signin" role="tabpanel">
+      <input name="login" type="email" inputmode="email" placeholder="Email" autocomplete="email" autocapitalize="none" spellcheck="false" aria-label="Email">
+      <input name="password" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password">
+      <button class="go" type="submit">Sign in</button>
+    </form>
+    <form id="acctCreate" novalidate data-pane="create" role="tabpanel">
+      <input name="login" type="email" inputmode="email" placeholder="Email" autocomplete="email" autocapitalize="none" spellcheck="false" aria-label="Email">
+      <input name="password" type="password" placeholder="Password" autocomplete="new-password" aria-label="Password">
+      <input name="password2" type="password" placeholder="Password again" autocomplete="new-password" aria-label="Password again">
+      <input name="code" placeholder="Library code" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Library code">
+      <button class="go" type="submit">Create account</button>
+    </form>
+  </div>
+  <div id="acctOut">
+    <div id="acctWho">Signed in as <b id="acctLogin"></b></div>
+    <p id="acctStatus"></p>
+    <div class="row"><button type="button" id="acctSync" class="go">Sync now</button><button type="button" id="acctSignOut">Sign out</button></div>
+  </div>
+  <p id="acctErr" role="alert"></p>
+  <p>Reading places, bookmarks and settings follow you to your other devices.
+    The library code is shown in the library computer's launcher window.</p>
+</div>
 <div id="netNote" class="note" hidden><svg class="ic" aria-hidden="true"><use href="#i-offline"/></svg>
   <div>No connection to the library. Books on this device can be read; the others are dimmed.</div></div>
 <div id="newNote" class="note" hidden><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>
@@ -593,6 +657,8 @@ PAGE = r"""<!DOCTYPE html>
 <footer>Generated __DATE__ · cover or title: about the book · Read: start reading</footer>
 
 <script id="data" type="application/json">__DATA__</script>
+<script src=".index/reader/sync-merge.js"></script>
+<script src=".index/reader/sync.js"></script>
 <script>
 "use strict";
 const books = JSON.parse(document.getElementById("data").textContent);
@@ -603,23 +669,35 @@ const authorLine = b => b.authors.length ? b.authors.join(", ") : "Unknown Autho
 const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB";
 books.forEach(b => b._search = norm([b.title, authorLine(b), b.series, b.description, b.file].join(" ")));
 
-// Installed as an app (started from its icon): the books opened last come first, and the library
-// can be kept on the device (see "Offline library" below). In a browser tab neither.
+// Installed as an app (started from its icon): the library can be kept on the device (see
+// "Offline library" below) and the settings are its own. In a browser tab neither.
 const inApp = navigator.standalone === true ||
   matchMedia("(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)").matches;
-if (inApp) $("sort").prepend(new Option("Recently opened", "opened"));
 // When each book was last opened in the reader: {href: time}, written by reader.html
 const openedTimes = () => { try { return JSON.parse(localStorage.getItem("epubLibrary:opened")) || {}; } catch { return {}; } };
 let openedAt = openedTimes();
 
 // Settings survive page reloads (the app keeps its own)
 const PREFS = inApp ? "epubIndex:app" : "epubIndex";
-const saved = (() => { try { return JSON.parse(localStorage.getItem(PREFS)) || {}; } catch { return {}; } })();
-$("sort").value = saved.sort || (inApp ? "opened" : "author");
-if (!$("sort").value) $("sort").value = "author";
-if (saved.group === true) $("group").setAttribute("aria-pressed", "true");
-const save = () => { try { localStorage.setItem(PREFS, JSON.stringify(
-  { sort: $("sort").value, group: $("group").getAttribute("aria-pressed") === "true" })); } catch {} };
+function applyPrefs() {
+  const saved = (() => { try { return JSON.parse(localStorage.getItem(PREFS)) || {}; } catch { return {}; } })();
+  $("sort").value = saved.sort || "opened";   // the books read last first, unless a sort was chosen
+  if (!$("sort").value) $("sort").value = "opened";
+  $("group").setAttribute("aria-pressed", saved.group === true);
+}
+applyPrefs();
+const save = () => {
+  try {
+    localStorage.setItem(PREFS, JSON.stringify({ sort: $("sort").value, group: $("group").getAttribute("aria-pressed") === "true" }));
+    localStorage.setItem(PREFS + ":time", String(Date.now()));
+  } catch {}
+  Sync.changed();
+};
+// Sync between devices (sync.js); a stand-in that does nothing if it isn't there
+const Sync = window.LibrarySync || { available: () => false, signedIn: () => false, account: () => null,
+  lastSync: () => null, changed() {}, onRemoteChange() {},
+  syncNow: async () => "signed-out", logout: async () => ({ ok: true }),
+  login: async () => ({ ok: false, error: "offline" }), register: async () => ({ ok: false, error: "offline" }) };
 
 const NS = "http://www.w3.org/2000/svg";
 function icon(name) {
@@ -720,14 +798,17 @@ function endFlight(f) {
   flight = null;
   f.anims.forEach(a => a.cancel());
   if (f.ghost) f.ghost.remove();
-  f.hidden.forEach(e => e.style.visibility = "");
+  f.hidden.forEach(e => { e.style.visibility = ""; e.style.opacity = ""; });
   if (f.end) f.end();
 }
 
 function startFlight(phase, anims, ghost, hidden, end) {
   const f = { phase, anims, ghost, hidden, end };
   flight = f;
-  hidden.forEach(e => e.style.visibility = "hidden");
+  // the book page's own cover is only made transparent: it stays a link that can be tapped while the
+  // copy flies to it (hidden, a tap would fall through to the page and do nothing); the shelf's
+  // cover is behind the book page anyway
+  hidden.forEach(e => { if (e.closest("#detail")) e.style.opacity = "0"; else e.style.visibility = "hidden"; });
   Promise.all(anims.map(a => a.finished)).then(() => { if (f.phase === phase) endFlight(f); }, () => {});
   return f;
 }
@@ -857,7 +938,14 @@ const sorters = {
   size:   (a, b) => b.size - a.size,
 };
 
-function render() {
+// keep: the book row at the top of the screen stays at the same height (the list was re-made while
+// the person was reading it: other order, other books); if that book is gone, the scroll stays
+function render(keep) {
+  const anchor = keep ? topRow() : null;
+  renderList();
+  if (anchor) placeRow(anchor);
+}
+function renderList() {
   $("searchBox").classList.toggle("filled", !!$("q").value);   // hides the "/" hint
   const words = norm($("q").value).split(/\s+/).filter(Boolean);
   openedAt = openedTimes();
@@ -885,6 +973,32 @@ function render() {
     list.append(el("div", { class: "grid" }, ...shown.map(card)));
   }
 }
+
+// ------------------------------------------------------------ Where you were (this device only)
+// <PREFS>:place = {href, offset, q, time}: the book row at the top of the screen (its key in the
+// library), its distance from the top of the window, the search text. Kept for the catalog to come
+// back to it (after the reader, after a restart on a book); never part of what is synced.
+const PLACE = PREFS + ":place";
+const topRow = () => {
+  const h = document.querySelector("header").getBoundingClientRect().bottom;   // the header sticks
+  for (const a of document.querySelectorAll("#list .book")) {
+    const r = a.getBoundingClientRect();
+    if (r.bottom > h + 1) return { href: a.dataset.key, offset: Math.round(r.top) };
+  }
+  return null;
+};
+function placeRow(p) {
+  const a = p && p.href && [...document.querySelectorAll("#list .book")].find(x => x.dataset.key === p.href);
+  if (a) scrollTo(0, Math.max(0, a.getBoundingClientRect().top + scrollY - p.offset));
+}
+let placeTimer = 0;
+function savePlace() {
+  clearTimeout(placeTimer); placeTimer = 0;
+  const r = topRow();
+  try { localStorage.setItem(PLACE, JSON.stringify({ href: r ? r.href : "", offset: r ? r.offset : 0, q: $("q").value, time: Date.now() })); } catch {}
+}
+addEventListener("scroll", () => { if (!placeTimer) placeTimer = setTimeout(savePlace, 300); }, { passive: true });
+addEventListener("pagehide", savePlace);
 
 // ------------------------------------------------------------ Offline library (installed app)
 // The app keeps the catalog, the reader and the books in the site's own storage on the device
@@ -1154,15 +1268,15 @@ function toast(text) {
   toastTimer = setTimeout(() => $("toast").hidden = true, 3500);
 }
 
-// Back from the reader in the app: the book just read moves to the front
-if (inApp) {
-  const fresh = () => { if (JSON.stringify(openedTimes()) !== JSON.stringify(openedAt) && $("sort").value === "opened") render(); };
+// Back from the reader (app or browser tab): the book just read moves to the front
+{
+  const fresh = () => { if (JSON.stringify(openedTimes()) !== JSON.stringify(openedAt) && $("sort").value === "opened") render(true); };
   addEventListener("pageshow", e => { if (e.persisted) fresh(); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) fresh(); });
 }
 
 if (location.protocol === "file:") $("fileNote").hidden = false;
-$("q").addEventListener("input", render);
+$("q").addEventListener("input", () => { render(); savePlace(); });
 $("sort").addEventListener("change", () => { save(); render(); });
 $("group").addEventListener("click", e => {
   const b = e.currentTarget; b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") !== "true");
@@ -1174,7 +1288,16 @@ document.addEventListener("keydown", e => {
   if (e.key === "/" && document.activeElement !== $("q")) { e.preventDefault(); $("q").focus(); }
   if (e.key === "Escape") { $("q").value = ""; render(); }
 });
-render();
+// Opened again (not by Back/Forward): the search is back; and the book that was at the top is there
+// again, whatever the browser would scroll to (the order may have changed meanwhile)
+{
+  let p = null; try { p = JSON.parse(localStorage.getItem(PLACE)); } catch {}
+  const nav = performance.getEntriesByType("navigation")[0];
+  if (p && typeof p.q === "string" && !(nav && nav.type === "back_forward")) $("q").value = p.q;
+  try { history.scrollRestoration = "manual"; } catch {}
+  render();
+  placeRow(p);
+}
 // Can be installed as an app (browser menu → "Install app" / "Add to Home screen"), but the browser
 // is not to suggest it by itself
 addEventListener("beforeinstallprompt", e => e.preventDefault());
@@ -1189,6 +1312,134 @@ addEventListener("beforeinstallprompt", e => e.preventDefault());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) ping(); });
   addEventListener("pagehide", () => { try { navigator.sendBeacon("/__bye"); } catch {} });
 })();
+
+// Account: sign in / create one; signed in: last sync, "Sync now", "Sign out". Errors show here only.
+let acctTab = "signin", syncResult = "", acctBusy = false;
+const ACCT_ERR = {
+  "wrong-code": "Wrong library code. It is shown in the library computer's launcher window.",
+  taken: "There is already an account with this email. Sign in instead.",
+  "bad-login": "Enter a valid email address.",
+  "wrong-password": "Wrong email or password.",
+  wait: "Too many tries. Try again later.",
+  offline: "Can't reach the library computer.",
+  "server-error": "The library computer had a problem (see its window / the .sync folder).",
+};
+const acctError = text => { $("acctErr").textContent = text || ""; };
+function syncedAt(t) {
+  const d = new Date(t), now = new Date();
+  if (now - d < 60000) return "just now";
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toDateString() === now.toDateString() ? "at " + time : d.toLocaleDateString() + " " + time;
+}
+// Under the library name: the account and its last sync (one line), or "Sign in to sync"
+setInterval(() => { if (!document.hidden) showBrand(); }, 60000);   // "synced 14:05" stays true while the page stays open
+function showBrand() {
+  if (!Sync.available()) return;
+  const a = Sync.signedIn() && Sync.account(), t = Sync.lastSync();
+  const line = !a ? "Sign in to sync" : a.login + " · " + (syncResult === "busy" ? "syncing…"
+    : syncResult === "offline" || !t ? "waiting for the library computer" : "synced " + syncedAt(t));
+  $("acctLine").textContent = line;
+  $("acctBrand").setAttribute("aria-label", a ? "Account: " + a.login : "Account: sign in to sync");
+}
+function showAcct() {
+  showBrand();
+  const on = Sync.signedIn(), a = Sync.account();
+  $("acctIn").hidden = on;
+  $("acctOut").hidden = !on;
+  for (const e of $("acctPop").querySelectorAll("[data-tab], [data-pane]")) {
+    const sel = (e.dataset.tab || e.dataset.pane) === acctTab;
+    e.classList.toggle("on", sel);
+    if (e.dataset.tab) e.setAttribute("aria-selected", sel);
+  }
+  if (!on) {
+    for (const f of [$("acctSignIn"), $("acctCreate")]) if (a && !f.elements.login.value) f.elements.login.value = a.login;
+    return;
+  }
+  $("acctLogin").textContent = a ? a.login : "";
+  const t = Sync.lastSync();
+  $("acctStatus").textContent = syncResult === "busy" ? "Syncing…"
+    : syncResult === "offline" || !t ? "Waiting for the library computer" + (t ? ` · last synced ${syncedAt(t)}` : "")
+    : "Last synced " + syncedAt(t);
+}
+function toggleAcct(open = $("acctPop").hidden) {
+  $("acctPop").hidden = !open;
+  $("acctBrand").setAttribute("aria-expanded", open);
+  if (open) { acctError(""); showAcct(); }
+}
+async function syncFromPanel() {
+  syncResult = "busy"; showAcct();
+  syncResult = await Sync.syncNow();
+  if (syncResult === "signed-out") acctError("Signed out by the library computer. Sign in again.");
+  showAcct();
+}
+async function acctAuth(form, call) {
+  if (acctBusy) return;
+  acctBusy = true;
+  acctError("");
+  for (const b of form.querySelectorAll("button")) b.disabled = true;
+  try {
+    const r = await call();
+    if (!r.ok) {
+      acctError(r.error === "wait" && r.wait ? `Too many tries. Try again in ${Math.ceil(r.wait / 60)} min.` : ACCT_ERR[r.error] || ACCT_ERR.offline);
+      return;
+    }
+    for (const i of form.querySelectorAll("input[type=password]")) i.value = "";
+    await syncFromPanel();   // the first sync merges this device's data with the account's: nothing is lost
+  } finally {
+    acctBusy = false;
+    for (const b of form.querySelectorAll("button")) b.disabled = false;
+  }
+}
+$("acctSignIn").onsubmit = e => {
+  e.preventDefault();
+  const f = e.target, login = f.elements.login.value.trim(), pw = f.elements.password.value;
+  if (!login || !pw) return acctError("Enter your email and password.");
+  acctAuth(f, () => Sync.login(login, pw));
+};
+$("acctCreate").onsubmit = e => {
+  e.preventDefault();
+  const f = e.target, login = f.elements.login.value.trim(), pw = f.elements.password.value, code = f.elements.code.value.trim();
+  if (!login || !pw) return acctError("Enter an email and a password.");
+  if (pw !== f.elements.password2.value) return acctError("The passwords don't match.");
+  if (!code) return acctError("Enter the library code: it is shown in the library computer's launcher window.");
+  acctAuth(f, () => Sync.register(login, pw, code));
+};
+$("acctPop").querySelector(".tabs").addEventListener("click", e => {
+  const b = e.target.closest("[data-tab]");
+  if (b) { acctTab = b.dataset.tab; acctError(""); showAcct(); }
+});
+$("acctPop").addEventListener("keydown", e => {
+  e.stopPropagation();   // typing here never reaches the catalog's shortcuts
+  if (e.key === "Escape") { e.preventDefault(); toggleAcct(false); $("acctBrand").focus(); }
+});
+$("acctSync").onclick = () => { acctError(""); syncFromPanel(); };
+$("acctSignOut").onclick = async () => { await Sync.logout(); syncResult = ""; acctError(""); showAcct(); };
+$("acctBrand").onclick = e => { e.stopPropagation(); toggleAcct(); };
+document.addEventListener("click", e => {   // a click elsewhere closes the panel
+  if (!$("acctPop").hidden && !$("acctPop").contains(e.target) && !$("acctBrand").contains(e.target)) toggleAcct(false);
+});
+if (Sync.available()) {   // secure pages only: a password never crosses the Wi-Fi in the clear
+  $("acctBrand").hidden = $("acctLine").hidden = false;
+  showBrand();
+}
+
+// Signed in: what other devices opened and chose comes in at start (never waiting longer than 2 s
+// for the library computer), when the page comes back to the front, and whenever a sync brings news.
+{
+  const refresh = () => {
+    openedAt = openedTimes();
+    applyPrefs();
+    render(true);
+    showBrand();
+    if (!$("acctPop").hidden) showAcct();
+  };
+  Sync.onRemoteChange(r => { if (r.opened || r.prefs) refresh(); });
+  if (Sync.signedIn()) Sync.syncNow({ timeoutMs: 2000 }).then(r => { syncResult = r; refresh(); });
+  // always attached: signed in from the panel later, coming back syncs too
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && Sync.signedIn()) Sync.syncNow().then(r => { syncResult = r; refresh(); });
+  });
+}
 
 // Came back to a book page (reload, or the reader's Back): show it without the flight
 { const key = history.state && history.state.book, b = key && books.find(x => x.href === key);

@@ -6,14 +6,18 @@
 set -u
 cd "$(dirname "$0")/../.."
 [ $# -gt 0 ] || { sed -n 2,5p "$0"; exit 2; }
-PORT=${PORT:-$(python3 -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); print(s.getsockname()[1])")}   # a free one
-python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1 & SERVER=$!
-trap 'kill $SERVER 2>/dev/null' EXIT
-sleep 1
-B=http://127.0.0.1:$PORT T=tests/reader
 LOGS=$(mktemp -d)
+# The library's files plus the sync routes (accounts in ./.sync/, git-ignored). PORT=0 (default): a
+# free port, which the server prints once it listens.
+python3 launchers/library_sync.py --serve . --port "${PORT:-0}" > "$LOGS/server.out" 2>&1 & SERVER=$!
 trap 'kill $SERVER 2>/dev/null; rm -rf "$LOGS"' EXIT
-i=0 PIDS=()
+for _ in $(seq 100); do grep -q "^Library:" "$LOGS/server.out" && break; sleep 0.1; done
+PORT=$(sed -n 's|^Library: http://127.0.0.1:\([0-9]*\)/.*|\1|p' "$LOGS/server.out")
+[ -n "$PORT" ] || { echo "Error: the server did not start"; cat "$LOGS/server.out"; exit 1; }
+B=http://127.0.0.1:$PORT T=tests/reader
+# the catalog's place: once, in a library of its own (not per book)
+node $T/catalog-place.mjs $B > "$LOGS/0-catalog.txt" 2>&1 &
+i=0 PIDS=($!)
 for book in "$@"; do
   i=$((i + 1))
   (
@@ -23,6 +27,9 @@ for book in "$@"; do
     node $T/place.mjs $B "$book" 15 "${WORD:-что}"
     node $T/hits.mjs $B "$book" "${WORD:-что}" 60 opendyslexic 120
     node $T/touch.mjs $B "$book"; node $T/status.mjs $B "$book"; node $T/typo.mjs $B "$book"
+    # one sync check at a time: each tries one wrong library code, and wrong codes from checks side
+    # by side would add up to the library-wide pause (after 5 in a row)
+    flock "$LOGS/sync.lock" node $T/sync.mjs $B "$book"
   ) > "$LOGS/$i.txt" 2>&1 &
   PIDS+=($!)
 done

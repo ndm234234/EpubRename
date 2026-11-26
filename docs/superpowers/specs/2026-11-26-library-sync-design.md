@@ -20,7 +20,7 @@ computer only; `.sh` twins of both do the same in Python on Linux/Mac. The launc
 
 ## Goals
 
-- Accounts: anyone who knows the **library code** can create an account (login, password) from the
+- Accounts: anyone who knows the **library code** can create an account (email, password) from the
   catalog or the reader; then sign in once per device, which stays signed in until "Sign out".
 - Synced, shared by all devices of an account:
   - the reading place of every book (`epubReader:book:<id>`: cfi, pct, title, time);
@@ -30,7 +30,7 @@ computer only; `.sh` twins of both do the same in Python on Linux/Mac. The launc
   phone, not to the tablet or a desktop browser:
   - reader settings (`epubReader:prefs`: theme, font, face, layout, typoTab);
   - catalog sort and grouping, kept apart for a browser tab (`epubIndex`) and the installed app
-    (`epubIndex:app`, which alone has "Recently opened"), as today.
+    (`epubIndex:app`), as today. "Recently opened" is offered, and the default, in both.
 - Automatic, no chores. Works offline: changes wait on the device and go when the server is back.
 - All four launchers serve sync; Windows still needs nothing installed.
 
@@ -108,8 +108,10 @@ Files, in the library folder (`<library>/.sync/`, never served as static files):
   Passwords: PBKDF2-SHA256 with a random salt (both PowerShell/.NET and Python have it). Tokens:
   random 32 bytes, stored only as their hash.
 - `data/<login>.json` — `{version, doc}`.
-- Logins: letters, digits, `.-_`, 2–32 characters, case-insensitive (stored lower-case) — they
-  name files.
+- Logins are the person's **email** (changed from a free login name): case-insensitive (trimmed,
+  stored lower-case), at most 128 characters, `local@domain` with `a–z 0–9 . _ + -` before the `@`
+  and dot-separated `a–z 0–9 -` labels after it (see `library_sync.py`) — they name files. The JSON
+  field is still called `login`. No mail is ever sent (nothing is verified).
 - **Password reset without an admin page:** the owner deletes `accounts/<login>.json` (that signs
   out all of that person's devices). The person registers again with the same login and the code
   and gets their data back (`data/<login>.json` is kept). Documented in README and in the window.
@@ -169,15 +171,17 @@ Files, in the library folder (`<library>/.sync/`, never served as static files):
 
 ## Interface
 
-- Catalog and reader: an account button. Signed out: "Sign in" (login, password) and "Create
-  account" (login, password twice, library code). Signed in: the login, the time of the last sync
+- Reader: an account button. Catalog: the logo and library name at the top left are the account
+  button, with a second line under the name ("Sign in to sync", or the email and the last sync).
+  Signed out: "Sign in" (email, password) and "Create
+  account" (email, password twice, library code). Signed in: the email, the time of the last sync
   (or "waiting for the library computer"), "Sync now", "Sign out".
 - Signing out keeps the device's local data; nothing is deleted on the server.
 - First sign-in on a device merges its local data with the account's (nothing lost on either side).
 - Errors show in that area, never as popups while reading.
 - Device kind: the reader's touch check plus screen width (phone below ~600px).
 - Accounts and sync are offered only on secure pages (`isSecureContext`: the router's https
-  address and `localhost`). On plain `http://192.168…` addresses the account button is hidden, so
+  address and `localhost`). On plain `http://192.168…` addresses there is no account button (the catalog's name is a plain title), so
   a password never crosses the Wi-Fi unencrypted; README says to use the https address. (Each
   address keeps its own local storage anyway.)
 - The sync files live in `<library>/.sync/` (`make_server.py` wipes `.index/` on every run). Both
