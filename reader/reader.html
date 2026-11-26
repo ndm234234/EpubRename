@@ -1544,12 +1544,20 @@ const FACES = {
   merriweather: { name: "Merriweather", stack: '"Reader Merriweather"' + SERIF },
   ptsans: { name: "PT Sans", stack: '"Reader PT Sans"' + SANS },
   inter: { name: "Inter", stack: '"Reader Inter"' + SANS },
+  // Well-known fonts that can't be shipped: their free twins, with Cyrillic
+  palatino: { name: "Palatino", stack: '"Reader P052", "Palatino Linotype", Palatino' + SERIF, twin: "P052" },
+  caecilia: { name: "Caecilia", stack: '"Reader Bitter"' + SERIF, twin: "Bitter" },
+  helvetica: { name: "Helvetica", stack: '"Reader Nimbus Sans"' + SANS, twin: "Nimbus Sans" },
+  futura: { name: "Futura", stack: '"Reader Jost"' + SANS, twin: "Jost" },
+  opendyslexic: { name: "OpenDyslexic", stack: '"Reader OpenDyslexic"' + SANS, wide: true },
 };
 const FONTS_CSS = new URL("fonts/fonts.css", location.href).href;
 for (const [v, f] of Object.entries(FACES)) {   // a button per font, written in that font
   const b = document.createElement("button");
   b.dataset.v = v;
   b.style.fontFamily = f.stack;
+  if (f.twin) b.title = `A free font like ${f.name}: ${f.twin}`;
+  if (f.wide) b.className = "wide2";
   b.append(Object.assign(document.createElement("b"), { textContent: f.name }),
            Object.assign(document.createElement("small"), { textContent: "Съешь же ещё" }));
   $("faceSeg").append(b);

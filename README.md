@@ -230,12 +230,16 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
 - **Aa** — text settings, remembered for all books:
   - size (also `+` / `−`);
   - font: *As in book* (under it, the font the open chapter is set in: e.g. *Times New Roman*,
-    *Liberation Serif · in the book* for a font the book carries, or *default serif*), or one of the reading fonts that come with the reader — Literata,
-    PT Serif, Lora, Merriweather, PT Sans, Inter. Books come with their own fonts (embedded,
+    *Liberation Serif · in the book* for a font the book carries, or *default serif*), or one of
+    the reading fonts that come with the reader — Literata, PT Serif, Lora, Merriweather,
+    PT Sans, Inter, OpenDyslexic, and free twins of well-known fonts that can't be shipped:
+    *Palatino* (P052), *Helvetica* (Nimbus Sans), *Futura* (Jost), *Caecilia* (Bitter); the
+    real font is named when you hover the button. Books come with their own fonts (embedded,
     or named like Times New Roman / Arial), and books that name none get the device's
     default, so they all look different. A chosen font shows every book the same way, on
     every device and without internet; bold, italics and monospaced code are kept.
-    The fonts are in `reader/fonts/` (SIL Open Font License, Cyrillic and Latin, 2.3 MB);
+    The fonts are in `reader/fonts/` (Cyrillic and Latin, 3.9 MB; SIL Open Font License,
+    P052 and Nimbus Sans GNU AGPL 3 with a font exception — see `reader/fonts/LICENSE.txt`);
     a browser downloads only the font in use;
   - layout: *Same in all books* gives plain paragraphs the same line spacing, indent and
     justified text with hyphenation. Titles, epigraphs and other styled parts keep the book's
