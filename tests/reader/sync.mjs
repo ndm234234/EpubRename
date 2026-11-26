@@ -13,12 +13,45 @@
 // device comes first under "Recently opened" on another (installed-app mode stubbed through
 // matchMedia); catalog settings of the app and of a browser tab sync separately; a sync that hangs
 // never holds the catalog back.
-import { readFileSync, mkdtempSync, mkdirSync, copyFileSync, readdirSync, statSync, rmSync } from "node:fs";
+// Part 3: two phones and a tablet on one account (a temp library with the book under a made-up name,
+// its own server, stopped and started again): A's place, bookmark with note and font reach B; a
+// bookmark deleted on B stays deleted; the tablet keeps its own fonts; a newer place pending on A
+// survives A's resize and font change; two uploads at once (409) keep both changes; a tab closed at
+// once sends its place (/__sync/place) with an account over 64 KB; the server stopped: no error, a
+// book opens in < 3 s, and after the restart one sync each brings the place over; back in front, B
+// is offered A's place and a tap takes it; a sync that never answers holds the opening < 3 s.
+// Ports: the servers take free ones (--port 0), the browsers too (cdp.mjs).
+import { readFileSync, mkdtempSync, mkdirSync, copyFileSync, readdirSync, statSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { launch, sleep } from "./cdp.mjs";
+import { HELPERS } from "./helpers.mjs";
 const [BASE, BOOK, ROOT = "."] = process.argv.slice(2);
+// A library_sync.py of its own: port 0 = a free one, read from the "Library:" line it prints once
+// it listens (so no fixed waits and no port collisions between checks run side by side). On a
+// restart the same port is asked for again: the devices' data is kept per address.
+const servers = new Set();
+process.on("exit", () => { for (const s of servers) try { s.kill("SIGKILL"); } catch {} });
+async function startServer(root, port = 0) {
+  for (let i = 0; i < 40; i++) {
+    const proc = spawn("python3", [join(ROOT, "launchers/library_sync.py"), "--serve", root, "--port", String(port)], { stdio: ["ignore", "pipe", "ignore"] });
+    servers.add(proc);
+    const got = await new Promise(res => {
+      let out = "";
+      proc.stdout.on("data", d => { out += d; const m = /Library: http:\/\/127\.0\.0\.1:(\d+)\//.exec(out); if (m) res(+m[1]); });
+      proc.on("exit", () => res(0));
+    });
+    if (got) return { proc, port: got, url: `http://127.0.0.1:${got}` };
+    servers.delete(proc);
+    await sleep(250);   // the port is not free yet (a restart)
+  }
+  throw new Error("library_sync.py did not start on port " + port);
+}
+async function stopServer(s) {
+  if (s.proc.exitCode === null && s.proc.signalCode === null) { const gone = new Promise(r => s.proc.once("exit", r)); s.proc.kill(); await gone; }
+  servers.delete(s.proc);
+}
 const INSECURE = BASE.replace("127.0.0.1", "lib.test");
 const W = 390, H = 844;
 let fails = 0;
@@ -198,11 +231,9 @@ const NAMES = ["Jane Doe/Jane Doe - A Quiet Harbour.epub", "John Roe/John Roe - 
 two.forEach((src, i) => { mkdirSync(join(LIB, NAMES[i].split("/")[0]), { recursive: true }); copyFileSync(src, join(LIB, NAMES[i])); });
 const built = spawnSync("python3", [join(ROOT, "make_server.py"), LIB], { encoding: "utf8" });
 ok(built.status === 0, "catalog built for the check");
-const PORT2 = 9800 + Math.floor(Math.random() * 150);
-const srv = spawn("python3", [join(ROOT, "launchers/library_sync.py"), "--serve", LIB, "--port", String(PORT2)], { stdio: "ignore" });
-process.on("exit", () => { try { srv.kill(); rmSync(LIB, { recursive: true, force: true }); } catch {} });
-await sleep(1500);
-const B2 = `http://127.0.0.1:${PORT2}`, CAT = B2 + "/index.html";
+const srv = await startServer(LIB);
+process.on("exit", () => { try { rmSync(LIB, { recursive: true, force: true }); } catch {} });
+const B2 = srv.url, CAT = B2 + "/index.html";
 const CODE2 = readFileSync(join(LIB, ".sync", "code.txt"), "utf8").trim();
 const APP = `(() => { const mm = matchMedia.bind(window);
   window.matchMedia = q => /display-mode/.test(q) ? { matches: true, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : mm(q); })()`;
@@ -280,6 +311,246 @@ ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: opened the second 
   ok(Date.now() - t0 < 4000, `a hanging sync: the catalog is listed without waiting (${Date.now() - t0} ms)`);
   A.close();
 }
-srv.kill();
+await stopServer(srv);
+
+// ======== part 3
+// Two phones (A, B) and a tablet (T), each its own browser profile, on one account of a library of
+// its own (the book copied in under a made-up name; this server is stopped and started again).
+{
+  const LIB3 = mkdtempSync(join(tmpdir(), "epub-reader-sync-"));
+  process.on("exit", () => { try { rmSync(LIB3, { recursive: true, force: true }); } catch {} });
+  symlinkSync(resolve(ROOT, "reader"), join(LIB3, "reader"));
+  const FILE3 = "Out/Jane Doe/Jane Doe - A Quiet Harbour.epub";
+  mkdirSync(join(LIB3, "Out/Jane Doe"), { recursive: true });
+  copyFileSync(join(ROOT, "Out", BOOK), join(LIB3, FILE3));
+  let S = await startServer(LIB3);
+  const PORT3 = S.port, B3 = S.url;
+  const CODE3 = readFileSync(join(LIB3, ".sync", "code.txt"), "utf8").trim();
+  const LOGIN3 = "e2e" + Math.floor(Math.random() * 1e9);
+  const dataFile = () => join(LIB3, ".sync", "data", LOGIN3 + ".json");
+  const serverDoc = () => { try { return JSON.parse(readFileSync(dataFile(), "utf8")).doc || {}; } catch { return {}; } };
+  const URL3 = `${B3}/reader/reader.html#book=${encodeURIComponent("../" + FILE3)}`;
+  const errors = new Map();   // uncaught page errors per device
+  const dev = async (name, w = W, h = H) => {
+    const d = await launch({ width: w, height: h, touch: true });
+    errors.set(d, 0);
+    d.on(m => { if (m.method === "Runtime.exceptionThrown") errors.set(d, errors.get(d) + 1); });
+    d.name = name;
+    return d;
+  };
+  const helpers = d => d.eval(HELPERS.replace("TOUCH_UI", "touchUi.matches"));
+  const open3 = async d => { await d.goto("about:blank"); await d.goto(URL3); await d.waitFor(READY, 30000); await settle(d); await helpers(d); };
+  const st = d => d.eval("JSON.stringify(__state())").then(JSON.parse);
+  const turn = async (d, n) => { for (let i = 0; i < n; i++) { await d.eval("rendition.next().then(() => 0)"); await settle(d); } };
+  const sync = d => d.eval("LibrarySync.syncNow()");
+  const toast = d => d.eval("document.getElementById('toast').classList.contains('show') ? document.getElementById('toastText').textContent : ''");
+  // what a reader would see as trouble: the start screen (a book not open, an error) or a message
+  const trouble = d => d.eval(`[document.getElementById('start').classList.contains('hidden') ? '' : 'start screen: ' + document.getElementById('start').textContent.trim().replace(/\\s+/g, ' ').slice(0, 80),
+    document.getElementById('toast').classList.contains('show') ? 'message: ' + document.getElementById('toastText').textContent : ''].filter(Boolean).join('; ')`);
+  const visible = (d, hidden) => d.eval(`(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => ${hidden} });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => ${hidden} ? 'hidden' : 'visible' });
+    document.dispatchEvent(new Event('visibilitychange')); })(); 0`);
+  const markIds = d => d.eval("JSON.stringify(marks.map(m => m.id))").then(JSON.parse);
+
+  // ---- accounts: A creates one (a large one: 300 bookmarks with notes in another book), B signs in
+  const A = await dev("A");
+  await A.goto(`${B3}/reader/reader.html`);
+  await A.eval(`(() => { const words = "harbour lantern quiet tide gull rope sail morning salt pier keeper fog bell shore".split(" ");
+    const seed = [];
+    for (let i = 0; i < 300; i++) {
+      const note = Array.from({ length: 40 }, (_, k) => words[(i * 7 + k * 3) % words.length]).join(" ");
+      const cfi = "epubcfi(/6/" + (2 + 2 * (i % 40)) + "!/4/2/1:" + i + ")", time = 1700000000000 + i * 1000;
+      seed.push({ id: time + "|" + cfi, cfi, text: "Seed page " + i, name: "", note: "Note " + i + ": " + note, time });
+    }
+    localStorage.setItem("epubReader:marks:seed:jane-doe-a-long-voyage", JSON.stringify(seed)); })(); 0`);
+  const reg3 = JSON.parse(await A.eval(`LibrarySync.register(${JSON.stringify(LOGIN3)}, "secret-pw", ${JSON.stringify(CODE3)}).then(JSON.stringify)`));
+  ok(reg3.ok, `part 3, A: account ${LOGIN3} created`);
+
+  // ---- A reads 10 pages, adds a bookmark with a note, a bigger font; B opens the book there
+  await open3(A);
+  await turn(A, 10);
+  await A.eval("toggleMarkHere(); 0");
+  const MA = await A.eval("marks[marks.length - 1].id");
+  await A.eval(`(() => { renderMarks(); editNote(marks.find(x => x.id === ${JSON.stringify(MA)}));
+    const a = document.querySelector('#markList textarea'); a.value = 'remember the lighthouse'; a.dispatchEvent(new Event('input')); a.blur(); })(); 0`);
+  await A.eval("toggleMarks(false); setFont(10); 0"); await settle(A);
+  const BOOKID = await id(A);
+  const a1 = await st(A), pa1 = await place(A);
+  ok(await sync(A) === "ok", `A: 10 pages on (at "${a1.first}"), a bookmark with a note, font ${await A.eval("prefs.font")}%: synced`);
+  const big = statSync(dataFile()).size;
+  ok(big > 64 * 1024, `the account's data is over 64 KB (${big} bytes): too big for a keepalive upload`);
+
+  const B = await dev("B");
+  await B.goto(`${B3}/reader/reader.html`);
+  ok(JSON.parse(await B.eval(`LibrarySync.login(${JSON.stringify(LOGIN3)}, "secret-pw").then(JSON.stringify)`)).ok, "B: signed in");
+  await open3(B);
+  const b1 = await st(B), pb1 = await place(B);
+  ok(pb1.cfi === pa1.cfi && b1.first === a1.first, `B opens the book at A's place: "${b1.first}" (A: "${a1.first}")`);
+  ok(await B.eval(`(marks.find(m => m.id === ${JSON.stringify(MA)}) || {}).note`) === "remember the lighthouse", "B: A's bookmark with its note");
+  ok(await B.eval("prefs.font") === 110 && await B.eval("LibrarySync.deviceKind()") === "phone", `B (phone): A's font (${await B.eval("prefs.font")}%)`);
+
+  // ---- B deletes the bookmark; A, back in front, loses it and does not bring it back
+  await B.eval(`(() => { renderMarks(); const i = marks.findIndex(m => m.id === ${JSON.stringify(MA)});
+    document.querySelectorAll('#markList button[title="Delete bookmark"]')[i].click(); toggleMarks(false); })(); 0`);
+  ok(await sync(B) === "ok", "B: deleted the bookmark and synced");
+  await visible(A, false);
+  await A.waitFor(`!marks.some(m => m.id === ${JSON.stringify(MA)})`, 10000).catch(() => {});
+  ok(!(await markIds(A)).includes(MA), "A back in front (visibilitychange): the bookmark is gone");
+  await A.eval("setFont(10); 0"); await settle(A);   // something of A's own to upload
+  ok(await sync(A) === "ok" && await sync(A) === "ok", "A: synced again (twice)");
+  ok(!(await markIds(A)).includes(MA), "A: still gone after its own syncs");
+  const g = (serverDoc().marks || {})[BOOKID] || {};
+  ok(g[MA] && typeof g[MA].deleted === "number", "the library keeps it deleted (a tombstone)");
+  ok(await sync(B) === "ok" && !(await markIds(B)).includes(MA), "B: synced, not resurrected");
+  await A.eval("setFont(-10); 0"); await settle(A);
+  ok(await sync(A) === "ok", "A: back to 110%, synced");
+
+  // ---- a tablet keeps its own fonts
+  const T = await dev("T", 820, 1180);
+  await T.goto(`${B3}/reader/reader.html`);
+  await T.eval(`LibrarySync.login(${JSON.stringify(LOGIN3)}, "secret-pw").then(r => r.ok)`);
+  await open3(T);
+  ok(await T.eval("LibrarySync.deviceKind()") === "tablet" && await T.eval("prefs.font") === 100,
+     `tablet (820x1180): fonts not taken from the phones (${await T.eval("prefs.font")}%)`);
+  ok((await place(T)).cfi === pa1.cfi, "tablet: opens at the phones' place");
+  await T.eval("setFont(-10); 0"); await settle(T);
+  ok(await sync(T) === "ok", "tablet: 90%, synced");
+  await sync(A); await sync(B);
+  ok(await A.eval("prefs.font") === 110 && await B.eval("prefs.font") === 110, "phones keep 110% (the tablet's font doesn't reach them)");
+
+  // ---- a newer place from B waits on A (not accepted) while A resizes and changes the font: A's
+  // old place must not become the newest
+  await turn(B, 5);
+  const pb2 = await place(B);
+  ok(await sync(B) === "ok", "B: 5 pages on, synced");
+  await visible(A, false);
+  await A.waitFor("document.getElementById('toast').classList.contains('show')", 10000).catch(() => {});
+  ok(/^Continue from \d+% \(another device\)\?$/.test(await toast(A)), `A: offered B's place ("${await toast(A)}"), not taken`);
+  await A.send("Emulation.setDeviceMetricsOverride", { width: W, height: H - 56, deviceScaleFactor: 2, mobile: true });
+  await sleep(700); await settle(A);
+  await A.send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 2, mobile: true });
+  await sleep(700); await settle(A);
+  await A.eval("setFont(10); 0"); await settle(A);
+  await A.eval("setFont(-10); 0"); await settle(A);
+  let pa = await place(A);
+  ok(pa.cfi === pb2.cfi && pa.time === pb2.time, `A resized and changed the font: B's place still pending in storage (time ${pa.time} / ${pb2.time})`);
+  ok(await A.eval("anchor") === pa1.cfi, "A: still shows its own page");
+  ok(await sync(A) === "ok", "A: synced");
+  await A.eval("sendPlace(); 0"); await sleep(500);   // as on leaving: sends what is stored
+  const sp = (serverDoc().places || {})[BOOKID] || {};
+  ok(sp.cfi === pb2.cfi && sp.time === pb2.time, "the library still has B's place as the newest");
+  await open3(B);
+  ok((await place(B)).cfi === pb2.cfi && await B.eval("anchor") === pb2.cfi, "B reopens: at B's place");
+  await open3(T);
+  ok(await T.eval("anchor") === pb2.cfi, "the tablet reopens: at B's place too");
+
+  // ---- A and B write at the same moment (different things): the later one gets 409, merges, and
+  // both changes are kept
+  await B.eval(`(() => { const f = window.__f0 = window.__f0 || fetch.bind(window);
+    window.__puts = []; window.__got = false; window.__go = false;
+    window.fetch = async (u, o) => {
+      const m = (o && o.method) || "GET", data = String(u).includes("/__sync/data");
+      if (data && m === "GET") { const r = await f(u, o); window.__got = true; return r; }
+      if (data && m === "PUT") { while (!window.__go) await new Promise(r => setTimeout(r, 20));
+        const r = await f(u, o); window.__puts.push(r.status); return r; }
+      return f(u, o); }; })(); 0`);
+  await B.eval("toggleMarkHere(); window.__res = LibrarySync.syncNow(); 0");
+  const MB = await B.eval("marks[marks.length - 1].id");
+  await B.waitFor("window.__got", 5000).catch(() => {});
+  await A.eval("toggleMarkHere(); 0");
+  const MX = await A.eval("marks[marks.length - 1].id");
+  ok(await sync(A) === "ok", "A: added a bookmark and synced while B's upload was on its way");
+  await B.eval("window.__go = true; 0");
+  ok(await B.eval("window.__res") === "ok", "B: its upload finished too");
+  const puts = await B.eval("window.__puts");
+  ok(puts[0] === 409 && puts[puts.length - 1] === 200, `B: the library answered 409, B merged and sent again (${puts})`);
+  await B.eval("window.fetch = window.__f0; 0");
+  await sync(A);
+  const both = (serverDoc().marks || {})[BOOKID] || {};
+  ok(both[MB] && !both[MB].deleted && both[MX] && !both[MX].deleted, "the library has both bookmarks");
+  ok((await markIds(A)).includes(MB) && (await markIds(B)).includes(MX), "A has B's bookmark, B has A's");
+  // and both at once, without holding either
+  await A.eval("toggleMarkHere(); 0"); await B.eval("toggleMarkHere(); 0");   // both off again
+  const [ra, rb] = await Promise.all([sync(A), sync(B)]);
+  await Promise.all([sync(A), sync(B)]);
+  const off = (serverDoc().marks || {})[BOOKID] || {};
+  ok(ra === "ok" && rb === "ok" && off[MB] && off[MB].deleted && off[MX] && off[MX].deleted && !(await markIds(A)).length && !(await markIds(B)).length,
+     `both deleted at once, synced at once (${ra}, ${rb}): both deletes kept on both`);
+
+  // ---- A turns pages and is hidden at once (the tab closed): the place goes by /__sync/place
+  await open3(A);
+  ok(await A.eval("anchor") === pb2.cfi, "A reopens: at the newest place (B's)");
+  // uploads of the whole account fail from here on (as a keepalive upload of > 64 KB would)
+  await A.eval(`window.__f0 = fetch.bind(window); window.fetch = (u, o) => o && o.method === "PUT"
+    ? Promise.reject(new TypeError("too large for keepalive")) : __f0(u, o); 0`);
+  await turn(A, 3);
+  const pa3 = await place(A), a3 = await st(A);
+  await A.goto("about:blank");   // visibilitychange (hidden) + pagehide: the place only, keepalive
+  let sp3 = {};
+  for (let i = 0; i < 25 && sp3.cfi !== pa3.cfi; i++) { await sleep(200); sp3 = (serverDoc().places || {})[BOOKID] || {}; }
+  ok(sp3.cfi === pa3.cfi && sp3.time === pa3.time, "A turned 3 pages and was closed at once: the library has the new place");
+  await open3(B);
+  const b3 = await st(B);
+  ok(await B.eval("anchor") === pa3.cfi && b3.first === a3.first, `B opens at it: "${b3.first}" (A: "${a3.first}")`);
+
+  // ---- the library computer is off
+  await open3(A);
+  await stopServer(S);
+  const e0 = errors.get(A);
+  await turn(A, 3);
+  ok(await A.eval("LibrarySync.syncNow()") === "offline", "server stopped: A's sync is offline");
+  ok(await trouble(A) === "" && errors.get(A) === e0, `server stopped, A turned 3 pages: nothing shown (${await trouble(A) || "-"})`);
+  const pa4 = await place(A);
+  // opening a book (picked by hand: nothing can be loaded from the computer now)
+  await A.eval("window.__old = rendition; 0");
+  const { root } = await A.send("DOM.getDocument");
+  const { nodeId } = await A.send("DOM.querySelector", { nodeId: root.nodeId, selector: "#file" });
+  const t0 = Date.now();
+  await A.send("DOM.setFileInputFiles", { nodeId, files: [join(LIB3, FILE3)] });
+  await A.waitFor("rendition !== __old && rendition.location && rendition.location.start && placeShown", 15000);
+  const took = Date.now() - t0;
+  await settle(A); await helpers(A);
+  ok(took < 3000, `server stopped: opening a book took ${took} ms (< 3 s)`);
+  ok(await trouble(A) === "" && errors.get(A) === e0, `and nothing is shown (${await trouble(A) || "-"})`);
+  ok(await A.eval("anchor") === pa4.cfi, "at A's place");
+  const a4 = await st(A);
+  // the computer is back: A's next sync sends it, B's next sync has it
+  S = await startServer(LIB3, PORT3);
+  ok(S.port === PORT3, "server started again on the same port");
+  const last = await A.eval("LibrarySync.lastSync()");
+  await A.eval("dispatchEvent(new Event('online')); 0");
+  await A.waitFor(`LibrarySync.lastSync() > ${last}`, 10000).catch(() => {});
+  ok(await A.eval(`LibrarySync.lastSync() > ${last}`), "A: synced on 'online'");
+  ok(await sync(B) === "ok" && (await place(B)).cfi === pa4.cfi, "B: one sync, and it has A's place");
+  await B.waitFor("document.getElementById('toast').classList.contains('show')", 5000).catch(() => {});
+  ok(/^Continue from \d+% \(another device\)\?$/.test(await toast(B)), `B (book open): offered ("${await toast(B)}")`);
+  await B.eval("hideToast(); 0");
+
+  // ---- B in front with the book open, A reads on: back to B, the place is offered; a tap takes it
+  await turn(A, 2);
+  const a5 = await st(A);
+  ok(await sync(A) === "ok", `A: 2 pages on ("${a5.first}"), synced`);
+  await visible(B, true);
+  await visible(B, false);
+  await B.waitFor("document.getElementById('toast').classList.contains('show')", 10000).catch(() => {});
+  ok(/^Continue from \d+% \(another device\)\?$/.test(await toast(B)), `B back in front: "${await toast(B)}"`);
+  const r = JSON.parse(await B.eval("JSON.stringify(document.getElementById('toastAct').getBoundingClientRect())"));
+  await B.tap(r.left + r.width / 2, r.top + r.height / 2);
+  await settle(B); await sleep(300); await settle(B);
+  const b5 = await st(B);
+  ok(await B.eval("anchor") === a5.anchor && b5.first === a5.first, `tapped "Continue": B is at A's page ("${b5.first}")`);
+
+  // ---- a library that never answers holds the opening back at most ~2 s
+  await T.send("Fetch.enable", { patterns: [{ urlPattern: "*/__sync/*" }] });   // sync requests never answered
+  await T.goto("about:blank"); await T.goto(URL3);
+  await T.waitFor(READY + " && placeShown", 15000);
+  const took2 = Math.round(await T.eval("performance.now()"));   // since the page began loading
+  ok(took2 < 3000, `sync never answering: the tablet opened the book in ${took2} ms (< 3 s)`);
+  ok(await trouble(T) === "", `and nothing is shown (${await trouble(T) || "-"})`);
+  ok([...errors.values()].every(n => n === 0), `no page errors (${[...errors].map(([d, n]) => d.name + ":" + n)})`);
+  A.close(); B.close(); T.close();
+  await stopServer(S);
+}
 console.log(fails ? `${fails} FAILED` : "ALL OK");
 process.exit(fails ? 1 : 0);

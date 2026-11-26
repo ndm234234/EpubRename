@@ -21,7 +21,8 @@ On-disk format, shared with the PowerShell twin:
     unparsable data/account file is an error (500) and is never overwritten.
 
 Throttle state (wrong codes, wrong passwords) lives in memory only.
-Dev server: python3 launchers/library_sync.py --serve ROOT --port N  (127.0.0.1, no browser).
+Dev server: python3 launchers/library_sync.py --serve ROOT --port N  (127.0.0.1, no browser; N=0: a free
+port, printed in the "Library:" line).
 """
 
 import contextlib
@@ -542,6 +543,7 @@ def serve(root, port):
             pass
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", port), functools.partial(Handler, directory=root))
+    port = server.server_address[1]   # --port 0: the free port the system gave
     print(f"Library: http://127.0.0.1:{port}/index.html\nCode:    {store.code()}", flush=True)
     try:
         server.serve_forever()
