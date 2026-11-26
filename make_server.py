@@ -319,13 +319,16 @@ PAGE = r"""<!DOCTYPE html>
   .brand { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; margin-right: 6px; }
   .brand .names { display: grid; min-width: 0; }
   /* With sync: the whole logo + name block is the account button (a button laid over it, so the
-     h1 stays a heading), with the account's state on a second line */
+     h1 stays a heading); a green check on the logo while signed in (grey while the library
+     computer doesn't answer), the email and the last sync in its tooltip */
   #acctBrand { position: absolute; inset: -4px -6px; z-index: 1; padding: 0; border: 0; border-radius: 12px;
                background: none; cursor: pointer; }
   #acctBrand:hover, #acctBrand[aria-expanded=true] { background: var(--accent-soft); }
-  .brand:has(#acctBrand:not([hidden])) h1 { line-height: 1.2; }
-  #acctLine { font-size: 12px; line-height: 1.25; color: var(--muted); white-space: nowrap; overflow: hidden;
-              text-overflow: ellipsis; }
+  .logoBox { position: relative; display: flex; flex: none; }
+  #acctMark { position: absolute; right: -5px; bottom: -5px; width: 17px; height: 17px; padding: 2.5px;
+              border-radius: 50%; background: #22a55a; color: #fff; stroke-width: 3.5;
+              box-shadow: 0 0 0 2px var(--bg); pointer-events: none; }
+  #acctMark.wait { background: #9aa1ad; }
   .logo { width: 34px; height: 34px; padding: 7px; border-radius: 10px; color: #fff; stroke-width: 2;
           background: linear-gradient(135deg, #5b8cff, #3563e9); box-shadow: 0 4px 12px -4px rgba(53,99,233,.6); }
   h1 { font-size: 19px; font-weight: 700; letter-spacing: -.01em; margin: 0; white-space: nowrap;
@@ -574,8 +577,8 @@ PAGE = r"""<!DOCTYPE html>
 </svg>
 <header><div class="bar">
   <div class="brand">
-    <svg class="ic logo" aria-hidden="true"><use href="#i-library"/></svg>
-    <div class="names"><h1>__TITLE__</h1><span id="acctLine" hidden></span></div>
+    <span class="logoBox"><svg class="ic logo" aria-hidden="true"><use href="#i-library"/></svg><svg id="acctMark" class="ic" aria-hidden="true" hidden><use href="#i-check"/></svg></span>
+    <div class="names"><h1>__TITLE__</h1></div>
     <span id="count" class="badge"></span>
     <button id="acctBrand" type="button" aria-expanded="false" aria-controls="acctPop" aria-label="Account" hidden
       title="Account: your last-opened books and settings on all your devices"></button>
@@ -1336,9 +1339,12 @@ setInterval(() => { if (!document.hidden) showBrand(); }, 60000);   // "synced 1
 function showBrand() {
   if (!Sync.available()) return;
   const a = Sync.signedIn() && Sync.account(), t = Sync.lastSync();
+  const waiting = syncResult === "offline" || (!t && syncResult !== "busy");
   const line = !a ? "Sign in to sync" : a.login + " · " + (syncResult === "busy" ? "syncing…"
-    : syncResult === "offline" || !t ? "waiting for the library computer" : "synced " + syncedAt(t));
-  $("acctLine").textContent = line;
+    : waiting ? "waiting for the library computer" : "synced " + syncedAt(t));
+  $("acctBrand").title = line;
+  $("acctMark").toggleAttribute("hidden", !a);   // an <svg>: no .hidden property
+  $("acctMark").classList.toggle("wait", !!a && waiting);
   $("acctBrand").setAttribute("aria-label", a ? "Account: " + a.login : "Account: sign in to sync");
 }
 function showAcct() {
@@ -1419,7 +1425,7 @@ document.addEventListener("click", e => {   // a click elsewhere closes the pane
   if (!$("acctPop").hidden && !$("acctPop").contains(e.target) && !$("acctBrand").contains(e.target)) toggleAcct(false);
 });
 if (Sync.available()) {   // secure pages only: a password never crosses the Wi-Fi in the clear
-  $("acctBrand").hidden = $("acctLine").hidden = false;
+  $("acctBrand").hidden = false;
   showBrand();
 }
 

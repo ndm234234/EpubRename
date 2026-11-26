@@ -172,7 +172,8 @@ Files, in the library folder (`<library>/.sync/`, never served as static files):
 ## Interface
 
 - Reader: an account button. Catalog: the logo and library name at the top left are the account
-  button, with a second line under the name ("Sign in to sync", or the email and the last sync).
+  button; a green check on the logo while signed in (grey while the library computer does not
+  answer), the email and the last sync in its tooltip.
   Signed out: "Sign in" (email, password) and "Create
   account" (email, password twice, library code). Signed in: the email, the time of the last sync
   (or "waiting for the library computer"), "Sync now", "Sign out".

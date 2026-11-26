@@ -284,22 +284,22 @@ const catalog = async (d, url = CAT) => { await d.goto("about:blank"); await d.g
 const calls2 = d => d.eval("performance.getEntriesByType('resource').filter(e => e.name.includes('/__sync')).length");
 const login = (d, who) => d.eval(`LibrarySync.login(${JSON.stringify(who)}, "secret-pw").then(r => r.ok)`);
 const BRAND_ON = "(e => !!e && e.tagName === 'BUTTON' && getComputedStyle(e).display !== 'none' && e.getAttribute('aria-controls') === 'acctPop')(document.getElementById('acctBrand'))";
-const LINE_SHOWN = "(e => !!e && getComputedStyle(e).display !== 'none' && e.textContent !== '')(document.getElementById('acctLine'))";
+const MARK_SHOWN = "(e => !!e && getComputedStyle(e).display !== 'none')(document.getElementById('acctMark'))";
 {
   // signed out: as before
   const t = await device(false, ["--host-resolver-rules=MAP lib.test 127.0.0.1"]);
   await catalog(t);
   ok(await t.eval("document.getElementById('acctBtn') === null"), "catalog: no separate account chip");
   ok(await t.eval(BRAND_ON), "catalog, secure page: the logo and library name are the account button");
-  ok(await t.eval("document.getElementById('acctLine').textContent") === "Sign in to sync" && await t.eval(LINE_SHOWN),
-     "catalog, signed out: \"Sign in to sync\" under the library name");
+  ok(await t.eval("document.getElementById('acctLine') === null"), "catalog: no caption line under the library name");
+  ok(!(await t.eval(MARK_SHOWN)), "catalog, signed out: no check mark on the logo");
   ok(await t.eval("document.getElementById('acctBrand').getAttribute('aria-label')") === "Account: sign in to sync", "catalog, signed out: the button's label");
   ok(await t.eval(`(r => (e => !!e && !!e.closest('#acctBrand'))(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)))(document.querySelector('.brand h1').getBoundingClientRect())`),
      "catalog: a tap on the library name hits the account button");
   ok(await t.eval("document.querySelector('header').getBoundingClientRect().height") <= 111, `catalog, 390 px: the header is no taller than before (${await t.eval("document.querySelector('header').getBoundingClientRect().height")} px, was 111)`);
   ok(await calls2(t) === 0, "catalog, signed out: nothing sent to /__sync");
   await catalog(t, CAT.replace("127.0.0.1", "lib.test"));
-  ok(!(await t.eval(BRAND_ON)) && !(await t.eval(LINE_SHOWN)), "catalog, plain http with a host name: the name is a plain title, no caption");
+  ok(!(await t.eval(BRAND_ON)) && !(await t.eval(MARK_SHOWN)), "catalog, plain http with a host name: the name is a plain title, no check mark");
   ok(await t.eval(`(r => (e => !!e && !e.closest('button'))(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)))(document.querySelector('.brand h1').getBoundingClientRect())`),
      "catalog, plain http: the library name is not a button");
   ok(await calls2(t) === 0, "catalog, insecure page: nothing sent to /__sync");
@@ -311,9 +311,10 @@ const reg = JSON.parse(await A.eval(`LibrarySync.register("cat" + Math.floor(Mat
 ok(reg.ok, "device A: account created");
 const LOGIN2 = reg.login;
 await catalog(A);
-await A.waitFor(`document.getElementById('acctLine').textContent.startsWith(${JSON.stringify(LOGIN2 + " · ")})`, 5000).catch(() => {});
-ok((await A.eval("document.getElementById('acctLine').textContent")).startsWith(LOGIN2 + " · "),
-   `catalog, signed in: the email (and the sync) under the library name ("${await A.eval("document.getElementById('acctLine').textContent")}")`);
+await A.waitFor(MARK_SHOWN + " && !document.getElementById('acctMark').classList.contains('wait')", 5000).catch(() => {});
+ok(await A.eval(MARK_SHOWN + " && !document.getElementById('acctMark').classList.contains('wait')"), "catalog, signed in and synced: a green check mark on the logo");
+ok((await A.eval("document.getElementById('acctBrand').title")).startsWith(LOGIN2 + " · "),
+   `catalog, signed in: the email and the sync in the logo's tooltip ("${await A.eval("document.getElementById('acctBrand').title")}")`);
 ok(await A.eval("document.getElementById('acctBrand').getAttribute('aria-label')") === "Account: " + LOGIN2, "catalog, signed in: the button's label has the email");
 ok(await A.eval("document.getElementById('acctBrand').getAttribute('aria-expanded')") === "false", "catalog: aria-expanded false while closed");
 await A.eval("document.getElementById('acctBrand').click(); 0");
@@ -376,7 +377,7 @@ ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: opened the second 
     f.elements.login.value = ${JSON.stringify(LOGIN2)}; f.elements.password.value = "secret-pw"; f.requestSubmit(); })(); 0`);
   await E.waitFor("/Last synced/.test(document.getElementById('acctStatus').textContent)", 10000).catch(() => {});
   ok(await E.eval("LibrarySync.signedIn()"), "device E: signed in from the catalog panel");
-  ok((await E.eval("document.getElementById('acctLine').textContent")).startsWith(LOGIN2), "device E: the email under the library name after signing in from the panel");
+  ok(await E.eval(MARK_SHOWN), "device E: the check mark on the logo after signing in from the panel");
   await A.eval(`(() => { const o = JSON.parse(localStorage.getItem('epubLibrary:opened') || '{}');
     o['made-up/later.epub'] = Date.now(); localStorage.setItem('epubLibrary:opened', JSON.stringify(o)); })(); 0`);
   ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: something new synced");
