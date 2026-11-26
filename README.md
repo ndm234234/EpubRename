@@ -186,7 +186,8 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
 
 - Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows, mouse wheel / touchpad (one page per notch or swipe).
 - **Phones and tablets** read with the whole screen for the text: only a thin line at the bottom
-  stays — `4/24 in chapter` and `p. 120 of 560 · 21%` — and the text has the same small margin
+  stays, numbers only — `4/24` (page in the chapter) on the left, `120/560 21%` (page in the
+  book, % read) on the right — and the text has the same small margin
   above and below it. The phone's own status bar (clock, battery) stays: hiding it only while reading would
   take the browser's fullscreen mode, and Chrome then always shows a "swipe to exit" hint.
   A tap in the **middle third** of the page brings the toolbar and the slider over the text (the

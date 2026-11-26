@@ -880,10 +880,12 @@ function onRelocated(loc) {
   const pct = locationsReady ? book.locations.percentageFromCfi(loc.start.cfi) : null;
   savePlace();
   const d = loc.start.displayed;
-  $("where").textContent = d && d.total ? `${d.page}/${d.total} in chapter` : "";
+  // Phones, tablets: numbers only ("10/30" and "43/560 2%"); with a mouse, with words
+  const bare = touchUi.matches;
+  $("where").textContent = d && d.total ? `${d.page}/${d.total}` + (bare ? "" : " in chapter") : "";
   if (locationsReady) {   // else: progress text
-    const total = bookPages(loc);
-    $("pct").textContent = (total ? `p. ${Math.min(total, Math.round(pct * total) + 1)} of ${total} · ` : "")
+    const total = bookPages(loc), page = Math.min(total, Math.round(pct * total) + 1);
+    $("pct").textContent = (total ? (bare ? `${page}/${total} ` : `p. ${page} of ${total} · `) : "")
                            + Math.round(pct * 100) + "%";
   }
   if (pct != null && !seeking) setSeek(pct);
