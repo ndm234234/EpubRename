@@ -298,7 +298,7 @@ address to type on the phone, e.g. `http://192.168.1.64:48865/`.
   On Linux a firewall (`ufw`, `firewalld`) may need to allow the port.
 - The window also shows the **library code** (see Accounts, below).
 - It uses its own ports (48865–48884), so both launchers can run at the same time. Reading places
-  and bookmarks are kept separately on each device.
+  and bookmarks are kept separately on each device, unless you use an account (below).
 - The window logs who uses the library: each device (address, computer name when the router
   knows it, system and browser), the book it opens, and when it leaves, with the number of
   connected devices:
@@ -324,9 +324,10 @@ computer that runs the launcher; nothing goes to the internet.
   `river-paper-cold-moon-47`) is printed in the launcher window at every start and kept in
   `.sync/code.txt` in the library folder; it stops strangers who reach the address from making
   accounts. On the other devices sign in with the same login and password.
-- **What is synced:** reading places, bookmarks (with their names and notes), the recently opened
-  books, and the reader and catalog settings, kept separately for each kind of device (phone,
-  tablet, computer), since what suits one screen doesn't suit another.
+- **What is synced:** reading places, bookmarks (with their names and notes) and the recently
+  opened books are the same on all devices. The reader and catalog settings are shared only between
+  devices of the same kind (phone, tablet, computer), since what suits one screen doesn't suit
+  another.
 - **What is not synced:** the books themselves and the offline copies on a device.
 - **Offline is fine:** changes are kept on the device and sent when the library is reachable again.
   The reader syncs when a book is opened, when you come back to the page and when you leave it;
