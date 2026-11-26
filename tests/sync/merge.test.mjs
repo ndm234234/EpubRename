@@ -198,3 +198,33 @@ test('property: commutative, idempotent, associative (seeded)', () => {
     assert.deepEqual(M.merge(M.merge(a, b), c), M.merge(a, M.merge(b, c)), 'associative case ' + i);
   }
 });
+
+test('malformed server input: __proto__ keys, null, arrays, wrong types', () => {
+  const evil = JSON.parse('{"v":1,"__proto__":{"x":1},"places":{"__proto__":{"cfi":"x","time":5},"B":{"cfi":"b","time":1}},' +
+    '"marks":{"__proto__":{"m":{"deleted":1}},"B":{"__proto__":{"cfi":"c"},"m":null,"n":[1],"o":{"cfi":"c","time":2}}},' +
+    '"opened":{"__proto__":9,"h":"zz"},"prefs":{"__proto__":{"reader":{}},"phone":{"__proto__":{"a":1},"reader":{"v":1},"readerTime":3}}}');
+  const good = doc({ places: { A: { cfi: 'a', time: 1 } }, opened: { h: 4 } });
+  const r = M.merge(good, evil);
+  assert.equal(Object.getPrototypeOf(r.places), Object.prototype);
+  assert.equal(Object.getPrototypeOf(r.marks.B), Object.prototype);
+  assert.equal(Object.getPrototypeOf(r.opened), Object.prototype);
+  assert.equal(Object.getPrototypeOf(r.prefs.phone), Object.prototype);
+  assert.equal(r.x, undefined);
+  assert.equal(r.places.cfi, undefined);
+  assert.deepEqual(Object.keys(r.places).sort(), ['A', 'B']);
+  assert.deepEqual(Object.keys(r.marks.B), ['o']);
+  assert.equal(r.opened.h, 4);
+  assert.deepEqual(JSON.parse(JSON.stringify(r)), r);
+  assert.deepEqual(M.merge(evil, good), r);
+  assert.deepEqual(M.merge(r, evil), r);
+
+  const junk = [null, 5, 'x', [], [1], { v: 1, places: [], marks: 'q', opened: null, prefs: 7 },
+    { places: { A: null, B: 5, C: [] }, marks: { A: null, B: [1], C: { m: 5 } }, opened: { a: {}, b: null }, prefs: { phone: null, tablet: [] } }];
+  for (const x of junk) for (const y of junk.concat([good, evil])) {
+    const m = M.merge(x, y);
+    assert.deepEqual(m, M.merge(y, x));
+    assert.deepEqual(M.merge(x, m), m);
+    assert.equal(m.v, 1);
+  }
+  assert.deepEqual(M.merge(null, junk[6]).places, {});
+});

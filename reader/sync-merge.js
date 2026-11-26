@@ -1,5 +1,6 @@
 // Pure merge of two sync documents (see docs/superpowers/specs/2026-11-26-library-sync-design.md).
-// No DOM, no storage. Every winner is picked by a total order, so merge is
+// No DOM, no storage. Keys named __proto__ are dropped; non-object entries are ignored.
+  // For well-formed or JSON-parsed input every winner is picked by a total order, so merge is
 // commutative, idempotent and associative.
 (function () {
   'use strict';
@@ -9,6 +10,7 @@
 
   function isObj(x) { return x !== null && typeof x === 'object' && !Array.isArray(x); }
   function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+  function get(o, k) { return has(o, k) ? o[k] : undefined; }
   function isNum(x) { return typeof x === 'number' && isFinite(x); }
   function time(x) { return isNum(x) ? x : -Infinity; }
 
@@ -16,7 +18,7 @@
     if (Array.isArray(x)) return x.map(norm);
     if (isObj(x)) {
       var o = {};
-      Object.keys(x).sort().forEach(function (k) { if (x[k] !== undefined) o[k] = norm(x[k]); });
+      Object.keys(x).sort().forEach(function (k) { if (k !== '__proto__' && x[k] !== undefined) o[k] = norm(x[k]); });
       return o;
     }
     return x;
@@ -51,18 +53,18 @@
   }
 
   function keysOf(a, b) {
-    var seen = {}, out = [];
+    var seen = Object.create(null), out = [];
     [a, b].forEach(function (o) {
-      Object.keys(o).forEach(function (k) { if (!has(seen, k)) { seen[k] = 1; out.push(k); } });
+      Object.keys(o).forEach(function (k) { if (k !== '__proto__' && !has(seen, k)) { seen[k] = 1; out.push(k); } });
     });
     return out;
   }
-  function mapOf(d, k) { return d && isObj(d[k]) ? d[k] : {}; }
+  function mapOf(d, k) { return d && isObj(get(d, k)) ? d[k] : {}; }
 
   function mergeMapOfEntries(a, b, rank) {
     var out = {};
     keysOf(a, b).forEach(function (k) {
-      var items = [a[k], b[k]].filter(isObj);
+      var items = [get(a, k), get(b, k)].filter(isObj);
       if (items.length) out[k] = clone(pickMax(items, rank));
     });
     return out;
@@ -75,8 +77,8 @@
   function mergeMarks(a, b) {
     var out = {};
     keysOf(a, b).forEach(function (book) {
-      var m = mergeMapOfEntries(isObj(a[book]) ? a[book] : {}, isObj(b[book]) ? b[book] : {}, markRank);
-      if (isObj(a[book]) || isObj(b[book])) out[book] = m;
+      var m = mergeMapOfEntries(isObj(get(a, book)) ? a[book] : {}, isObj(get(b, book)) ? b[book] : {}, markRank);
+      if (isObj(get(a, book)) || isObj(get(b, book))) out[book] = m;
     });
     return out;
   }
@@ -84,7 +86,7 @@
   function mergeOpened(a, b) {
     var out = {};
     keysOf(a, b).forEach(function (k) {
-      var items = [a[k], b[k]].filter(function (x) { return x !== undefined; });
+      var items = [get(a, k), get(b, k)].filter(function (x) { return x !== undefined; });
       var best = pickMax(items, function (x) { return { t: time(x), k: 0, s: ser(x) }; });
       out[k] = clone(best);
     });
@@ -123,7 +125,7 @@
   function mergePrefs(a, b) {
     var out = {};
     keysOf(a, b).forEach(function (kind) {
-      var x = a[kind], y = b[kind];
+      var x = get(a, kind), y = get(b, kind);
       if (isObj(x) && isObj(y)) out[kind] = mergeKind(x, y);
       else if (isObj(x) || isObj(y)) out[kind] = mergeKind(isObj(x) ? x : {}, isObj(y) ? y : {});
     });
