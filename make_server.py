@@ -788,14 +788,17 @@ function endFlight(f) {
   flight = null;
   f.anims.forEach(a => a.cancel());
   if (f.ghost) f.ghost.remove();
-  f.hidden.forEach(e => e.style.visibility = "");
+  f.hidden.forEach(e => { e.style.visibility = ""; e.style.opacity = ""; });
   if (f.end) f.end();
 }
 
 function startFlight(phase, anims, ghost, hidden, end) {
   const f = { phase, anims, ghost, hidden, end };
   flight = f;
-  hidden.forEach(e => e.style.visibility = "hidden");
+  // the book page's own cover is only made transparent: it stays a link that can be tapped while the
+  // copy flies to it (hidden, a tap would fall through to the page and do nothing); the shelf's
+  // cover is behind the book page anyway
+  hidden.forEach(e => { if (e.closest("#detail")) e.style.opacity = "0"; else e.style.visibility = "hidden"; });
   Promise.all(anims.map(a => a.finished)).then(() => { if (f.phase === phase) endFlight(f); }, () => {});
   return f;
 }

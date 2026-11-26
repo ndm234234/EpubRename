@@ -9,6 +9,8 @@
 //      search text is back and the same book is at the top
 //   3. browser tab: "Recently opened" is the default there too (the book read moves to the front);
 //      a chosen sort wins; the back button keeps the scroll; the place is kept per kind of device
+//   4. phone: the book page's cover and Read button open the reader on the first tap, also while
+//      the cover is still flying in
 import { mkdtempSync, mkdirSync, copyFileSync, readdirSync, statSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -177,6 +179,34 @@ const settled = async (d, want, what) => {   // the wanted book is where it was 
   await d.eval("history.back()");
   await d.waitFor(LISTED, 20000);
   await settled(d, mid, "browser tab, Author, back button");
+  d.close();
+}
+
+// ======== 4. phone: the book page's cover and Read button work while the cover is still flying in
+{
+  const d = await device(false);
+  const touch = async (x, y) => {   // a quick tap, nothing waited for afterwards
+    await d.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    await sleep(40);
+    await d.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  };
+  const centre = sel => d.eval(`(r => r && r.width ? [r.left + r.width / 2, r.top + r.height / 2] : null)(
+    (e => e && e.getBoundingClientRect())(document.querySelector(${JSON.stringify(sel)})))`);
+  for (const [what, sel, after] of [["the cover", "#detail .dcover", 150], ["the Read button", "#detail .dact .btn.primary", 400]]) {
+    await catalog(d);
+    await d.eval("scrollTo(0, 0)");
+    const shelf = await centre("#list .book .cover");
+    await touch(...shelf);
+    try { await d.waitFor("!document.getElementById('detail').hidden", 2000); } catch {}
+    await sleep(after);
+    const flying = await d.eval("flight !== null");
+    const at = await centre(sel);
+    if (!at) { ok(false, `book page: ${what} is there`); continue; }
+    await touch(...at);
+    let opened = false;
+    try { opened = await d.waitFor("location.href.includes('reader.html')", 4000); } catch {}
+    ok(flying && opened, `phone: ${what} tapped ${after} ms into the opening (cover still flying: ${flying}) opens the reader at once`);
+  }
   d.close();
 }
 
