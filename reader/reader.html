@@ -231,13 +231,16 @@
   /* Text settings ("Aa"): size, font, layout */
   #typoBtn .aa { font-size: 17px; }
   #typo { position: absolute; z-index: 11; top: 8px; right: 8px; width: min(330px, calc(100vw - 16px));
-          padding: 12px; display: grid; gap: 12px; border: 1px solid var(--line);
-          /* see-through, so the text behind shows how a size or font change looks */
-          background: color-mix(in srgb, var(--panel) 80%, transparent);
+          padding: 12px; display: grid; gap: 12px; background: var(--panel); border: 1px solid var(--line);
           border-radius: 14px; box-shadow: var(--shadow); opacity: 0; visibility: hidden; transform: translateY(-6px);
           transition: opacity .15s, transform .15s, visibility .15s; max-height: calc(100% - 16px); overflow-y: auto; }
   #typo.open { opacity: 1; visibility: visible; transform: none; }
-  #typo h5 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  /* One tab at a time: Size, Font, Layout */
+  #typo .tabs { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--hover); }
+  #typo .tabs button { flex: 1; height: 32px; padding: 0 8px; border-radius: 8px; font-size: 14px; color: var(--muted); }
+  #typo .tabs button.on { background: var(--bg); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+  #typo [data-pane] { display: none; }
+  #typo [data-pane].on { display: block; }
   #typo p { margin: 6px 2px 0; font-size: 12px; color: var(--muted); line-height: 1.35; }
   .seg { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--hover); }
   .seg button { flex: 1; height: 34px; padding: 0 8px; border-radius: 8px; font-size: 14px; }
@@ -280,7 +283,17 @@
   body.touchui #seek, body.touchui #navLoad { transform: translateY(8px); }
   body.touchui.bars header, body.touchui.bars #seek, body.touchui.bars #navLoad {
          opacity: 1; visibility: visible; transform: none; }
-  body.touchui.bars #typo { top: 60px; max-height: calc(100% - 68px); }   /* below the toolbar */
+  /* Aa on a touch screen: a sheet sliding down from under the toolbar, at most half the screen,
+     so the text below shows what a change does */
+  body.touchui #typo { top: 52px; left: 0; right: 0; width: auto; max-height: calc(50% - 52px);
+         border-width: 0 0 1px; border-radius: 0 0 16px 16px; transform: translateY(-16px); padding: 10px 14px 14px; }
+  body.touchui #typo.open { transform: none; }
+  /* all the fonts at once in half a screen: three in a row */
+  body.touchui .seg.faces { grid-template-columns: repeat(3, 1fr); }
+  body.touchui .seg.faces button { min-height: 46px; padding: 4px 2px; }
+  body.touchui .seg.faces button:not([data-v=book]) { grid-column: auto; }
+  body.touchui .seg.faces b { font-size: 14px; }
+  body.touchui .seg.faces small { font-size: 12px; }
   /* As much text as fits: no space around the page here; the page's own margins (typoCss) are
      the same above and below the text */
   body.touchui #viewer { margin-top: 0; margin-bottom: 0; }
@@ -347,17 +360,22 @@
     <div id="markList"></div>
   </aside>
   <div id="typo" role="dialog" aria-label="Text settings">
-    <div><h5>Size</h5>
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="size">Size</button>
+      <button role="tab" data-tab="font">Font</button>
+      <button role="tab" data-tab="layout">Layout</button>
+    </div>
+    <div data-pane="size" role="tabpanel">
       <div class="seg">
         <button id="smaller" title="Smaller text (−)" aria-label="Smaller text" disabled><span class="aa s">A</span></button>
         <span id="fontPct">100%</span>
         <button id="bigger" title="Bigger text (+)" aria-label="Bigger text" disabled><span class="aa l">A</span></button>
       </div></div>
-    <div><h5>Font</h5>
+    <div data-pane="font" role="tabpanel">
       <div class="seg faces" id="faceSeg">
         <button data-v="book" class="wide2"><b>As in book</b><small id="bookFont"></small></button>
       </div></div>
-    <div><h5>Layout</h5>
+    <div data-pane="layout" role="tabpanel">
       <div class="seg" id="layoutSeg">
         <button data-v="book">As in book</button>
         <button data-v="even">Same in all books</button>
@@ -1691,6 +1709,12 @@ function showBookFont() {
   $("bookFont").textContent = c ? bookFontName(c.document) : "";
 }
 function showTypo() {
+  const tab = ["size", "font", "layout"].includes(prefs.typoTab) ? prefs.typoTab : "size";
+  for (const e of $("typo").querySelectorAll("[data-tab], [data-pane]")) {
+    const on = (e.dataset.tab || e.dataset.pane) === tab;
+    e.classList.toggle("on", on);
+    if (e.dataset.tab) e.setAttribute("aria-selected", on);
+  }
   $("fontPct").textContent = prefs.font + "%";
   $("smaller").disabled = !rendition || prefs.font <= 60;
   $("bigger").disabled = !rendition || prefs.font >= 200;
@@ -1715,6 +1739,10 @@ function toggleTypo(open = !$("typo").classList.contains("open")) {
   if (open) { toggleToc(false); toggleSearch(false); toggleMarks(false); showTypo(); showBookFont(); }
 }
 $("typoBtn").onclick = e => { e.stopPropagation(); toggleTypo(); };
+$("typo").querySelector(".tabs").addEventListener("click", e => {
+  const b = e.target.closest("[data-tab]");
+  if (b) { prefs.typoTab = b.dataset.tab; savePrefs(); showTypo(); }
+});
 document.addEventListener("click", e => {   // a click anywhere else closes it
   if ($("typo").classList.contains("open") && !$("typo").contains(e.target)) toggleTypo(false);
 });

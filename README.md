@@ -234,7 +234,9 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
 - **Print** (computer; also `Ctrl+P` or the browser's Print menu) prints exactly what is on the
   screen, like a picture of it: the open pages, without the bars and buttons, scaled to fit an
   A4 sheet (landscape for a wide window, portrait for a tall one), black on white whatever the theme.
-- **Aa** — text settings, remembered for all books:
+- **Aa** — text settings, remembered for all books, on three tabs (*Size*, *Font*, *Layout*; it
+  opens on the tab used last). On a phone or tablet it slides down from under the toolbar and takes
+  at most half the screen, so the page below shows what a change does:
   - size (also `+` / `−`);
   - font: *As in book* (under it, the font the open chapter is set in: e.g. *Times New Roman*,
     *Liberation Serif · in the book* for a font the book carries, or *default serif*), or one of
