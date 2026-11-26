@@ -256,13 +256,13 @@ def main() -> int:
     if count["new"] or count["overwritten"]:
         print("🔒 All copies verified by SHA-256, source files untouched")
 
-    # Rebuild the catalog Out/index.html (make_index.py lives next to this script)
+    # Rebuild the catalog Out/index.html (make_server.py lives next to this script)
     print("\n🗂  Building catalog...")
     try:
         sys.path.insert(0, str(SCRIPT_DIR))
-        from make_index import build_index
+        from make_server import build_index
     except ImportError as e:
-        print(f"⚠️  Catalog skipped: make_index.py not found next to this script ({e})")
+        print(f"⚠️  Catalog skipped: make_server.py not found next to this script ({e})")
     else:
         build_index(OUT_DIR)
     return 0 if errors == 0 else 2

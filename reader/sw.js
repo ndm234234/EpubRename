@@ -1,5 +1,5 @@
 // Offline library: keeps the catalog, the reader and the books on the device.
-// make_index.py copies this file next to index.html, so it serves the whole library folder.
+// make_server.py copies this file next to index.html, so it serves the whole library folder.
 //
 // Two caches (the site's own storage, not the browser's HTTP cache):
 //   epublib-shell  the catalog page, the reader, fonts, covers, icons

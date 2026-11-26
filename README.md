@@ -4,7 +4,7 @@ Small Python scripts to tidy up an EPUB collection:
 
 - **`epub_rename.py`** — copies books from `In/` into `Out/<Author>/<Author> - <Title>.epub`,
   using the author and title stored inside each book, and verifies every copy.
-- **`make_index.py`** — builds `index.html`, an offline catalog of a book folder
+- **`make_server.py`** — builds `index.html`, an offline catalog of a book folder
   with covers, search, sorting and a built-in reader. It runs automatically at the end of `epub_rename.py`
   and can also be used on its own for any folder.
 - **`fix_cover.py`** — makes sure every book has a cover that readers and catalogs can find:
@@ -134,10 +134,10 @@ Constants at the top of `epub_rename.py`:
 | `MAX_AUTHORS_SHOWN` | `2`                | more authors than this → shortened        |
 | `ET_AL`             | `" и др."`         | suffix for shortened author lists         |
 
-## make_index.py
+## make_server.py
 
 ```bash
-python3 make_index.py [FOLDER] [--title "My Library"]
+python3 make_server.py [FOLDER] [--title "My Library"]
 ```
 
 Scans `FOLDER` (default: `Out` in the current folder) recursively and writes:
@@ -314,7 +314,7 @@ no address bar. The browser doesn't push it; it's in the browser's menu — Chro
 - The app opens the library at the address it was installed from: keep the computer's address (and
   port) the same, e.g. a fixed address for it in the router. The server is needed for the first start
   and for updates; after that the app also works without it (below).
-- `make_index.py` writes the app description to `.index/manifest.webmanifest`, named after the library.
+- `make_server.py` writes the app description to `.index/manifest.webmanifest`, named after the library.
 - In the app the catalog is sorted by **Recently opened** by default: the book read last comes first,
   then books not opened yet. The other orders are in the same menu. In a browser tab nothing changes.
 
@@ -346,7 +346,7 @@ the whole library is on the device, blue while downloading) opens the settings:
   don't come back by themselves.
 
 The app checks the library when it starts, when it comes back to the screen and when the connection
-returns. `make_index.py` writes the list for this to `.index/library.json`, so run it after changing
+returns. `make_server.py` writes the list for this to `.index/library.json`, so run it after changing
 the books, as always:
 
 - a new book is downloaded (in *All books* mode);
@@ -357,7 +357,7 @@ the books, as always:
 
 The storage is the browser's site data for the library's address. Clearing it (e.g. *Clear data* in
 the site settings, or removing the app) removes the books too. The service worker `sw.js` next to
-`index.html` is written by `make_index.py`.
+`index.html` is written by `make_server.py`.
 
 ## fix_cover.py
 
@@ -403,7 +403,7 @@ terminal), `--dry-run` only prints what would be done.
 Only the package file (OPF) is edited, as text, so everything else in the book stays
 byte for byte; the fixed file is checked (opens, nothing lost, every listed file present,
 cover found) before it replaces the old one, and keeps the old file's date. Running it
-again changes nothing. Run `make_index.py` afterwards to see the covers in the catalog.
+again changes nothing. Run `make_server.py` afterwards to see the covers in the catalog.
 
 ## pdf2epub.py
 

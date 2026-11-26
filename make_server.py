@@ -2,7 +2,7 @@
 """Build index.html — a browsable catalog of all EPUB books in a folder.
 
 Usage:
-    python3 make_index.py [FOLDER]        (default: ./Out)
+    python3 make_server.py [FOLDER]        (default: ./Out)
 
 The folder is scanned recursively. The catalog shows covers, authors, titles,
 descriptions, has search, sorting and grouping by author; clicking a title
