@@ -187,9 +187,10 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
 - Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows, mouse wheel / touchpad (one page per notch or swipe).
 - **Phones and tablets** read with the whole screen for the text: only a thin line at the bottom
   stays — `4/24 in chapter` and `p. 120 of 560 · 21%` — and the page sits in the middle of the
-  screen. The first tap on the book goes fullscreen, hiding the phone's own status bar (clock,
-  Wi-Fi, battery) and buttons; the browser allows that only after a tap. A tap in the **middle third** of the page brings the
-  toolbar and the slider over the text (the page doesn't move); another tap hides them. A tap in
+  screen. The phone's own status bar (clock, battery) stays: hiding it only while reading would
+  take the browser's fullscreen mode, and Chrome then always shows a "swipe to exit" hint.
+  A tap in the **middle third** of the page brings the toolbar and the slider over the text (the
+  page doesn't move); another tap hides them. A tap in
   the **left / right third** or a swipe turns the page. The bars hide again after any move in the
   book (page turn, slider, contents, search, bookmark). Taps on links or while selecting text don't
   count. With a mouse the bars are always there and taps in the lower half of the page turn pages.
@@ -309,10 +310,6 @@ no address bar. The browser doesn't push it; it's in the browser's menu — Chro
   port) the same, e.g. a fixed address for it in the router. The server is needed for the first start
   and for updates; after that the app also works without it (below).
 - `make_index.py` writes the app description to `.index/manifest.webmanifest`, named after the library.
-- The installed app opens **full screen**: no status bar (clock, battery) and no system buttons, in
-  the catalog too. The reader then needn't ask for fullscreen, so Chrome shows no "swipe to exit"
-  hint. In a browser tab (and in an `http://` home-screen shortcut, which opens in the browser) the
-  first tap on a book goes fullscreen instead, and Chrome shows that hint; a page can't hide it.
 - In the app the catalog is sorted by **Recently opened** by default: the book read last comes first,
   then books not opened yet. The other orders are in the same menu. In a browser tab nothing changes.
 

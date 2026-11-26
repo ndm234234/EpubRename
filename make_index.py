@@ -1252,10 +1252,9 @@ def write_manifest(index_dir: Path, title: str) -> None:
         "description": "EPUB library and reader",
         "start_url": "../index.html",
         "scope": "../",
-        # The installed app has the whole screen: no status bar (clock, battery) and no system
-        # buttons, so the reader needn't ask for fullscreen, and Chrome shows no "swipe to exit"
-        # hint. Where fullscreen apps aren't supported (iPhone) it opens as a normal app.
-        "display": "fullscreen",
+        # Not "fullscreen": the phone's status bar (clock, battery) stays, and a fullscreen app
+        # leaves a black band where the camera cutout is.
+        "display": "standalone",
         "background_color": "#f7f7f5",
         "theme_color": "#f7f7f5",
         "icons": [
