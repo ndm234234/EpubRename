@@ -279,8 +279,9 @@
   body.touchui.bars header, body.touchui.bars #seek, body.touchui.bars #navLoad {
          opacity: 1; visibility: visible; transform: none; }
   body.touchui.bars #typo { top: 60px; max-height: calc(100% - 68px); }   /* below the toolbar */
-  /* The page sits in the middle of the screen: as much space above the text as the status line takes below */
-  body.touchui #viewer { margin-top: calc(8px + var(--foot, 30px)); }
+  /* As much text as fits: no space around the page here; the page's own margins (typoCss) are
+     the same above and below the text */
+  body.touchui #viewer { margin-top: 0; margin-bottom: 0; }
 </style>
 </head>
 <body>
@@ -1463,7 +1464,6 @@ const touchUi = matchMedia("(hover: none) and (pointer: coarse)");
 function setBars(on) { document.body.classList.toggle("bars", on && touchUi.matches); }
 function onTouchUi() {
   document.body.classList.toggle("touchui", touchUi.matches);
-  document.body.style.setProperty("--foot", document.querySelector("footer").offsetHeight + "px");
   setBars(false);
 }
 touchUi.addEventListener("change", onTouchUi);
@@ -1593,7 +1593,8 @@ for (const [v, f] of Object.entries(FACES)) {   // a button per font, written in
 }
 if (!FACES[prefs.face]) prefs.face = "book";
 function typoCss() {
-  let css = "";
+  // Phones, tablets: smaller margins above and below the text than epub.js's 20px, the same on both
+  let css = touchUi.matches ? "body { padding-top: 12px !important; padding-bottom: 12px !important; }\n" : "";
   if (FACES[prefs.face])   // code and other monospaced text keeps its font
     css += `body, body *:not(pre, code, kbd, samp, tt, pre *, code *) { font-family: ${FACES[prefs.face].stack} !important; }\n`;
   // Plain paragraphs only, and weaker than any class rule: centred titles, epigraphs etc. keep the
