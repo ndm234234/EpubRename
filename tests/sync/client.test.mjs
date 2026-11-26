@@ -39,6 +39,7 @@ function fakeServer() {
     const body = opts.body ? JSON.parse(opts.body) : null;
     const auth = (opts.headers || {}).Authorization;
     const authed = auth === 'Bearer ' + s.token;
+    if (s.broken && /register|login/.test(url)) return Promise.resolve(res(s.broken, {}));
     if (url === '/__sync/register') {
       if (!/^[a-z0-9._-]{2,32}$/.test(body.login)) return Promise.resolve(res(400, {}));
       if (body.code !== s.code) return Promise.resolve(res(403, {}));
@@ -169,7 +170,8 @@ test('sync merges both ways', async () => {
   assert.equal(await S.syncNow(), 'ok');
   assert.equal(get('epubReader:book:' + BOOK).pct, 0.7);
   assert.equal(get('epubLibrary:opened')['c.epub'], 9);
-  assert.deepEqual(get('epubReader:marks:' + BOOK).map((m) => m.time), [10, 15, 20]);
+  // (no setMarkOrder: the device's own marks keep their order, the new one follows)
+  assert.deepEqual(get('epubReader:marks:' + BOOK).map((m) => m.time), [10, 20, 15]);
   assert.equal(srv.version, 4);
   assert.equal(srv.doc.places[WEIRD].time, 2000);
   assert.equal(srv.doc.opened['a.epub'], 5);
@@ -314,6 +316,28 @@ test('setMarkOrder controls the order marks are written in', async () => {
   srv.doc = M.merge(M.emptyDoc(), { marks: { [BOOK]: { y: mark(20, { id: 'y' }), z: mark(30, { id: 'z' }) } } });
   await S.syncNow();
   assert.deepEqual(get('epubReader:marks:' + BOOK).map((m) => m.time), [30, 20, 10]);
+});
+
+test('default mark order: marks already on the device keep their order, new ones follow by time', async () => {
+  const S = env();
+  // the reader keeps marks in book order, which need not be creation order
+  put('epubReader:marks:' + BOOK, [mark(30), mark(10), mark(50)]);
+  srv.doc = M.merge(M.emptyDoc(), { marks: { [BOOK]: { y: mark(40, { id: 'y' }), z: mark(20, { id: 'z' }) } } });
+  await S.syncNow();
+  assert.deepEqual(get('epubReader:marks:' + BOOK).map((m) => m.time), [30, 10, 50, 20, 40]);
+  // none on the device yet: by time
+  srv.doc = M.merge(srv.doc, { marks: { [WEIRD]: { a: mark(9, { id: 'a' }), b: mark(3, { id: 'b' }) } } });
+  await S.syncNow();
+  assert.deepEqual(get('epubReader:marks:' + WEIRD).map((m) => m.time), [3, 9]);
+});
+
+test('a library computer error (5xx) on sign-in or create is server-error, not offline', async () => {
+  const S = env({ signedIn: false });
+  srv.broken = 500;
+  assert.deepEqual(await S.login('ann', 'pw'), { ok: false, error: 'server-error' });
+  assert.deepEqual(await S.register('bob', 'pw', srv.code), { ok: false, error: 'server-error' });
+  srv.broken = 503;
+  assert.deepEqual(await S.login('ann', 'pw'), { ok: false, error: 'server-error' });
 });
 
 test('concurrent syncNow share one in-flight run', async () => {

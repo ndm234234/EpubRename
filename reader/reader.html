@@ -614,7 +614,7 @@ async function openBook(data, fileName) {
   bookKey = "epubReader:book:" + bookId;
   anchor = "";
   marksKey = "epubReader:marks:" + bookId;
-  marks = store.get(marksKey) || [];
+  marks = inBookOrder(store.get(marksKey) || []);   // a sync from the catalog may store them oldest first
   $("markFilter").value = "";
   $("marksBtn").disabled = !marks.length;
   document.title = md.title || fileName;
@@ -1381,6 +1381,8 @@ $("pillClear").onclick = () => clearSearch();
 
 // Stored per book in localStorage, sorted by position in the book.
 const cfiCmp = (a, b) => new ePub.CFI().compare(a, b);
+// Bookmarks in book order (Previous / Next and the list rely on it); a CFI that can't be compared stays put
+const inBookOrder = list => list.sort((a, b) => { try { return cfiCmp(a.cfi, b.cfi); } catch { return 0; } });
 const saveMarks = () => { store.set(marksKey, marks); Sync.changed(); };
 // A bookmark's id: its creation time and place (as SyncMerge.markId); older ones have none and get the same
 const markId = m => m.id || (m.time + "|" + m.cfi);
@@ -2011,7 +2013,7 @@ function reloadPrefs() {
 // unless a name or note is being typed (it is drawn when that ends)
 function reloadMarks() {
   const mine = new Map(marks.map(m => [markId(m), m]));
-  marks = (store.get(marksKey) || []).map(m => { const o = mine.get(markId(m)); return o ? Object.assign(o, m) : m; });
+  marks = inBookOrder((store.get(marksKey) || []).map(m => { const o = mine.get(markId(m)); return o ? Object.assign(o, m) : m; }));
   if ($("markList").querySelector("textarea, input")) updateMarkUi();
   else { renderMarks(); if (!marks.length) toggleMarks(false); }
 }
@@ -2048,10 +2050,11 @@ let acctTab = "signin", syncResult = "", acctBusy = false;
 const ACCT_ERR = {
   "wrong-code": "Wrong library code. It is shown in the library computer's launcher window.",
   taken: "This login is taken: choose another one.",
-  "bad-login": "Login: 2 to 32 characters, a–z, 0–9 and . _ -",
+  "bad-login": "Login: 2 to 32 characters, a–z, 0–9 and . _ - (not a reserved name: con, aux, nul, prn, com1…, lpt1…)",
   "wrong-password": "Wrong login or password.",
   wait: "Too many tries. Try again later.",
   offline: "Can't reach the library computer.",
+  "server-error": "The library computer had a problem (see its window / the .sync folder).",
 };
 function acctError(text) { $("acctErr").textContent = text || ""; }
 function syncedAt(t) {

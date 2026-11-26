@@ -15,7 +15,9 @@
   var K_ACCOUNT = 'librarySync:account', K_DIRTY = 'librarySync:dirty', K_LAST = 'librarySync:lastSync';
   var THROTTLE_MS = 30000, DEFAULT_TIMEOUT = 8000, AUTH_TIMEOUT = 10000, MAX_PUTS = 3;
 
-  var markOrder = function (a, b) { return (a.time || 0) - (b.time || 0); };
+  // The order bookmarks are written in (setMarkOrder; the reader sets book order). Without one:
+  // the marks already on the device keep their order, new ones follow, oldest first.
+  var markOrder = null;
   var listeners = [];
   var inflight = null, changeSeq = 0, lastRun = -Infinity, timer = null, onlineHooked = false;
 
@@ -114,7 +116,7 @@
         lsSet(K_ACCOUNT, JSON.stringify({ login: String(login).toLowerCase().trim(), token: r.body.token }));
         return { ok: true };
       }
-      var out = { ok: false, error: ERR[kind][r.status] || 'offline' };
+      var out = { ok: false, error: ERR[kind][r.status] || (r.status >= 500 ? 'server-error' : 'offline') };
       if (out.error === 'wait' && isObj(r.body) && isNum(r.body.wait)) out.wait = r.body.wait;
       return out;
     }, function () { return { ok: false, error: 'offline' }; });
@@ -166,6 +168,18 @@
     return doc;
   }
 
+  function sortMarks(live, oldLive) {
+    if (markOrder) { live.sort(markOrder); return; }
+    var at = {};
+    if (Array.isArray(oldLive)) oldLive.forEach(function (x, i) { if (isObj(x)) { var k = SyncMerge.markId(x); if (!(k in at)) at[k] = i; } });
+    var pos = function (m) { var k = SyncMerge.markId(m); return k in at ? at[k] : Infinity; };
+    live.sort(function (a, b) {
+      var pa = pos(a), pb = pos(b);
+      if (pa !== pb) return pa < pb ? -1 : 1;
+      return (a.time || 0) - (b.time || 0);
+    });
+  }
+
   function applyLocal(doc) {
     var rep = { places: [], marks: [], prefs: false, opened: false };
     if (!isObj(doc)) return rep;
@@ -185,7 +199,7 @@
       var oldLive = lsJson(P_MARKS + id), changed = false;
       var asSet = function (a) { return Array.isArray(a) ? a.map(canon).sort().join('|') : ''; };
       if (asSet(oldLive) !== asSet(live) || (oldLive === undefined && live.length)) {
-        if (live.length || oldLive !== undefined) { live.sort(markOrder); changed = lsSet(P_MARKS + id, JSON.stringify(live)) || changed; }
+        if (live.length || oldLive !== undefined) { sortMarks(live, oldLive); changed = lsSet(P_MARKS + id, JSON.stringify(live)) || changed; }
       }
       var oldGone = lsJson(P_GONE + id);
       if (canon(isObj(oldGone) ? oldGone : {}) !== canon(gone)) {

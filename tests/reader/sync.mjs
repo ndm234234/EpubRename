@@ -4,15 +4,19 @@
 // - the place's time changes only on deliberate moves (a page turn), not on opening, reopening,
 //   resizing or a font change; a book never read before is saved with time 0
 // - bookmarks get an id (time|cfi), edits set `edited`, deleting writes a tombstone (marksGone)
+// - bookmarks stored out of book order are put in book order on opening and on a sync; Previous
+//   bookmark goes to the nearest one
 // - prefs keep a "changed at" time
 // - the account button: shown on a secure page (http://127.0.0.1), hidden on plain http with a host
 //   name (http://lib.test, mapped to 127.0.0.1); signed out the reader sends nothing to /__sync
-// - the panel: a wrong library code shows an error in the panel; the right one signs in and syncs
+// - the panel: a reserved login, a 500 from the library computer and a wrong library code each show
+//   their own error in the panel; the right code signs in and syncs
 // Part 2: the catalog (index.html made by make_server.py from two books copied under made-up names
 // into a temp library, served by its own library_sync.py): the account button; a book opened on one
 // device comes first under "Recently opened" on another (installed-app mode stubbed through
-// matchMedia); catalog settings of the app and of a browser tab sync separately; a sync that hangs
-// never holds the catalog back.
+// matchMedia); catalog settings of the app and of a browser tab sync separately; signed in from the
+// catalog's panel (a 500 and a reserved login told apart first), coming back to the front syncs
+// without a reload; a sync that hangs never holds the catalog back.
 // Part 3: two phones and a tablet on one account (a temp library with the book under a made-up name,
 // its own server, stopped and started again): A's place, bookmark with note and font reach B; a
 // bookmark deleted on B stays deleted; the tablet keeps its own fonts; a newer place pending on A
@@ -119,6 +123,30 @@ const m2 = await p.eval("marks[marks.length - 1].id");
 await p.eval("toggleMarkHere(); 0");
 const gone2 = JSON.parse(await p.eval(`localStorage.getItem(${JSON.stringify("epubReader:marksGone:")} + ${JSON.stringify(BID)})`));
 ok(gone2 && typeof gone2[m2] === "number", "toggling the bookmark off writes marksGone too");
+// bookmarks stored out of book order (a sync from the catalog writes them oldest first): the reader
+// puts them in book order on opening and when a sync brings them in; Previous goes to the nearest
+{
+  const saved = await p.eval("localStorage.getItem(bookKey)"), cfis = [];
+  for (let i = 0; i < 3; i++) {
+    if (i) { await p.eval("rendition.next().then(() => 0)"); await settle(p); await p.eval("rendition.next().then(() => 0)"); await settle(p); }
+    await p.eval("toggleMarkHere(); hideToast(); 0");
+    cfis.push(await p.eval("here().start.cfi"));
+  }
+  const MKEY = JSON.stringify("epubReader:marks:" + BID);
+  const reverse = `localStorage.setItem(${MKEY}, JSON.stringify(JSON.parse(localStorage.getItem(${MKEY}))
+    .sort((a, b) => ${JSON.stringify(cfis)}.indexOf(b.cfi) - ${JSON.stringify(cfis)}.indexOf(a.cfi)))); 0`;
+  await p.eval(reverse);
+  await open(p, BASE);   // at the third bookmark's page
+  ok(JSON.stringify(await p.eval("marks.map(m => m.cfi)")) === JSON.stringify(cfis), "bookmarks stored out of order: opened in book order");
+  await p.eval("window.__d = displayAt; window.__to = ''; displayAt = c => { __to = c; }; stepMark(-1); displayAt = __d; 0");
+  ok(await p.eval("__to") === cfis[1], "Previous bookmark: the nearest one, not the first in storage");
+  await p.eval(reverse);
+  await p.eval("reloadMarks(); 0");
+  ok(JSON.stringify(await p.eval("marks.map(m => m.cfi)")) === JSON.stringify(cfis), "a sync wrote them out of order: reloaded in book order");
+  ok(await p.eval("renderMarks(), document.querySelectorAll('#markList .mark').length") === 3, "the list shows all three");
+  // as before this check: no bookmarks, the place it had
+  await p.eval(`marks = []; localStorage.removeItem(${MKEY}); localStorage.setItem(bookKey, ${JSON.stringify(saved)}); renderMarks(); 0`);
+}
 
 // ---- account button, secure page, signed out
 ok(await p.eval("isSecureContext") === true, "http://127.0.0.1 is a secure context");
@@ -140,6 +168,14 @@ await p.eval("document.querySelector('#acct [data-tab=create]').click(); 0").cat
 await fill("acctCreate", { login: LOGIN, password: "secret-pw", password2: "other-pw", code: "x" });
 await sleep(300);
 ok(/match/i.test(await text("#acctErr")), `passwords that differ: error in the panel ("${await text("#acctErr")}")`);
+await fill("acctCreate", { login: "con", password: "secret-pw", password2: "secret-pw", code: "x" });
+await p.waitFor("document.getElementById('acctErr').textContent.includes('reserved')", 10000).catch(() => {});
+ok(/reserved.*con/.test(await text("#acctErr")), `a reserved login (con): the error says so ("${await text("#acctErr")}")`);
+await p.eval(`window.__f = fetch; window.fetch = (u, o) => String(u).includes('/__sync/') ? Promise.resolve(new Response("{}", { status: 500 })) : __f(u, o); 0`);
+await fill("acctCreate", { login: LOGIN, password: "secret-pw", password2: "secret-pw", code: "x" });
+await p.waitFor("/had a problem/.test(document.getElementById('acctErr').textContent)", 10000).catch(() => {});
+ok(/had a problem/.test(await text("#acctErr")), `the library computer answers 500: not "can't reach" ("${await text("#acctErr")}")`);
+await p.eval("window.fetch = __f; 0");
 await fill("acctCreate", { login: LOGIN, password: "secret-pw", password2: "secret-pw", code: "wrong-code-words-00" });
 await p.waitFor("/code/i.test(document.getElementById('acctErr').textContent)", 10000).catch(() => {});
 ok(/code/i.test(await text("#acctErr")), `wrong library code: error in the panel ("${await text("#acctErr")}")`);
@@ -302,6 +338,30 @@ ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: opened the second 
   await sleep(1500);
   ok(await A.eval("document.getElementById('sort').value") === "author" && await A.eval("document.getElementById('group').getAttribute('aria-pressed')") === "false",
      "browser tab: keeps its own settings (the app's don't reach it)");
+  // E signs in from the catalog's own panel (no reload): back in front, it syncs and gets news
+  const E = await device(false);
+  await catalog(E);
+  await E.eval(`window.__f = fetch; window.fetch = (u, o) => String(u).includes('/__sync/') ? Promise.resolve(new Response("{}", { status: 500 })) : __f(u, o);
+    (() => { document.getElementById('acctBtn').click(); const f = document.getElementById('acctSignIn');
+    f.elements.login.value = "con"; f.elements.password.value = "x"; f.requestSubmit(); })(); 0`);
+  await E.waitFor("/had a problem/.test(document.getElementById('acctErr').textContent)", 10000).catch(() => {});
+  ok(/had a problem/.test(await E.eval("document.getElementById('acctErr').textContent")), "catalog: a 500 from the library computer is told apart from \"can't reach\"");
+  await E.eval("window.fetch = __f; 0");
+  await E.eval(`(() => { const f = document.getElementById('acctSignIn'); f.elements.login.value = "con"; f.elements.password.value = "x"; f.requestSubmit(); })(); 0`);
+  await E.waitFor("document.getElementById('acctErr').textContent.includes('reserved')", 10000).catch(() => {});
+  ok(/reserved.*con/.test(await E.eval("document.getElementById('acctErr').textContent")), "catalog: a reserved login (con): the error says so");
+  await E.eval(`(() => { const f = document.getElementById('acctSignIn');
+    f.elements.login.value = ${JSON.stringify(LOGIN2)}; f.elements.password.value = "secret-pw"; f.requestSubmit(); })(); 0`);
+  await E.waitFor("/Last synced/.test(document.getElementById('acctStatus').textContent)", 10000).catch(() => {});
+  ok(await E.eval("LibrarySync.signedIn()"), "device E: signed in from the catalog panel");
+  await A.eval(`(() => { const o = JSON.parse(localStorage.getItem('epubLibrary:opened') || '{}');
+    o['made-up/later.epub'] = Date.now(); localStorage.setItem('epubLibrary:opened', JSON.stringify(o)); })(); 0`);
+  ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: something new synced");
+  await E.eval("document.dispatchEvent(new Event('visibilitychange')); 0");
+  await E.waitFor("'made-up/later.epub' in JSON.parse(localStorage.getItem('epubLibrary:opened') || '{}')", 5000).catch(() => {});
+  ok(await E.eval("'made-up/later.epub' in JSON.parse(localStorage.getItem('epubLibrary:opened') || '{}')"),
+     "device E, back in front (no reload since signing in): synced and has it");
+  E.close();
   // a sync that never answers does not hold the catalog back
   await A.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const f = fetch.bind(window);
     window.fetch = (u, o) => String(u).includes('/__sync') ? new Promise(() => {}) : f(u, o); })()` });

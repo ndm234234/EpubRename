@@ -1305,10 +1305,11 @@ let acctTab = "signin", syncResult = "", acctBusy = false;
 const ACCT_ERR = {
   "wrong-code": "Wrong library code. It is shown in the library computer's launcher window.",
   taken: "This login is taken: choose another one.",
-  "bad-login": "Login: 2 to 32 characters, a–z, 0–9 and . _ -",
+  "bad-login": "Login: 2 to 32 characters, a–z, 0–9 and . _ - (not a reserved name: con, aux, nul, prn, com1…, lpt1…)",
   "wrong-password": "Wrong login or password.",
   wait: "Too many tries. Try again later.",
   offline: "Can't reach the library computer.",
+  "server-error": "The library computer had a problem (see its window / the .sync folder).",
 };
 const acctError = text => { $("acctErr").textContent = text || ""; };
 function syncedAt(t) {
@@ -1405,12 +1406,11 @@ if (Sync.available()) $("acctBtn").hidden = false;   // secure pages only: a pas
     if (!$("acctPop").hidden) showAcct();
   };
   Sync.onRemoteChange(r => { if (r.opened || r.prefs) refresh(); });
-  if (Sync.signedIn()) {
-    Sync.syncNow({ timeoutMs: 2000 }).then(r => { syncResult = r; refresh(); });
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden && Sync.signedIn()) Sync.syncNow().then(r => { syncResult = r; refresh(); });
-    });
-  }
+  if (Sync.signedIn()) Sync.syncNow({ timeoutMs: 2000 }).then(r => { syncResult = r; refresh(); });
+  // always attached: signed in from the panel later, coming back syncs too
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && Sync.signedIn()) Sync.syncNow().then(r => { syncResult = r; refresh(); });
+  });
 }
 
 // Came back to a book page (reload, or the reader's Back): show it without the flight
