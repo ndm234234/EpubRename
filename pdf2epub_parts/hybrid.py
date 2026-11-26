@@ -75,6 +75,12 @@ def place_tocs(blocks: list[Block], layer_tocs: list) -> list:
     return layer_tocs
 
 
+def _short(seconds: float) -> str:
+    """0:57, 1:52, 1:02:05: the time one page took."""
+    s = int(round(seconds))
+    return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
+
+
 def page_note(source: str, info: dict, retried: bool) -> str:
     """What the check did on a page, for its progress line."""
     if source == "empty":
@@ -249,11 +255,20 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
         started, done_now, recognised = time.time(), 0, 0
         failing: list[int] = []                    # pages in a row accurate failed on
         blank: set[int] = set()                    # pages accurate read as blank (not kept)
+        spent: dict[int, float] = {}               # seconds Marker spent on each page
+
+        def timed(pages: list[int], action) -> None:
+            """Run action and share its time between the pages it read."""
+            t = time.monotonic()
+            action()
+            for n in pages:
+                spent[n] = spent.get(n, 0.0) + (time.monotonic() - t) / len(pages)
+
         for i in range(0, len(todo), ACC_BATCH):
             batch = todo[i:i + ACC_BATCH]
             need = [n for n in batch if not acc_file(n).exists()]
             if need:
-                recognise("accurate", need, lambda n, h: _write(acc_file(n), h))
+                timed(need, lambda: recognise("accurate", need, lambda n, h: _write(acc_file(n), h)))
                 recognised += len(need)
                 # a blank page where fast read text: the reading failed (e.g. its server died);
                 # read it once more, and if it is still blank, don't keep it
@@ -261,7 +276,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                     if acc_file(n).exists() and not read(acc_file(n)).strip() and \
                             len(re.findall(r"\w+", text_of(read(fast_file(n))))) >= BLANK_SUSPECT:
                         log(f"page {n}: accurate came back blank, reading it again")
-                        recognise("accurate", [n], lambda k, h: _write(acc_file(k), h))
+                        timed([n], lambda: recognise("accurate", [n], lambda k, h: _write(acc_file(k), h)))
                         if not read(acc_file(n)).strip():
                             acc_file(n).unlink()
                             blank.add(n)
@@ -287,7 +302,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                     if needs_retry(result):
                         retried = True
                         again: dict[int, str] = {}
-                        recognise("accurate", [n], again.__setitem__)
+                        timed([n], lambda: recognise("accurate", [n], again.__setitem__))
                         if again.get(n, "").strip():
                             second = merge_page(strip_running_heads(again[n], n, offset), fast_html, layer[n], digital)
                             if (second.looped, -second.coverage, second.extra_run) < \
@@ -309,14 +324,16 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                     picture = base.render_page(pdf, n, work / "images" / f"page-{n:04d}", base.PAGE_IMAGE_HEIGHT)
                     if picture:
                         merged, source = f'<p><img src="{_escape(str(picture))}" alt="page {n}"/></p>', "picture"
-                report["pages"][str(n)] = {"source": source, "retried": retried, **info}
+                seconds = round(spent.get(n, 0.0))
+                report["pages"][str(n)] = {"source": source, "retried": retried, **info, "seconds": seconds}
                 _write(report_path, json.dumps(report, ensure_ascii=False, indent=1))
                 _write(merged_file(n), merged)
-                log(f"page {n}: {source} {info}")
+                log(f"page {n}: {source} {info} {seconds} s")
                 done_now += 1
                 elapsed = time.time() - started
                 left = time_left(elapsed, recognised, len(todo) - done_now)
-                progress(f"📄 page {n}/{numbers[-1]} · {page_note(source, info, retried)} · {_fmt(elapsed)} elapsed"
+                progress(f"📄 page {n}/{numbers[-1]} · {page_note(source, info, retried)} · ⏱ {_short(seconds)}"
+                         f" · {_fmt(elapsed)} elapsed"
                          + (f" · ~{_fmt(left)} left" if left is not None else ""))
     finally:
         stop(engine)

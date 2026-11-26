@@ -57,8 +57,12 @@ class FakeEngine:
         self.calls, self.fail_accurate, self.interrupt_on = [], set(fail_accurate), interrupt_on
         self.fail_fast, self.loop_accurate = set(fail_fast), set(loop_accurate)
 
+    clock = None                  # [seconds]: a run of Marker takes a minute a page on it
+
     def __call__(self, engine, pdf, mode, pages, out_dir):
         self.calls.append((mode, list(pages)))
+        if self.clock is not None and mode == "accurate":
+            self.clock[0] += 60 * len(pages)
         if mode == "accurate":
             if self.interrupt_on is not None and self.interrupt_on in pages:
                 self.interrupt_on = None
@@ -181,6 +185,21 @@ class HybridTest(unittest.TestCase):
         self.assertTrue(any(s.startswith("🔍 reading pages 1–3") for s in status), status)
         self.assertEqual(status[-1], "", "the live line is cleared at the end")
 
+    def test_time_of_each_page(self):
+        clock = [1000.0]
+        fake = FakeEngine(empty_once={2})
+        fake.clock = clock
+        with mock.patch.object(hy.time, "monotonic", lambda: clock[0]):
+            self.convert(fake, keep_work=True)
+        pages = [line for line in self.lines if line.startswith("📄")]
+        self.assertIn("page 1/3 · ok · ⏱ 1:00 · ", pages[0])
+        self.assertIn("⏱ 2:00 · ", pages[2], "a page read twice took its share of the batch and the second reading")
+        report = json.loads((self.work() / "report.json").read_text())
+        self.assertEqual([report["pages"][k]["seconds"] for k in "123"], [60, 60, 120])
+        log = (self.work() / "log.txt").read_text()
+        self.assertIn("page 1: accurate", log)
+        self.assertRegex(log, r"page 3: accurate .* 120 s")
+
     def test_fast_failure_split_in_halves(self):
         fake = FakeEngine(fail_fast={1})
         self.convert(fake, keep_work=True)
@@ -302,6 +321,9 @@ class PageNoteTest(unittest.TestCase):
         self.assertEqual(hy.page_note("fast", {"reason": "accurate repeated itself"}, True),
                          "⚠️ fast reading used (accurate repeated itself)")
         self.assertEqual(hy.page_note("empty", {}, False), "empty page")
+
+    def test_short_time(self):
+        self.assertEqual([hy._short(s) for s in (0, 7.4, 59.6, 61, 3725)], ["0:00", "0:07", "1:00", "1:01", "1:02:05"])
 
 
 class TimeTest(unittest.TestCase):
