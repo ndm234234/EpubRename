@@ -1467,11 +1467,15 @@ function onTouchUi() {
   setBars(false);
 }
 // Only the page on the screen: Android's status bar (clock, Wi-Fi, battery) and its buttons hide.
-// A browser allows this only in answer to a tap, so the first tap on the book does it; after
-// leaving it (the Back gesture) the next tap comes back to it.
+// In a browser tab this is allowed only in answer to a tap, so the first tap on the book does it
+// (Chrome then shows its "swipe to exit" hint); after leaving it (the Back gesture) the next tap
+// comes back to it.
+// The installed app already has the whole screen (manifest "display": "fullscreen"): asking again
+// would only bring Chrome's "swipe to exit" hint.
+const appFullscreen = matchMedia("(display-mode: fullscreen)");
 function goFullscreen() {
   const root = document.documentElement;
-  if (!touchUi.matches || document.fullscreenElement || !root.requestFullscreen) return;
+  if (!touchUi.matches || appFullscreen.matches || document.fullscreenElement || !root.requestFullscreen) return;
   root.requestFullscreen({ navigationUI: "hide" }).catch(() => {});
 }
 touchUi.addEventListener("change", onTouchUi);

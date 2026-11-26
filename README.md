@@ -309,6 +309,10 @@ no address bar. The browser doesn't push it; it's in the browser's menu — Chro
   port) the same, e.g. a fixed address for it in the router. The server is needed for the first start
   and for updates; after that the app also works without it (below).
 - `make_index.py` writes the app description to `.index/manifest.webmanifest`, named after the library.
+- The installed app opens **full screen**: no status bar (clock, battery) and no system buttons, in
+  the catalog too. The reader then needn't ask for fullscreen, so Chrome shows no "swipe to exit"
+  hint. In a browser tab (and in an `http://` home-screen shortcut, which opens in the browser) the
+  first tap on a book goes fullscreen instead, and Chrome shows that hint; a page can't hide it.
 - In the app the catalog is sorted by **Recently opened** by default: the book read last comes first,
   then books not opened yet. The other orders are in the same menu. In a browser tab nothing changes.
 
