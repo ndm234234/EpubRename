@@ -6,9 +6,15 @@
 # Needs python3 (installed on most Linux systems).
 cd "$(dirname "$0")" || exit 1
 exec python3 - "$PWD" <<'PY'
-import functools, http.server, sys, threading, time, urllib.request, webbrowser
+import functools, http.server, os, sys, threading, time, urllib.request, webbrowser
 
 ROOT, IDLE_HOURS = sys.argv[1], 3
+sys.path.insert(0, ROOT)
+import library_sync                       # accounts and reading-place sync, stored in .sync/
+store = library_sync.SyncStore(ROOT)
+def open_browser(url):
+    if not os.environ.get("LIBRARY_NO_BROWSER"):
+        webbrowser.open(url)
 # Ports are tried in order and the first one is normally used: reading places are
 # stored per address, so the same port keeps them. Ports used by other programs are skipped.
 PORTS = range(48765, 48785)
@@ -16,7 +22,11 @@ last_use = time.time()
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/__library_root":   # lets a launcher recognise this library
+        if self.path.startswith("/__sync/"):
+            library_sync.respond(self, store)
+        elif library_sync.is_private(self.path):
+            self.send_error(404)
+        elif self.path == "/__library_root":   # lets a launcher recognise this library
             body = ROOT.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -25,6 +35,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(body)
         else:
             super().do_GET()
+
+    def do_HEAD(self):
+        if library_sync.is_private(self.path):
+            self.send_error(404)
+        else:
+            super().do_HEAD()
+
+    def do_POST(self):
+        if self.path.startswith("/__sync/"):
+            library_sync.respond(self, store)
+        else:
+            self.send_error(405)
+
+    def do_PUT(self):
+        if self.path.split("?")[0] == "/__sync/data":
+            library_sync.respond(self, store)
+        else:
+            self.send_error(405)
 
     def log_message(self, *args):
         global last_use
@@ -41,7 +69,7 @@ server = None
 for port in PORTS:
     url = f"http://127.0.0.1:{port}/index.html"
     if is_this_library(port):             # already running: just open the catalog
-        webbrowser.open(url)
+        open_browser(url)
         sys.exit(0)
     try:
         server = http.server.ThreadingHTTPServer(("127.0.0.1", port),
@@ -58,8 +86,8 @@ def stop_when_idle():
     server.shutdown()
 
 threading.Thread(target=stop_when_idle, daemon=True).start()
-threading.Timer(0.3, webbrowser.open, [url]).start()
-print(f"Library: {url}\nFolder:  {ROOT}\nPress Ctrl+C or close this window to stop.", flush=True)
+threading.Timer(0.3, open_browser, [url]).start()
+print(f"Library: {url}\nFolder:  {ROOT}\nLibrary code: {store.code()}\nPress Ctrl+C or close this window to stop.", flush=True)
 try:
     server.serve_forever()
 except KeyboardInterrupt:
