@@ -9,7 +9,8 @@ descriptions, has search, sorting and grouping by author; clicking a title
 opens the book in the built-in reader (epub.js, offline). Works offline; no internet or server needed.
 
 Written files:  FOLDER/index.html, small cover copies in  FOLDER/.index/covers/
-the reader in  FOLDER/.index/reader/, the "Open Library" launchers and sw.js (offline app) in  FOLDER/
+the reader in  FOLDER/.index/reader/, the "Open Library" launchers (with library_sync.py and
+library-sync.ps1, the account/sync store) and sw.js (offline app) in  FOLDER/
 (they open the catalog through a tiny local web server, so books open with a click).
 EPUB files are only read, never modified.
 Pillow (optional) is used to shrink covers; without it covers are copied as is.

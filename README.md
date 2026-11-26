@@ -147,7 +147,8 @@ Scans `FOLDER` (default: `Out` in the current folder) recursively and writes:
   removed books are cleaned up);
 - `FOLDER/.index/reader/` — the reader (copied from `reader/` next to the script);
 - `FOLDER/Open Library.bat`, `FOLDER/Open Library.sh` and their `(network)` versions —
-  launchers (from `launchers/`).
+  launchers (from `launchers/`), with `library_sync.py` and `library-sync.ps1`, the code
+  behind accounts and sync (below).
 
 EPUB files are only read. Keep `.index/` next to `index.html` when moving the catalog.
 
@@ -178,6 +179,9 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
   reader brings you back to the book's page. `Ctrl`+click / middle click on a cover opens the reader
   in a new tab. With "reduce motion" turned on in the system there is no animation.
 - **Open file** opens any EPUB from disk in the reader.
+- The catalog returns to where you were: after reading it shows the same place in the shelf, and
+  after the browser or app is restarted on a book's page it opens that page again. This is kept
+  on the device only, it is not synced.
 
 ### Reader
 
@@ -270,7 +274,13 @@ For one-click reading, open the catalog with the launcher placed next to `index.
 The launcher starts a tiny web server on this computer only (`localhost:48765`; if another
 program uses that port, the next free one up to 48784) and opens the catalog in the browser. Close the window (or `Ctrl+C`) to stop it; the Linux one
 also stops after 3 hours without use. Running it again while it works just opens the browser.
-Reading places are stored per address, so keep using the launcher to keep them.
+Reading places are stored per address, so keep using the launcher to keep them (or use an
+account to have them on every device, below). The window shows the library code for accounts.
+
+The Windows launchers share `launchers/library-sync.ps1`, the Linux ones `launchers/library_sync.py`;
+both keep the same files in `.sync/`, so a `.bat` and a `.sh` can serve one library. To try the
+sync store on its own: `python3 launchers/library_sync.py --serve FOLDER --port 8000` (this
+computer only, no browser). The manual check for Windows is `tests/windows-sync-checklist.md`.
 
 #### Reading on a phone or tablet (home Wi-Fi)
 
@@ -286,6 +296,7 @@ address to type on the phone, e.g. `http://192.168.1.64:48865/`.
 - Windows asks once whether PowerShell may use the network: allow it for **Private** networks
   (and check the Wi-Fi is set as a Private network). No administrator rights needed.
   On Linux a firewall (`ufw`, `firewalld`) may need to allow the port.
+- The window also shows the **library code** (see Accounts, below).
 - It uses its own ports (48865–48884), so both launchers can run at the same time. Reading places
   and bookmarks are kept separately on each device.
 - The window logs who uses the library: each device (address, computer name when the router
@@ -301,6 +312,36 @@ address to type on the phone, e.g. `http://192.168.1.64:48865/`.
   Open pages report in once a minute; a device that goes quiet for 3 minutes (screen off,
   browser in the background, out of Wi-Fi) is shown as gone, and comes back as connected
   when it reports in again. Refused outside addresses are logged once each.
+
+#### Accounts: the same place on every device
+
+Optional. Without an account everything works as before, each device on its own. With one, your
+phone, tablet and computer share what you read. The account lives in the library itself, on the
+computer that runs the launcher; nothing goes to the internet.
+
+- **Create an account** on any device: the **account button** in the catalog's header, then a
+  login, a password and the **library code**. The code (four words and two digits, like
+  `river-paper-cold-moon-47`) is printed in the launcher window at every start and kept in
+  `.sync/code.txt` in the library folder; it stops strangers who reach the address from making
+  accounts. On the other devices sign in with the same login and password.
+- **What is synced:** reading places, bookmarks (with their names and notes), the recently opened
+  books, and the reader and catalog settings, kept separately for each kind of device (phone,
+  tablet, computer), since what suits one screen doesn't suit another.
+- **What is not synced:** the books themselves and the offline copies on a device.
+- **Offline is fine:** changes are kept on the device and sent when the library is reachable again.
+  The reader syncs when a book is opened, when you come back to the page and when you leave it;
+  while you read, changes go out at most once every 30 seconds. Changes made on two devices are
+  merged, and a deleted bookmark stays deleted.
+- **Use the https address.** The account button is hidden on a plain `http://192.168.…` address:
+  browsers allow it only on https (or on `localhost`, the same computer). Put the library behind
+  https as for installing the app, above.
+- **Wrong codes and passwords are slowed down:** after 5 wrong in a row the library answers
+  "try later" for a minute, longer with each further mistake.
+- **Forgotten password:** the owner deletes `.sync/accounts/<login>.json` in the library folder.
+  The person registers again with the same login and the library code, and gets their data back
+  (it is kept in `.sync/data/<login>.json`).
+- **Back up `.sync/`** with the library: it holds the code, the accounts and everyone's data. It is
+  never served to the network, `make_server.py` never touches it, and it is in `.gitignore`.
 
 #### Installing as an app
 
@@ -526,6 +567,16 @@ FULL=1 tests/reader/run.sh "Jane Doe/Jane Doe - A Quiet Harbour.epub"   # every 
 
 Several books run side by side; the output keeps only failures and each check's verdict.
 `W`/`H` set the screen, `TOUCH=0` a desktop, `SHOTS=dir` saves screenshots.
+
+## Sync checks
+
+```bash
+python3 -m pytest -q tests                     # servers, merge, launchers
+node --test 'tests/sync/*.test.mjs'            # the browser side of sync
+python3 tests/sync_contract.py http://host:port FOLDER/.sync/code.txt   # a running server, any launcher
+```
+
+The reader checks above (`tests/reader/run.sh "<book>"`) cover the reader itself.
 
 ## Notes and limitations
 
