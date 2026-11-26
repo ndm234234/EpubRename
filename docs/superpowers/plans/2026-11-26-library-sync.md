@@ -216,10 +216,35 @@ The script builds not only the catalog but the whole served library (reader, lau
 - [ ] **Step 3: Run** the whole set: `tests/reader/run.sh "<book>" "<book2>"`, `python3 -m pytest -q tests`, `node --test tests/sync`.
 - [ ] **Step 4: Commit**.
 
-### Task 9: Docs and rebuild
+### Task 9: The catalog returns to where you were (local, not synced)
+
+Independent of sync; may be done at any point after Task 0. Today the catalog keeps its scroll and search only when it comes back through the browser's history. Two cases lose the place: (1) the installed app's "Recently opened" sort re-renders after reading, the order changes, and the same scroll height shows other books; (2) the app opens straight on a book (restart), "Catalog" then loads a fresh catalog at the top.
 
 **Files:**
-- Modify: `README.md` (reader section: accounts and sync; launchers: the library code in the window, password reset by deleting `.sync/accounts/<login>.json`, use the https address, back up `.sync/`), `make_server.py` docstring/help if it lists launcher files, `.gitignore` (`.sync/`)
+- Modify: `make_server.py` (catalog template script)
+- Test: `tests/reader/catalog-place.mjs`
+
+**Interfaces:**
+- Stored per device in `localStorage["<PREFS>:place"]` (`<PREFS>` is `epubIndex` or `epubIndex:app`, as for the catalog's other settings): `{href, offset, q, time}` — the book row at the top of the screen (its reader link), its distance from the top of the window, the search text.
+- Written on scroll (at most every 300 ms), on search input, and on `pagehide`.
+- Restore:
+  - after any re-render of the list (`render()`), scroll so that the stored book row is at the same `offset`. If the row is gone (filtered out or removed), keep the scroll as is.
+  - on a fresh load that is not a back/forward navigation (`performance.getEntriesByType("navigation")[0].type !== "back_forward"`): put back `q` in the search field, render, then restore as above.
+- Not synced between devices (each catalog has its own screen); never written into the sync document.
+
+- [ ] **Step 1: Write the failing checks** (headless Chrome, phone, installed-app mode stubbed through `matchMedia` as in earlier checks):
+  - "Recently opened": scroll to the 15th book, note the book at the top, open it, read 3 pages, go back → the same book row is at the same height (±4 px) or, if that book is the one just read and moved first, the list is at its top with it first;
+  - open the catalog, type a search, scroll, open a book; then load the reader URL in a fresh tab (no catalog in history) and press "Catalog" → the search text is back and the same book row is at the top (±4 px);
+  - the plain browser-tab case keeps working as today (back button, same scroll).
+- [ ] **Step 2: Run** `node tests/reader/catalog-place.mjs <base>` — FAIL on the first two.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** it and `tests/reader/run.sh "<book>"` — `ALL OK`.
+- [ ] **Step 5: Commit**.
+
+### Task 10: Docs and rebuild
+
+**Files:**
+- Modify: `README.md` (catalog: it returns to where you were; reader section: accounts and sync; launchers: the library code in the window, password reset by deleting `.sync/accounts/<login>.json`, use the https address, back up `.sync/`), `make_server.py` docstring/help if it lists launcher files, `.gitignore` (`.sync/`)
 
 - [ ] **Step 1:** Write the README parts (fictional names only).
 - [ ] **Step 2:** `python3 make_server.py Out` — the library gets `library_sync.py`, `library-sync.ps1` and the new launchers.
