@@ -368,3 +368,32 @@ test('sendPlaceNow: keepalive POST, never throws', async () => {
   S.sendPlaceNow(BOOK, {});
   await flush();
 });
+
+test('available: secure http(s) pages only, never file://', () => {
+  const S = env();
+  globalThis.location = { protocol: 'https:' };
+  assert.equal(S.available(), true);
+  globalThis.location = { protocol: 'http:' };
+  assert.equal(S.available(), true);
+  globalThis.isSecureContext = false;
+  assert.equal(S.available(), false);
+  globalThis.isSecureContext = true;
+  globalThis.location = { protocol: 'file:' };
+  assert.equal(S.available(), false);
+  delete globalThis.location;
+});
+
+test('signedIn and lastSync', async () => {
+  let S = env({ signedIn: false });
+  assert.equal(S.signedIn(), false);
+  assert.equal(S.lastSync(), null);
+  S = env();
+  assert.equal(S.signedIn(), true);
+  const before = Date.now();
+  assert.equal(await S.syncNow(), 'ok');
+  assert.ok(S.lastSync() >= before);
+  srv.token = 'other';   // the server forgot this device: 401
+  assert.equal(await S.syncNow(), 'signed-out');
+  assert.equal(S.signedIn(), false);
+  assert.deepEqual(S.account(), { login: 'ann' });
+});

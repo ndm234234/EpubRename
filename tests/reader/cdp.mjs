@@ -4,11 +4,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export async function launch({ width = 390, height = 844, touch = true } = {}) {
+export async function launch({ width = 390, height = 844, touch = true, args = [] } = {}) {
   const profile = mkdtempSync(join(tmpdir(), "epub-reader-test-"));
   const port = 9300 + Math.floor(Math.random() * 500);
   const proc = spawn("google-chrome", ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
-    "--no-first-run", "--no-default-browser-check", "--disable-gpu", "about:blank"], { stdio: "ignore", detached: true });
+    "--no-first-run", "--no-default-browser-check", "--disable-gpu", ...args, "about:blank"], { stdio: "ignore", detached: true });
   // the browser and all its helper processes, at once (a closing browser would write the profile again)
   const kill = () => { try { process.kill(-proc.pid, "SIGKILL"); } catch {} };
   process.on("exit", () => {   // the browser and its throwaway profile go with the check

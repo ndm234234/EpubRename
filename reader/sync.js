@@ -52,7 +52,12 @@
     return lsSet(k, JSON.stringify(val));
   }
 
-  function available() { return !!globalThis.isSecureContext; }
+  // Secure pages only (https, localhost); and only from a server: file:// pages count as secure too
+  function available() {
+    var loc = globalThis.location;
+    if (loc && !/^https?:$/.test(loc.protocol)) return false;
+    return !!globalThis.isSecureContext;
+  }
 
   function deviceKind() {
     try {
@@ -75,6 +80,8 @@
     return a ? { login: a.login } : null;
   }
   function signedIn() { var a = readAccount(); return !!(a && a.token); }
+  // When the last sync finished (ms), or null
+  function lastSync() { var t = Number(lsGet(K_LAST)); return lsGet(K_LAST) !== null && isFinite(t) && t > 0 ? t : null; }
 
   function call(method, url, token, body, signal) {
     var headers = { 'Content-Type': 'application/json' };
@@ -291,7 +298,7 @@
   function onRemoteChange(fn) { if (typeof fn === 'function') listeners.push(fn); }
 
   globalThis.LibrarySync = {
-    available: available, deviceKind: deviceKind, account: account,
+    available: available, deviceKind: deviceKind, account: account, signedIn: signedIn, lastSync: lastSync,
     register: register, login: login, logout: logout,
     collectLocal: collectLocal, applyLocal: applyLocal, setMarkOrder: setMarkOrder,
     syncNow: syncNow, changed: changed, sendPlaceNow: sendPlaceNow, onRemoteChange: onRemoteChange
