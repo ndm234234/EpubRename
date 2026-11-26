@@ -16,7 +16,9 @@ On-disk format, shared with the PowerShell twin:
   * device token: 32 random bytes, sent to the device as a 64-char lower-case hex string. The
     stored token hash is SHA-256 (lower-case hex) of that hex string's ASCII bytes (the 64
     characters themselves, not the 32 raw bytes). The token travels as `Authorization: Bearer <hex>`.
-  * every JSON file is UTF-8; writes go to a temp file in the same folder, then os.replace.
+  * every file is UTF-8 without BOM; writes go to a temp file in the same folder, then os.replace.
+    Readers tolerate a BOM (PowerShell 5.1 writes one). A missing file means "absent"; an
+    unparsable data/account file is an error (500) and is never overwritten.
 
 Throttle state (wrong codes, wrong passwords) lives in memory only.
 Dev server: python3 launchers/library_sync.py --serve ROOT --port N  (127.0.0.1, no browser).
@@ -34,11 +36,12 @@ import sys
 import threading
 import time
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote
 
 ITERATIONS = 200000
 BODY_LIMIT = 8 * 1024 * 1024
 LOGIN_RE = re.compile(r"[a-z0-9._-]{2,32}")
+RESERVED = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
 TOKEN_RE = re.compile(r"[0-9a-f]{64}")
 JSON_TYPE = "application/json; charset=utf-8"
 FREE_WRONG = 5          # wrong tries in a row before the pause starts
@@ -49,21 +52,40 @@ WORDS = """
 able acid aged also arch area army atom aunt auto away baby back bake ball band bank barn base bath
 bead beam bean bear beat bell belt bend bird bite blue boat body bold bolt bone book boot born bowl
 brave bread brick bridge brook broom brown bulb bush cabin cake calm camp candy cape card care cart
-cave chain chair chalk charm chess chief city clay clean clear cliff clock cloud coal coast coat coin
-cold cone cook cool copper coral cord corn cove craft crane crisp crown cube curl dark dawn deep deer
-desk dish dock door dove draw dream drum dune dust eagle earth east easy edge elm ember end fair fall
-farm fast fawn fern field fig fine fire fish flag flame flat fleet flint flour foam fog fold forest
-fork fox frame frost fruit gate gift glad glass glen glow goat gold grain grape grass gray green grove
-gull hall hand harbor hare hat hawk hay heart hedge hill honey hood hope horn house hush ice inch ink
-iron isle ivory jade jar jazz jolly joy keen kettle key kind king kite knot lake lamp lane lark leaf
-lemon lily lime linen lion lock log loom lull lunar maple marsh mast meadow melon mill mint mist moon
-moss moth mouse mud nest net night noble north nut oak oat ocean olive orange otter owl oyster paint
-pale palm paper path pearl pebble pine plain plum pond pony pool port quail quartz queen quick quiet
-quilt rain raven reed ribbon ridge ring river road robin rock roof root rope rose round ruby sage sail
-salt sand seal shade shell shore silk silver sky slate snow soft song south spark spice spoon spring
-star steam stone storm straw stream sugar summer sun swan swift tale tea thorn tide tiger tile timber
-tower trail tree tulip twig vale velvet violet wagon warm wave wheat willow wind winter wolf wood
-wren yard yarn yellow zinc
+cave chain chair chalk charm chess chief city clay clean clear cliff clock cloud coal coast coat
+coin cold cone cook cool copper coral cord corn cove craft crane crisp crown cube curl dark dawn
+deep deer desk dish dock door dove draw dream drum dune dust eagle earth east easy edge elm ember
+end fair fall farm fast fawn fern field fig fine fire fish flag flame flat fleet flint flour foam
+fog fold forest fork fox frame frost fruit gate gift glad glass glen glow goat gold grain grape
+grass gray green grove gull hall hand harbor hare hat hawk hay heart hedge hill honey hood hope horn
+house hush ice inch ink iron isle ivory jade jar jazz jolly joy keen kettle key kind king kite knot
+lake lamp lane lark leaf lemon lily lime linen lion lock log loom lull lunar maple marsh mast meadow
+melon mill mint mist moon moss moth mouse mud nest net night noble north nut oak oat ocean olive
+orange otter owl oyster paint pale palm paper path pearl pebble pine plain plum pond pony pool port
+quail quartz queen quick quiet quilt rain raven reed ribbon ridge ring river road robin rock roof
+root rope rose round ruby sage sail salt sand seal shade shell shore silk silver sky slate snow soft
+song south spark spice spoon spring star steam stone storm straw stream sugar summer sun swan swift
+tale tea thorn tide tiger tile timber tower trail tree tulip twig vale velvet violet wagon warm wave
+wheat willow wind winter wolf wood wren yard yarn yellow zinc acorn amber angle apple apron arrow
+aster badge basil basket beach beacon berry birch blade blank blaze bloom blossom bonnet border
+branch breeze bright bronze bubble bucket budget butter button cactus camel canal candle canyon
+carpet castle cedar cellar cherry cinder circle clover cobble comet cotton cradle crest crystal
+cypress daisy delta desert diary dinner dolphin dragon drift echo elder engine fabric falcon feather
+ferry fiddle finch fjord flower forge fossil fountain garden garlic ginger glider granite gravel
+guitar hammer harvest hazel helmet heron hollow hornet island jacket jasmine jungle kernel kitten
+ladder lagoon lantern laurel lilac linden lizard lotus magnet mango marble meteor mirror monkey
+mosaic nectar needle nickel noodle novel nutmeg orchid oxygen paddle palace panda parrot pasture
+pepper petal piano pillow planet pocket poppy prairie pumpkin puzzle rabbit radish rafter ranch
+rapids reef rocket saddle saffron salmon sapphire satin scarlet shadow sheep shield signal sketch
+sparrow spider spruce square stable statue sunset table tassel temple thistle thunder ticket toast
+tomato trumpet tunnel turnip turtle umbrella valley vanilla village walnut walrus wander weasel
+whale whisper window wizard wonder yacht zebra zephyr anchor arctic autumn badger banjo barrel
+beetle bishop bobcat bottle bounty buckle cabbage cannon carrot ceramic chapel cheese chimney cicada
+citrus cobweb cricket cuckoo currant dahlia dapple dingo dusk ermine fennel ferret firefly flute
+gazelle gecko glacier goblet gopher gourd hammock heather hickory icicle jackal jigsaw kayak koala
+lavender lichen locket lullaby mallow maroon meringue minnow mulberry muffin nutria oatmeal oriole
+osprey paprika pelican penguin pigeon pistol plover pretzel quince radar raisin rhubarb sequoia
+shuttle skiff sorrel starling sundial tangerine teapot thimble toffee vessel violin wafer whistle
 """.split()
 
 _ZERO_ACCOUNT_SALT = b"\0" * 16
@@ -71,7 +93,7 @@ _ZERO_ACCOUNT_SALT = b"\0" * 16
 
 def is_private(url_path):
     """True if any (decoded) segment of the URL path is `.sync`."""
-    path = unquote(urlsplit(url_path).path)
+    path = unquote(re.split(r"[?#]", url_path, maxsplit=1)[0])
     return any(seg.lower().rstrip(". ") == ".sync" for seg in re.split(r"[/\\]", path))
 
 
@@ -87,31 +109,60 @@ def _is_number(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
+class Corrupt(Exception):
+    """A stored file exists but can't be used; it is reported (500) and never overwritten."""
+
+
 class _Throttle:
-    """Counts wrong tries per key; after FREE_WRONG in a row, answers 'wait' with a doubling pause."""
+    """Counts wrong tries per key; after FREE_WRONG in a row, pauses with a doubling delay.
+
+    begin() reserves an attempt atomically (so parallel requests can't all slip in before the
+    first one is judged); each begun attempt must end with right(), wrong() or release().
+    """
 
     def __init__(self):
-        self.state = {}      # key -> [wrong count, locked until]
+        self.state = {}      # key -> [wrong count, locked until, attempts in flight]
         self.mutex = threading.Lock()
 
-    def wait(self, key, now):
+    def begin(self, key, now):
+        """0 if the attempt may go on (and is reserved), else the seconds to wait."""
         with self.mutex:
-            s = self.state.get(key)
-            return max(0.0, s[1] - now) if s else 0.0
+            s = self.state.setdefault(key, [0, 0.0, 0])
+            if s[1] > now:
+                return s[1] - now
+            slots = FREE_WRONG - s[0] if s[0] < FREE_WRONG else 1
+            if s[2] >= slots:
+                return 1.0
+            s[2] += 1
+            return 0
 
-    def wrong(self, key, now):
+    def _end(self, key, wrong, now=0):
         with self.mutex:
-            s = self.state.setdefault(key, [0, 0.0])
-            s[0] += 1
-            if s[0] >= FREE_WRONG:
-                s[1] = now + min(FIRST_PAUSE * 2 ** (s[0] - FREE_WRONG), MAX_PAUSE)
-            if len(self.state) > 10000:   # forget finished pauses of keys that never reached one
-                for k in [k for k, v in self.state.items() if v[1] < now and k != key and v[0] < FREE_WRONG]:
+            s = self.state.setdefault(key, [0, 0.0, 0])
+            s[2] = max(0, s[2] - 1)
+            if wrong is None:
+                pass
+            elif wrong:
+                s[0] += 1
+                if s[0] >= FREE_WRONG:
+                    s[1] = now + min(FIRST_PAUSE * 2 ** (s[0] - FREE_WRONG), MAX_PAUSE)
+            else:
+                s[0], s[1] = 0, 0.0
+            if s[0] == 0 and s[2] == 0:
+                del self.state[key]
+            elif len(self.state) > 10000:   # forget keys whose pause is over and that never reached one
+                for k in [k for k, v in self.state.items()
+                          if k != key and v[2] == 0 and v[1] < now and v[0] < FREE_WRONG]:
                     del self.state[k]
 
+    def wrong(self, key, now):
+        self._end(key, True, now)
+
     def right(self, key):
-        with self.mutex:
-            self.state.pop(key, None)
+        self._end(key, False)
+
+    def release(self, key):
+        self._end(key, None)
 
 
 class SyncStore:
@@ -125,14 +176,14 @@ class SyncStore:
     def code(self):
         path = self.dir / "code.txt"
         try:
-            text = path.read_text(encoding="utf-8").strip()
+            text = path.read_text(encoding="utf-8-sig").strip()
             if text:
                 return text
         except OSError:
             pass
         with self._locked():
             try:
-                text = path.read_text(encoding="utf-8").strip()
+                text = path.read_text(encoding="utf-8-sig").strip()
                 if text:
                     return text
             except OSError:
@@ -181,19 +232,42 @@ class SyncStore:
                 tmp.unlink()
 
     def _read_json(self, path, default=None):
+        """Parsed file; `default` only if it does not exist; a file that can't be parsed raises Corrupt."""
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            text = path.read_text(encoding="utf-8-sig")
+        except FileNotFoundError:
             return default
+        try:
+            return json.loads(text)
+        except ValueError:
+            raise Corrupt(path.name) from None
+
+    def _read_account(self, login):
+        """The account dict, None if absent; Corrupt if the file is unusable."""
+        acc = self._read_json(self._account_path(login))
+        if acc is None:
+            return None
+        if not (isinstance(acc, dict) and isinstance(acc.get("tokens"), list)
+                and isinstance(acc.get("iterations"), int) and not isinstance(acc.get("iterations"), bool)
+                and acc["iterations"] > 0 and isinstance(acc.get("hash"), str) and acc["hash"].isascii()
+                and isinstance(acc.get("salt"), str)):
+            raise Corrupt(f"{login}.json")
+        try:
+            bytes.fromhex(acc["salt"])
+        except ValueError:
+            raise Corrupt(f"{login}.json") from None
+        return acc
 
     def _account_path(self, login):
         return self.dir / "accounts" / f"{login}.json"
 
     def _read_data(self, login):
         d = self._read_json(self.dir / "data" / f"{login}.json")
-        if isinstance(d, dict) and isinstance(d.get("version"), int):
+        if d is None:
+            return {"version": 0, "doc": None}
+        if isinstance(d, dict) and isinstance(d.get("version"), int) and not isinstance(d["version"], bool):
             return d
-        return {"version": 0, "doc": None}
+        raise Corrupt(f"{login}.json")
 
     def _write_data(self, login, data):
         self._write(self.dir / "data" / f"{login}.json", data)
@@ -212,9 +286,13 @@ class SyncStore:
             return None, None
         want = _hash_token(token)
         for path in sorted((self.dir / "accounts").glob("*.json")):
-            acc = self._read_json(path)
+            try:
+                acc = self._read_json(path)
+            except Corrupt:
+                continue   # someone else's broken file must not lock everybody out
             if isinstance(acc, dict) and isinstance(acc.get("tokens"), list) \
-                    and any(hmac.compare_digest(want, str(t)) for t in acc["tokens"]):
+                    and any(isinstance(t, str) and t.isascii() and hmac.compare_digest(want, t)
+                            for t in acc["tokens"]):
                 return path.stem, token
         return None, None
 
@@ -238,7 +316,7 @@ class SyncStore:
         return obj if isinstance(obj, dict) else None
 
     def handle(self, method, path, headers, body):
-        path = urlsplit(path).path
+        path = re.split(r"[?#]", path, maxsplit=1)[0]
         routes = {"/__sync/register": "POST", "/__sync/login": "POST", "/__sync/logout": "POST",
                   "/__sync/place": "POST", "/__sync/data": ("GET", "PUT")}
         if path not in routes:
@@ -249,7 +327,12 @@ class SyncStore:
         if len(body) > BODY_LIMIT:
             return self._err(413, "too large")
         name = path.rsplit("/", 1)[1]
-        return getattr(self, "_" + name)(method, headers, body)
+        try:
+            return getattr(self, "_" + name)(method, headers, body)
+        except Corrupt as e:
+            return self._err(500, "corrupt file", file=str(e))
+        except Exception:
+            return self._err(500, "server error")
 
     def _new_token(self, acc):
         token = secrets.token_hex(32)
@@ -262,7 +345,8 @@ class SyncStore:
         if obj is None:
             return None
         login, password = obj.get("login"), obj.get("password")
-        if not isinstance(login, str) or not LOGIN_RE.fullmatch(login.lower()):
+        if not isinstance(login, str) or not LOGIN_RE.fullmatch(login.lower()) \
+                or login.lower().split(".")[0] in RESERVED:   # reserved device names on Windows
             return None
         if not isinstance(password, str) or not 0 < len(password) <= 1024:
             return None
@@ -274,13 +358,18 @@ class SyncStore:
             return self._err(400, "bad request")
         obj, login, password = cred
         now = self._now()
-        wait = self._code_throttle.wait("code", now)
+        wait = self._code_throttle.begin("code", now)
         if wait > 0:
             return self._throttled(wait)
-        given = obj.get("code")
-        want = self.code().strip().lower()
-        if not isinstance(given, str) or not hmac.compare_digest(
-                given.strip().lower().encode("utf-8"), want.encode("utf-8")):
+        try:
+            given = obj.get("code")
+            want = self.code().strip().lower()
+            good = isinstance(given, str) and hmac.compare_digest(
+                given.strip().lower().encode("utf-8"), want.encode("utf-8"))
+        except BaseException:
+            self._code_throttle.release("code")
+            raise
+        if not good:
             self._code_throttle.wrong("code", now)
             return self._err(403, "wrong code")
         self._code_throttle.right("code")
@@ -300,26 +389,28 @@ class SyncStore:
             return self._err(400, "bad request")
         _, login, password = cred
         now = self._now()
-        wait = self._pw_throttle.wait(login, now)
+        wait = self._pw_throttle.begin(login, now)
         if wait > 0:
             return self._throttled(wait)
-        acc = self._read_json(self._account_path(login))
-        if isinstance(acc, dict) and isinstance(acc.get("salt"), str) and isinstance(acc.get("hash"), str):
-            iterations = acc.get("iterations") if isinstance(acc.get("iterations"), int) else ITERATIONS
-            ok = hmac.compare_digest(_hash_password(password, bytes.fromhex(acc["salt"]), iterations),
-                                     acc["hash"])
-        else:
-            _hash_password(password, _ZERO_ACCOUNT_SALT, ITERATIONS)   # same cost for unknown logins
-            ok = False
+        try:
+            acc = self._read_account(login)
+            if acc is not None:
+                ok = hmac.compare_digest(
+                    _hash_password(password, bytes.fromhex(acc["salt"]), acc["iterations"]), acc["hash"])
+            else:
+                _hash_password(password, _ZERO_ACCOUNT_SALT, ITERATIONS)   # same cost for unknown logins
+                ok = False
+        except BaseException:
+            self._pw_throttle.release(login)
+            raise
         if not ok:
             self._pw_throttle.wrong(login, now)
             return self._err(401, "unauthorized")
         self._pw_throttle.right(login)
         with self._locked():
-            acc = self._read_json(self._account_path(login))
-            if not isinstance(acc, dict):
+            acc = self._read_account(login)
+            if acc is None:
                 return self._err(401, "unauthorized")
-            acc.setdefault("tokens", [])
             token = self._new_token(acc)
             self._write(self._account_path(login), acc)
         return self._json(200, {"token": token})
@@ -394,7 +485,10 @@ def respond(handler, store):
         handler.close_connection = True   # the unread body would corrupt a kept-alive connection
     else:
         body = handler.rfile.read(length) if length else b""
-        status, ctype, out = store.handle(handler.command, handler.path, dict(handler.headers.items()), body)
+        try:
+            status, ctype, out = store.handle(handler.command, handler.path, dict(handler.headers.items()), body)
+        except Exception:
+            status, ctype, out = store._err(500, "server error")
     handler.send_response(status)
     if status != 204:
         handler.send_header("Content-Type", ctype)

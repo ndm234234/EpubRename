@@ -98,7 +98,7 @@ def test_login_taken_409_case_insensitive(store):
     assert register(store, "aNN")[0] == 409
 
 
-@pytest.mark.parametrize("login", ["a", "x" * 33, "../x", "a/b", "a b", ""])
+@pytest.mark.parametrize("login", ["a", "x" * 33, "../x", "a/b", "a b", "", "con", "NUL", "aux", "prn", "com1", "lpt9", "con.x", "nul.txt.y"])
 def test_bad_logins_400(store, login):
     assert register(store, login)[0] == 400
 
@@ -210,6 +210,9 @@ def test_is_private():
     assert is_private("/%2Esync/x")
     assert is_private("/a/.sync")
     assert is_private("/a%2F.sync/x")
+    assert is_private("//.sync/x")
+    assert is_private("/.sync?x=1")
+    assert is_private("/.sync#a")
     assert not is_private("/.index/reader/sync.js")
     assert not is_private("/book.sync.txt")
 
@@ -225,5 +228,88 @@ def test_passwords_and_tokens_not_stored_plain(store, tmp_path):
 
 def test_word_list_is_big_and_distinct():
     from library_sync import WORDS
-    assert len(WORDS) >= 256 and len(set(WORDS)) == len(WORDS)
+    assert len(WORDS) >= 400 and len(set(WORDS)) == len(WORDS)
     assert all(re.fullmatch(r"[a-z]+", w) for w in WORDS)
+
+
+def test_concurrent_wrong_logins_cannot_beat_the_throttle(store):
+    import threading
+    register(store, "ann")
+    statuses = []
+
+    def go():
+        statuses.append(call(store, "POST", "/__sync/login", {"login": "ann", "password": "bad"})[0])
+
+    threads = [threading.Thread(target=go) for _ in range(20)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert statuses.count(401) <= 5 and statuses.count(401) + statuses.count(429) == 20
+
+
+def test_concurrent_wrong_codes_cannot_beat_the_throttle(store):
+    import threading
+    store.code()
+    statuses = []
+
+    def go():
+        statuses.append(register(store, "bob", code="nope")[0])
+
+    threads = [threading.Thread(target=go) for _ in range(20)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert statuses.count(403) <= 5 and statuses.count(403) + statuses.count(429) == 20
+
+
+def test_bom_files_are_read(store, tmp_path):
+    token = new_token(store)
+    d = tmp_path / ".sync"
+    (d / "data").mkdir(exist_ok=True)
+    (d / "data" / "ann.json").write_bytes(b"\xef\xbb\xbf" + json.dumps({"version": 3, "doc": {"v": 1}}).encode())
+    assert call(store, "GET", "/__sync/data", token=token) == (200, {"version": 3, "doc": {"v": 1}})
+    acc = d / "accounts" / "ann.json"
+    acc.write_bytes(b"\xef\xbb\xbf" + acc.read_bytes())
+    assert call(store, "POST", "/__sync/login", {"login": "ann", "password": "pw123456"})[0] == 200
+    (d / "code.txt").write_bytes(b"\xef\xbb\xbfriver-paper-cold-moon-47\r\n")
+    assert store.code() == "river-paper-cold-moon-47"
+    assert register(store, "bob", code="river-paper-cold-moon-47")[0] == 200
+
+
+def test_corrupt_data_file_is_500_and_never_overwritten(store, tmp_path):
+    token = new_token(store)
+    f = tmp_path / ".sync" / "data" / "ann.json"
+    f.parent.mkdir(exist_ok=True)
+    f.write_text("{broken", encoding="utf-8")
+    assert call(store, "GET", "/__sync/data", token=token)[0] == 500
+    assert call(store, "PUT", "/__sync/data", {"version": 0, "doc": {"v": 1}}, token)[0] == 500
+    assert place(store, token, "b1", "c1", 5) == 500
+    assert f.read_text(encoding="utf-8") == "{broken"
+
+
+def test_corrupt_account_file_is_500_not_a_crash(store, tmp_path):
+    new_token(store)
+    acc = tmp_path / ".sync" / "accounts" / "ann.json"
+    acc.write_text(json.dumps({"login": "ann", "salt": "zz", "hash": "\u00e9", "iterations": 1, "tokens": []}))
+    assert call(store, "POST", "/__sync/login", {"login": "ann", "password": "pw123456"})[0] == 500
+
+
+def test_respond_turns_exceptions_into_500(store):
+    class Boom:
+        def handle(self, *a):
+            raise RuntimeError("x")
+
+        _err = staticmethod(SyncStore._err.__get__(store))
+
+    class Fake:
+        command, path = "GET", "/__sync/data"
+        headers = {}
+        rfile = io.BytesIO(b"")
+        wfile = io.BytesIO()
+        sent = []
+
+        def send_response(self, code): self.sent.append(code)
+        def send_header(self, k, v): pass
+        def end_headers(self): pass
+
+    h = Fake()
+    respond(h, Boom())
+    assert h.sent == [500]
