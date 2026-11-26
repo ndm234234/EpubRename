@@ -40,6 +40,12 @@ $global:SyncJsonRe = [regex]::new(
   '|(?<n>-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|NaN|-?Infinity)' +
   '|(?<p>[{}\[\]:,])|(?<l>true|false|null))',
   [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+# The stored data file as both servers write it, version first: {"version": N, "doc": {...}}. Its
+# head gives the version without parsing the whole document (slow in PowerShell for a big account)
+$global:SyncDataHeadRe = [regex]::new(
+  '\A\{"version": (0|[1-9][0-9]*), "doc": \{', [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+$global:SyncDataTailRe = [regex]::new(
+  '\}\}[ \t\n\r]*\z', [Text.RegularExpressions.RegexOptions]::CultureInvariant)
 
 # The same list as WORDS in library_sync.py (a test checks they match)
 $global:SyncWords = (@'
@@ -566,6 +572,23 @@ function Read-SyncData($store, [string]$login) {
   return @{ Text = $text; Version = (ConvertTo-SyncBigInt $v.R); Doc = (Get-SyncMember $node 'doc') }
 }
 
+# @{ Text; Version } of the stored data without parsing the document when the file has the form
+# both servers write (a head and a tail check only); any other file is parsed in full by
+# Read-SyncData (Corrupt, a 500, if it can't be). For GET and PUT: a file cut short fails the tail
+# check; a file broken in the middle is served as is (the browser's JSON.parse refuses it, so no
+# device merges with it or sends its version back), and a PUT of that version replaces it.
+function Read-SyncDataQuick($store, [string]$login) {
+  $name = $login + '.json'
+  $bytes = Read-SyncBytes (Get-SyncDataPath $store $login)
+  if ($null -eq $bytes) { return @{ Text = '{"version": 0, "doc": null}'; Version = (ConvertTo-SyncBigInt '0') } }
+  try { $text = ConvertFrom-SyncUtf8 $bytes } catch { throw (New-SyncCorrupt $name) }
+  $m = $global:SyncDataHeadRe.Match($text)
+  if ($m.Success -and $global:SyncDataTailRe.IsMatch($text)) {
+    return @{ Text = $text; Version = (ConvertTo-SyncBigInt $m.Groups[1].Value) }
+  }
+  return (Read-SyncData $store $login)
+}
+
 function Write-SyncData($store, [string]$login, $version, [string]$rawDoc) {
   $v = $version.ToString([Globalization.CultureInfo]::InvariantCulture)
   Write-SyncFile (Get-SyncDataPath $store $login) ('{"version": ' + $v + ', "doc": ' + $rawDoc + '}')
@@ -792,7 +815,7 @@ function Invoke-SyncData($store, [string]$method, [hashtable]$headers, [byte[]]$
   if ($method -ceq 'GET') {
     $auth = Get-SyncAuth $store $headers
     if ($null -eq $auth) { return (New-SyncError 401 'unauthorized') }
-    $current = Read-SyncData $store $auth.Login
+    $current = Read-SyncDataQuick $store $auth.Login
     return (New-SyncAnswer 200 $current.Text)
   }
   $lock = Enter-SyncLock $store
@@ -805,7 +828,7 @@ function Invoke-SyncData($store, [string]$method, [hashtable]$headers, [byte[]]$
     if ($null -eq $b -or -not (Test-SyncInt $version) -or $null -eq $doc -or $doc.K -cne 'o') {
       return (New-SyncError 400 'bad request')
     }
-    $current = Read-SyncData $store $auth.Login
+    $current = Read-SyncDataQuick $store $auth.Login
     $given = ConvertTo-SyncBigInt $version.R
     if ([System.Numerics.BigInteger]::Compare($given, $current.Version) -ne 0) { return (New-SyncAnswer 409 $current.Text) }
     $next = [System.Numerics.BigInteger]::Add($current.Version, [System.Numerics.BigInteger]::One)

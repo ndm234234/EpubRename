@@ -4,6 +4,7 @@ Cheap guards only: Windows PowerShell 5.1 syntax, ASCII, the shared word list, b
 and that both .bat files load library-sync.ps1 and hide .sync.
 """
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -118,3 +119,45 @@ def test_bat_uses_the_sync_store(path):
     assert "Test-SyncPrivate $" in code and "Test-SyncPrivateFile $root $path" in code
     assert "Invoke-SyncRequest $store" in code and "Library code" in code and "Get-SyncCode $store" in code
     assert "$SyncBodyLimit" in code
+
+
+def _ps_regex(text, name):
+    """A [regex]::new('...') pattern of library-sync.ps1, as a Python regex (\\z is \\Z there)."""
+    m = re.search(rf"\$global:{name} = \[regex\]::new\(\s*'((?:[^']|'')*)'", text)
+    assert m, name
+    return re.compile(m.group(1).replace("''", "'").replace(r"\z", r"\Z"))
+
+
+def test_ps1_reads_the_stored_version_without_parsing_the_document(tmp_path):
+    # GET and PUT read the version from the head of the stored file (both servers write
+    # {"version": N, "doc": {...}}, version first); anything else is parsed in full
+    text = PS1.read_text(encoding="ascii")
+    head, tail = _ps_regex(text, "SyncDataHeadRe"), _ps_regex(text, "SyncDataTailRe")
+    assert """('{"version": ' + $v + ', "doc": ' + $rawDoc + '}')""" in text   # the PowerShell writer
+    data = re.search(r"(?ms)^function Invoke-SyncData\b.*?^}", text).group(0)
+    assert "Read-SyncDataQuick $store" in data and "Read-SyncData $store" not in data
+    place = re.search(r"(?ms)^function Invoke-SyncPlace\b.*?^}", text).group(0)
+    assert "Read-SyncData $store" in place   # the place changes the document: parsed (and checked) in full
+    quick = re.search(r"(?ms)^function Read-SyncDataQuick\b.*?^}", text).group(0)
+    assert "Read-SyncData $store $login" in quick   # the fallback
+    # the Python writer: version first too, after a PUT and after a place
+    from library_sync import SyncStore
+    store = SyncStore(tmp_path)
+    _, _, out = store.handle("POST", "/__sync/register", {}, json.dumps(
+        {"login": "ann", "password": "pw123456", "code": store.code()}).encode())
+    auth = {"Authorization": "Bearer " + json.loads(out)["token"]}
+    path = tmp_path / ".sync" / "data" / "ann.json"
+    doc = {"v": 1, "marks": {"Jane Doe - A Quiet Harbour": {"x": {"note": '"doc": {} }'}}}}
+    assert store.handle("PUT", "/__sync/data", auth, json.dumps({"version": 0, "doc": doc}).encode())[0] == 200
+    stored = path.read_text(encoding="utf-8")
+    m = head.match(stored)
+    assert m and m.group(1) == "1" and tail.search(stored)
+    place = {"book": "Jane Doe - A Quiet Harbour", "place": {"cfi": "epubcfi(/6/4)", "time": 5}}
+    assert store.handle("POST", "/__sync/place", auth, json.dumps(place).encode())[0] == 204
+    stored = path.read_text(encoding="utf-8")
+    m = head.match(stored)
+    assert m and m.group(1) == "2" and tail.search(stored)
+    # what is not in that form is left to the full parse (and a 500 if it can't be parsed)
+    for other in ['{"doc": {}, "version": 3}', '{"version":3,"doc":{}}', '{"version": 03, "doc": {}}',
+                  '{"version": 3, "doc": null}', stored[:len(stored) // 2], " " + stored]:
+        assert not (head.match(other) and tail.search(other)), other

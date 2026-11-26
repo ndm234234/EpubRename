@@ -271,7 +271,9 @@ class SyncStore:
         raise Corrupt(f"{login}.json")
 
     def _write_data(self, login, data):
-        self._write(self.dir / "data" / f"{login}.json", data)
+        # version first, as {"version": N, "doc": {...}}: the PowerShell twin reads the version from
+        # the head of the file without parsing the document
+        self._write(self.dir / "data" / f"{login}.json", {"version": data["version"], "doc": data["doc"]})
 
     def _auth(self, headers):
         """(login, token) of the account holding the bearer token, or (None, None)."""

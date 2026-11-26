@@ -51,7 +51,21 @@ with `python3 make_server.py <folder>`), so `library-sync.ps1` sits next to the 
    it sees Python's version and document. Both accept each other's `accounts\*.json` (same salt,
    hash, iterations and token hashes).
 
-## 5. Old .NET (only if a machine has .NET Framework older than 4.7.2)
+## 5. Speed with a big account
+
+On the library computer (WSL or Python for Windows), with each `.bat` running in turn:
+
+    python3 tests/sync_timing.py http://127.0.0.1:<port> <library>/.sync/code.txt
+
+It creates an account (a random `timing-...` login), uploads a document of about 1 MB (thousands
+of bookmarks with notes, made-up books), then times `GET /__sync/data`, `PUT /__sync/data` and
+`POST /__sync/place` three times each. Expected on a normal PC: each `ok`, the slowest of each well
+under 1 s, last line `all under 1 s`. (A third argument sets another size in KB, e.g. `4096`.)
+Then sign in on a phone (over https) with the login and password the script printed and open a
+book: it still opens within about 2 s; turn a page, lock the phone, unlock it: no error shown.
+Afterwards delete `.sync/accounts/timing-*.json` and `.sync/data/timing-*.json`.
+
+## 6. Old .NET (only if a machine has .NET Framework older than 4.7.2)
 
 Register and sign in once: the first sign-in compiles a small PBKDF2 helper (a second or two),
 after which it works as on newer machines.

@@ -76,3 +76,24 @@ def test_python_launchers_pass_contract(tmp_path, kind):
     if "network" in kind:
         assert "registration ok" in out and "sign-in ok" in out and "refused" in out
         assert "pw-" not in out   # passwords are never logged
+
+
+def test_timing_script_against_the_python_server(tmp_path):
+    # tests/sync_timing.py (the timing step of windows-sync-checklist.md) works, and the Python
+    # server stays well under its limit with a big account
+    from sync_timing import run
+    lib = _library(tmp_path)
+    port = _free_port()
+    proc = subprocess.Popen([sys.executable, str(lib / "library_sync.py"), "--serve", str(lib), "--port", str(port)],
+                            cwd=lib, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        _find(lib, [port], proc)
+        code = (lib / ".sync" / "code.txt").read_text(encoding="utf-8").strip()
+        res = run(f"http://127.0.0.1:{port}", code, kb=1024, log=lambda *_: None)
+        assert [r[0] for r in res] == ["GET /__sync/data", "PUT /__sync/data", "POST /__sync/place"]
+        assert all(r[1] in (200, 204) and r[2] < 1.0 for r in res), res
+        data = next((lib / ".sync" / "data").glob("*.json")).read_text(encoding="utf-8")
+        assert data.startswith('{"version": 7, "doc": {')   # 1 + 3 PUTs + 3 newer places
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
