@@ -680,21 +680,24 @@ const inApp = navigator.standalone === true ||
 const openedTimes = () => { try { return JSON.parse(localStorage.getItem("epubLibrary:opened")) || {}; } catch { return {}; } };
 let openedAt = openedTimes();
 
-// Settings survive page reloads (the app keeps its own); the sort is one for all devices (synced)
-const PREFS = inApp ? "epubIndex:app" : "epubIndex", SORT = "epubIndex:sort";
+// Settings survive page reloads. The view (sort and grouping) is one for all devices and both
+// catalogs (browser tab and app), synced; each catalog's own copy is the fallback.
+const PREFS = inApp ? "epubIndex:app" : "epubIndex", VIEW = "epubIndex:view";
 function applyPrefs() {
   const read = k => { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } };
-  const saved = read(PREFS), shared = read(SORT);
-  // the sort chosen last on any device (and any of this device's catalogs), else this catalog's own,
-  // else the books read last first
-  $("sort").value = shared.sort || saved.sort || "opened";
+  const saved = read(PREFS), view = read(VIEW);
+  // chosen last on any device, else this catalog's own, else the books read last first, ungrouped
+  $("sort").value = view.sort || saved.sort || "opened";
   if (!$("sort").value) $("sort").value = "opened";
-  $("group").setAttribute("aria-pressed", saved.group === true);
+  $("group").setAttribute("aria-pressed", ("group" in view ? view.group : saved.group) === true);
 }
 applyPrefs();
 const save = () => {
   try {
-    localStorage.setItem(PREFS, JSON.stringify({ sort: $("sort").value, group: $("group").getAttribute("aria-pressed") === "true" }));
+    const v = JSON.stringify({ sort: $("sort").value, group: $("group").getAttribute("aria-pressed") === "true" });
+    localStorage.setItem(PREFS, v);
+    localStorage.setItem(VIEW, v);
+    localStorage.setItem(VIEW + ":time", String(Date.now()));
     localStorage.setItem(PREFS + ":time", String(Date.now()));
   } catch {}
   Sync.changed();
@@ -1283,13 +1286,7 @@ function toast(text) {
 
 if (location.protocol === "file:") $("fileNote").hidden = false;
 $("q").addEventListener("input", () => { render(); savePlace(); });
-$("sort").addEventListener("change", () => {
-  try {
-    localStorage.setItem(SORT, JSON.stringify({ sort: $("sort").value }));
-    localStorage.setItem(SORT + ":time", String(Date.now()));
-  } catch {}
-  save(); render();
-});
+$("sort").addEventListener("change", () => { save(); render(); });
 $("group").addEventListener("click", e => {
   const b = e.currentTarget; b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") !== "true");
   save(); render();

@@ -29,11 +29,11 @@ computer only; `.sh` twins of both do the same in Python on Linux/Mac. The launc
 - Synced **per kind of device** (phone / tablet / computer): a phone's settings follow to another
   phone, not to the tablet or a desktop browser:
   - reader settings (`epubReader:prefs`: theme, font, face, layout, typoTab);
-  - catalog grouping, kept apart for a browser tab (`epubIndex`) and the installed app
-    (`epubIndex:app`), as today.
-- Synced **the same on every device** (owner's call after the first build): the catalog's sort
-  (`epubIndex:sort` + `epubIndex:sort:time`, `prefs.all.catalogSort` in the doc; the later choice
-  wins). "Recently opened" is offered, and the default, in every catalog.
+  - (each catalog still keeps its own copy of its view, `epubIndex` / `epubIndex:app`, as the
+    fallback).
+- Synced **the same on every device** (owner's call after the first build): the catalog's view,
+  sort and grouping (`epubIndex:view` + `epubIndex:view:time`, `prefs.all.catalogView` in the doc;
+  the later choice wins). "Recently opened" is offered, and the default, in every catalog.
 - Automatic, no chores. Works offline: changes wait on the device and go when the server is back.
 - All four launchers serve sync; Windows still needs nothing installed.
 

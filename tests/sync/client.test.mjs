@@ -301,17 +301,17 @@ test('prefs of another device kind: not applied locally, kept in the doc', async
   assert.equal(d.prefs.phone, undefined);
 });
 
-test('the catalog sort is the same on every kind of device', async () => {
+test('the catalog view (sort and grouping) is the same on every kind of device', async () => {
   const S = env({ kind: 'computer' });
-  put('epubIndex:sort', { sort: 'author' }); put('epubIndex:sort:time', '100');
-  srv.doc = M.merge(M.emptyDoc(), { prefs: { all: { catalogSort: { sort: 'opened' }, catalogSortTime: 200 } } });
+  put('epubIndex:view', { sort: 'author', group: false }); put('epubIndex:view:time', '100');
+  srv.doc = M.merge(M.emptyDoc(), { prefs: { all: { catalogView: { sort: 'opened', group: true }, catalogViewTime: 200 } } });
   await S.syncNow();
-  assert.deepEqual(get('epubIndex:sort'), { sort: 'opened' });           // a phone's newer choice reaches the computer
-  put('epubIndex:sort', { sort: 'title' }); put('epubIndex:sort:time', '300');
+  assert.deepEqual(get('epubIndex:view'), { sort: 'opened', group: true });   // a phone's newer choice reaches the computer
+  put('epubIndex:view', { sort: 'title', group: false }); put('epubIndex:view:time', '300');
   await S.syncNow();
-  assert.deepEqual(srv.doc.prefs.all.catalogSort, { sort: 'title' });      // and the computer's goes back to all
-  assert.equal(srv.doc.prefs.all.catalogSortTime, 300);
-  assert.equal(srv.doc.prefs.computer && srv.doc.prefs.computer.catalogSort, undefined);
+  assert.deepEqual(srv.doc.prefs.all.catalogView, { sort: 'title', group: false });   // and the computer's goes back to all
+  assert.equal(srv.doc.prefs.all.catalogViewTime, 300);
+  assert.equal(srv.doc.prefs.computer && srv.doc.prefs.computer.catalogView, undefined);
 });
 
 test('non-synced keys are untouched and never uploaded', async () => {

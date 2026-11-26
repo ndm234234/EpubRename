@@ -12,10 +12,11 @@
     { group: 'catalogTab', key: 'epubIndex', time: 'epubIndex:time' },
     { group: 'catalogApp', key: 'epubIndex:app', time: 'epubIndex:app:time' }
   ];
-  // Settings the same on every kind of device: the catalog's sort (prefs.all in the doc)
+  // Settings the same on every kind of device: the catalog's view, its sort and grouping
+  // (prefs.all in the doc)
   var SHARED_KIND = 'all';
   var SHARED_KEYS = [
-    { group: 'catalogSort', key: 'epubIndex:sort', time: 'epubIndex:sort:time' }
+    { group: 'catalogView', key: 'epubIndex:view', time: 'epubIndex:view:time' }
   ];
   var K_ACCOUNT = 'librarySync:account', K_DIRTY = 'librarySync:dirty', K_LAST = 'librarySync:lastSync';
   var THROTTLE_MS = 30000, DEFAULT_TIMEOUT = 8000, AUTH_TIMEOUT = 10000, MAX_PUTS = 3;
