@@ -99,6 +99,9 @@
   /* clip: closed side panels sit outside it, and focusing them must never scroll the page sideways */
   #stage { flex: 1; position: relative; display: flex; min-height: 0; overflow: hidden; overflow: clip; }
   #viewer { flex: 1; min-width: 0; margin: 16px 0; }
+  /* Scrolling: the browser must not move the text by itself when a chapter above grows (scroll
+     anchoring): epub.js and the reader keep the place, and both at once moved it twice */
+  #viewer .epub-container { overflow-anchor: none; }
   /* Page arrows: a quiet full-height strip with a round button in the middle */
   .side { flex: none; width: 64px; padding: 0; border-radius: 0; color: var(--muted);
           display: flex; align-items: center; justify-content: center; }
@@ -271,6 +274,11 @@
   .seg.faces button.on b { font-weight: 700; }
   .seg.faces small { font-size: 13px; font-weight: 400; color: var(--muted); }
   #bookFont:empty { display: none; }
+  /* "Scroll text": a row like the buttons above it */
+  .check { display: flex; align-items: center; gap: 10px; margin-top: 12px; min-height: 38px; padding: 0 12px;
+           border-radius: 10px; background: var(--hover); font-size: 14px; cursor: pointer; }
+  .check input { width: 18px; height: 18px; margin: 0; flex: none; accent-color: var(--accent); cursor: pointer; }
+  @media (hover: none) and (pointer: coarse) { .check { min-height: 46px; } }
   #fontPct { flex: 1.3; display: grid; place-items: center; font-size: 14px; font-weight: 600;
              font-variant-numeric: tabular-nums; }
   @media (hover: none) and (pointer: coarse) { .seg button { height: 42px; } }
@@ -400,7 +408,9 @@
         <button data-v="book">As in book</button>
         <button data-v="even">Same in all books</button>
       </div>
-      <p>Same line spacing, paragraph indents and justified text in every book.</p></div>
+      <p>Same line spacing, paragraph indents and justified text in every book.</p>
+      <label class="check"><input type="checkbox" id="scrollText">Scroll text</label>
+      <p>The whole book as one ribbon, scrolled up instead of turned page by page.</p></div>
   </div>
   <div id="acct" role="dialog" aria-label="Account">
     <div id="acctIn">
@@ -517,7 +527,8 @@ const THEME_CSS = {
            "body.dark *": { color: "inherit !important", "background-color": "transparent !important" },
            "body.dark a, body.dark a *": { color: "#6ea0ff !important" } },
 };
-const prefs = Object.assign({ theme: "light", font: 100, face: "book", layout: "book" }, store.get("epubReader:prefs"));
+const PREFS = { theme: "light", font: 100, face: "book", layout: "book", scroll: false };
+const prefs = Object.assign({}, PREFS, store.get("epubReader:prefs"));
 const savePrefs = () => { store.set("epubReader:prefs", prefs); store.set("epubReader:prefsTime", Date.now()); Sync.changed(); };
 document.documentElement.dataset.theme = prefs.theme;
 // The phone's status bar (and an installed app's title bar) in the colour of the reader's bar
@@ -620,78 +631,10 @@ async function openBook(data, fileName) {
   document.title = md.title || fileName;
   $("title").textContent = [md.title || fileName, md.creator].filter(Boolean).join(" — ");
 
-  rendition = book.renderTo("viewer", { width: "100%", height: "100%", spread: "auto",
-                                        allowScriptedContent: false });
-  for (const t of THEMES) rendition.themes.register(t, THEME_CSS[t]);
-  rendition.themes.register("paper", { "body.paper": { color: "#000 !important", background: "#fff !important" } });
-  rendition.themes.select(prefs.theme);
-  rendition.themes.fontSize(prefs.font + "%");
-  rendition.hooks.content.register(contents => {
-    applyTypo(contents.document);
-    contents.document.addEventListener("wheel", onWheel, { passive: false });
-    // Taps on the text are heard here, not through epub.js: it listens passively, so the browser
-    // would ignore "this tap is the reader's" and act on it too (Chrome's "Touch to Search" sheet)
-    contents.document.addEventListener("touchstart", touchStart, { passive: true });
-    contents.document.addEventListener("touchend", touchEnd, { passive: false });
-    // The chapter grew or shrank after it was shown (a font loaded late): page numbers anew
-    let t = 0;
-    contents.on("resize", () => { clearTimeout(t); t = setTimeout(() => {
-      if (!settling && rendition.getContents()[0] === contents) rendition.reportLocation();
-    }, 100); });
-  });
-  rendition.started.then(() => keepOldPageUntilNewIsReady(rendition));
-  // Window resized: back to the reading place, not to the start of the page shown (see displayAt)
-  rendition.onResized = function (size, cfi) {
-    this.emit("resized", { width: size.width, height: size.height }, cfi);
-    if (this.location && this.location.start) displayAt(cfi || anchor || this.location.start.cfi);
-  };
-  // The reader's own moves (page turns any way: buttons, keys, swipes, wheel; contents, search,
-  // slider) set the reading place and stop displayAt's second jump. displayAt itself uses the
-  // originals (turnPage), so a re-layout never moves the reading place.
-  const next = rendition.next.bind(rendition), prev = rendition.prev.bind(rendition);
-  turnPage = { next, display: rendition.display.bind(rendition),
-    // Back into the chapter before: epub.js goes to its last page before the chapter is fully
-    // laid out (fonts, pictures); it then grows and that page is no longer the last. Go on to it.
-    prev: async () => {
-      const before = here();
-      await prev();
-      const after = here();
-      if (!before || !after || after.start.index === before.start.index) return;
-      await layoutSettled();
-      for (let i = 0, k = pagesToChapterEnd(); i < Math.min(k, 50); i++) await next();
-    } };
-  let quiet = false;   // opening at the start: not a move of the reader's
-  const byReader = f => async (...a) => {
-    moved = true;
-    setBars(false);   // after any move the text is read again, without the bars
-    const r = await f(...a);
-    const loc = here();
-    if (loc) {
-      // epub.js may give the start of a paragraph begun on the page before; then find the page's first word
-      const off = pagesFromShown(loc.start.cfi);
-      anchor = off === null || off === 0 ? loc.start.cfi : firstOnShownPage() || loc.start.cfi;
-      savePlace(!quiet);
-    }
-    return r;
-  };
-  rendition.next = byReader(turnPage.next);
-  rendition.prev = byReader(turnPage.prev);
-  // A place in the book (search match, slider, saved place) is checked to be on the page shown
-  // (again once the chapter is laid out: a font still loading moves the text)
-  rendition.display = byReader(async t => {
-    if (!(typeof t === "string" && t.startsWith("epubcfi("))) return turnPage.display(t);
-    await placeAt(t);
-    const shown = here() && here().start.cfi;
-    await layoutSettled();
-    if (here() && here().start.cfi === shown && pagesFromShown(t)) await placeAt(t);
-  });
-  rendition.on("relocated", onRelocated);
-  rendition.on("click", () => { toggleTypo(false); toggleAcct(false); });
-  rendition.on("keydown", onKey);
+  makeRendition();
 
   const saved = store.get(bookKey);
   placeTime = saved && typeof saved.time === "number" ? saved.time : 0;
-  const atStart = async () => { quiet = true; try { await rendition.display(); } finally { quiet = false; } };
   try { await (saved && saved.cfi ? displayAt(saved.cfi) : atStart()); }
   catch { await atStart(); }   // saved place is no longer valid
   placeShown = true;
@@ -708,6 +651,117 @@ async function openBook(data, fileName) {
     renderMarks();   // chapter names are known now
   });
   prepareLocations(book, bookId);
+}
+
+// The book on the screen: pages (epub.js's paginated flow) or, with "Scroll text", one ribbon of
+// all the chapters one after another (its scrolled flow with the continuous manager). Switching
+// makes it anew (remakeRendition).
+let quiet = false;   // opening at the start: not a move of the reader's
+let scrollMode = false;   // the rendition on the screen scrolls (prefs.scroll when it was made)
+const atStart = async () => { quiet = true; try { await rendition.display(); } finally { quiet = false; } };
+// The book's own content hooks before any rendition: each rendition adds its own there and
+// destroy() leaves them, so a new one starts from these (no dead hooks after mode switches)
+let bookHooks = null;
+function makeRendition() {
+  const hooks = book.spine.hooks.content.hooks;
+  if (bookHooks) hooks.splice(0, hooks.length, ...bookHooks); else bookHooks = hooks.slice();
+  scrollMode = !!prefs.scroll;
+  rendition = book.renderTo("viewer", scrollMode
+    ? { width: "100%", height: "100%", flow: "scrolled", manager: "continuous", spread: "none", allowScriptedContent: false }
+    : { width: "100%", height: "100%", spread: "auto", allowScriptedContent: false });
+  for (const t of THEMES) rendition.themes.register(t, THEME_CSS[t]);
+  rendition.themes.register("paper", { "body.paper": { color: "#000 !important", background: "#fff !important" } });
+  rendition.themes.select(prefs.theme);
+  rendition.themes.fontSize(prefs.font + "%");
+  rendition.hooks.content.register(contents => {
+    applyTypo(contents.document);
+    contents.document.addEventListener("wheel", onWheel, { passive: false });
+    // Taps on the text are heard here, not through epub.js: it listens passively, so the browser
+    // would ignore "this tap is the reader's" and act on it too (Chrome's "Touch to Search" sheet)
+    contents.document.addEventListener("touchstart", touchStart, { passive: true });
+    contents.document.addEventListener("touchmove", touchMove, { passive: true });
+    contents.document.addEventListener("touchend", touchEnd, { passive: false });
+    // The chapter grew or shrank after it was shown (a font or a picture loaded late): page numbers
+    // anew; scrolling, the reading place back to the top (unless the reader is scrolling)
+    let t = 0;
+    contents.on("resize", () => { clearTimeout(t); t = setTimeout(() => {
+      if (settling || !rendition.getContents().includes(contents)) return;
+      // (its chapter unloaded meanwhile, the text above having grown: the whole way there)
+      if (scrollMode && !readerScrolling && anchor && !scrollToPlace(anchor)) { displayAt(anchor); return; }
+      rendition.reportLocation();
+    }, 100); });
+  });
+  const r = rendition;
+  if (scrollMode) r.once("attached", () => watchScroll(r));   // its container is there then
+  else r.started.then(() => keepOldPageUntilNewIsReady(r));
+  // Window resized: back to the reading place, not to the start of the page shown (see displayAt)
+  rendition.onResized = function (size, cfi) {
+    this.emit("resized", { width: size.width, height: size.height }, cfi);
+    if (this.location && this.location.start) displayAt(scrollMode ? anchor || cfi : cfi || anchor || this.location.start.cfi);
+  };
+  // The reader's own moves (page turns any way: buttons, keys, swipes, wheel; contents, search,
+  // slider) set the reading place and stop displayAt's second jump. displayAt itself uses the
+  // originals (turnPage), so a re-layout never moves the reading place.
+  const next = rendition.next.bind(rendition), prev = rendition.prev.bind(rendition);
+  turnPage = { next, display: rendition.display.bind(rendition),
+    // Back into the chapter before: epub.js goes to its last page before the chapter is fully
+    // laid out (fonts, pictures); it then grows and that page is no longer the last. Go on to it.
+    prev: async () => {
+      const before = here();
+      await prev();
+      const after = here();
+      if (!before || !after || after.start.index === before.start.index) return;
+      await layoutSettled();
+      for (let i = 0, k = pagesToChapterEnd(); i < Math.min(k, 50); i++) await next();
+    } };
+  const byReader = f => async (...a) => {
+    moved = true;
+    setBars(false);   // after any move the text is read again, without the bars
+    const res = await f(...a);
+    const loc = here();
+    if (loc) {
+      if (scrollMode) anchor = firstShown() || loc.start.cfi;   // the text now at the top
+      else {
+        // epub.js may give the start of a paragraph begun on the page before; then find the page's first word
+        const off = pagesFromShown(loc.start.cfi);
+        anchor = off === null || off === 0 ? loc.start.cfi : firstOnShownPage() || loc.start.cfi;
+      }
+      savePlace(!quiet);
+    }
+    return res;
+  };
+  rendition.next = byReader(turnPage.next);
+  rendition.prev = byReader(turnPage.prev);
+  // A place in the book (search match, slider, saved place) is checked to be on the page shown
+  // (again once the chapter is laid out: a font still loading moves the text)
+  rendition.display = byReader(async t => {
+    if (scrollMode) {   // a place, or a chapter from the contents: at the top of the screen
+      await placeAt(t);
+      const seq = readerScrolls;
+      await layoutSettled();
+      if (seq === readerScrolls && r === rendition) scrollToPlace(t);
+      return;
+    }
+    if (!(typeof t === "string" && t.startsWith("epubcfi("))) return turnPage.display(t);
+    await placeAt(t);
+    const shown = here() && here().start.cfi;
+    await layoutSettled();
+    if (here() && here().start.cfi === shown && pagesFromShown(t)) await placeAt(t);
+  });
+  rendition.on("relocated", onRelocated);
+  rendition.on("click", () => { toggleTypo(false); toggleAcct(false); });
+  rendition.on("keydown", onKey);
+}
+// "Scroll text" switched (here or on another device of the kind): the book anew, at the same place
+async function remakeRendition() {
+  if (!rendition || scrollMode === !!prefs.scroll) return;
+  const at = anchor;
+  ++placing; settling = false;   // a placing still going on in the old one stops there
+  rendition.destroy();
+  $("viewer").replaceChildren();
+  makeRendition();
+  for (const h of hits) setHighlight(h, h === hits[hitIdx] ? HL_CURRENT : HL_STYLE);
+  try { await (at ? displayAt(at) : atStart()); } catch { await atStart(); }
 }
 
 // ------------------------------------------------------------ positions across the book
@@ -970,12 +1024,21 @@ async function displayAt(cfi, deliberate = false) {   // deliberate: the reader 
 async function placeAt(cfi, my) {
   await turnPage.display(cfi);
   if (my !== undefined && my !== placing) return;   // a newer placing has started: its moves count
+  const mine = () => my === undefined || my === placing;
+  if (scrollMode) {
+    // epub.js unloads chapters away from the screen while it adds the ones around: if the place's
+    // chapter isn't laid out right then, go there again
+    for (let i = 1; i <= 4 && mine() && !scrollToPlace(cfi); i++) {
+      await new Promise(r => setTimeout(r, 100 * i));
+      if (mine() && !scrollToPlace(cfi)) await turnPage.display(cfi); else break;
+    }
+    return;
+  }
   let shift = pagesFromShown(cfi);
   if (shift === null) {
     const loc = here();
     shift = loc && !loc.atEnd && new ePub.CFI().compare(cfi, loc.end.cfi) > 0 ? 1 : 0;
   }
-  const mine = () => my === undefined || my === placing;
   for (let i = 0; i < Math.min(shift, 3) && mine(); i++) await turnPage.next();
   for (let i = 0; i < Math.min(-shift, 3) && mine(); i++) await turnPage.prev();
 }
@@ -1032,21 +1095,190 @@ function pagesFromShown(cfi) {
     return b ? Math.floor((b.left + 1) / s.delta) - s.col : null;
   } catch { return null; }
 }
-function layoutSettled() {
-  const c = rendition.getContents()[0], doc = c && c.document;
-  if (!doc) return Promise.resolve();
+function layoutSettled() {   // every chapter on the screen (one when paged, a few when scrolling)
+  const docs = rendition.getContents().map(c => c.document).filter(Boolean);
+  if (!docs.length) return Promise.resolve();
   const loaded = el => new Promise(r => { el.addEventListener("load", r, { once: true }); el.addEventListener("error", r, { once: true }); });
-  const link = doc.getElementById("readerFonts");
-  const fonts = (link && !link.sheet ? loaded(link) : Promise.resolve()).then(() => {
-    const face = FACES[prefs.face];
-    const loads = face ? ["", "italic ", "bold ", "italic bold "].map(v =>
-      doc.fonts.load(v + "16px " + face.stack.split(",")[0], "Аа Aa").catch(() => {})) : [];
-    return Promise.all(loads).then(() => doc.fonts.ready);
-  });
-  const pictures = [...doc.images].filter(i => !i.complete).map(loaded);
+  const waits = [];
+  for (const doc of docs) {
+    const link = doc.getElementById("readerFonts");
+    waits.push((link && !link.sheet ? loaded(link) : Promise.resolve()).then(() => {
+      const face = FACES[prefs.face];
+      const loads = face ? ["", "italic ", "bold ", "italic bold "].map(v =>
+        doc.fonts.load(v + "16px " + face.stack.split(",")[0], "Аа Aa").catch(() => {})) : [];
+      return Promise.all(loads).then(() => doc.fonts.ready);
+    }));
+    waits.push(...[...doc.images].filter(i => !i.complete).map(loaded));
+  }
   const frames = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-  return Promise.race([Promise.all([fonts, ...pictures]).then(frames),
+  return Promise.race([Promise.all(waits).then(frames),
                        new Promise(r => setTimeout(r, 4000))]);
+}
+
+// ------------------------------------------------------------ scrolling ("Scroll text")
+
+// The reading place is the first text at the top of the scroll area. Chapters are iframes one
+// under another in epub.js's container, which is what scrolls.
+const scroller = () => rendition && rendition.manager && rendition.manager.container;
+function shownViews() {
+  const m = rendition.manager, all = m.views && (m.views._views || (m.views.all && m.views.all())) || [];
+  return all.filter(v => v.displayed && v.contents && v.iframe);
+}
+// Text nodes of a chapter, in order (kept with the document: the text itself never changes)
+function textNodes(doc) {
+  if (!doc.__textNodes) {
+    const list = [], w = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    for (let n; (n = w.nextNode()); ) if (n.nodeValue.trim()) list.push(n);
+    doc.__textNodes = list;
+  }
+  return doc.__textNodes;
+}
+const boxes = r => [...r.getClientRects()].filter(b => b.width > 0 && b.height > 0);
+// The first character of a chapter whose box starts at or below y (its document's coordinates),
+// moved on to the start of a word. null: none.
+function textBelow(doc, y) {
+  const nodes = textNodes(doc), r = doc.createRange();
+  const nodeBoxes = n => { r.selectNodeContents(n); return boxes(r); };
+  // the first node that ends below y (nodes are one under another in a column)
+  let a = 0, b = nodes.length;
+  while (a < b) {
+    const mid = (a + b) >> 1;
+    let k = mid, bx;
+    while (k < b && !(bx = nodeBoxes(nodes[k])).length) k++;   // hidden text: the next one tells
+    if (k < b && bx[bx.length - 1].bottom > y) b = mid; else a = k + 1;
+  }
+  const charBox = (n, i) => { r.setStart(n, i); r.setEnd(n, i + 1); return boxes(r)[0]; };
+  for (let j = a; j < nodes.length && j < a + 50; j++) {
+    const n = nodes[j], s = n.nodeValue;
+    if (!nodeBoxes(n).length) continue;
+    // the first character at or below y (a space tells by the letter after it: spaces at a line's
+    // end have no box)
+    const below = i => {
+      while (i < s.length && /\s/.test(s[i])) i++;
+      const c = i < s.length && charBox(n, i);
+      return !!c && c.top >= y - 1;
+    };
+    let lo = 0, hi = s.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (below(mid)) hi = mid; else lo = mid + 1; }
+    let i = lo;
+    if (i > 0 && i < s.length && !/\s/.test(s[i - 1])) while (i < s.length && !/\s/.test(s[i])) i++;   // a word begun on the line above
+    while (i < s.length && /\s/.test(s[i])) i++;
+    if (i < s.length && charBox(n, i)) return { node: n, offset: i, box: charBox(n, i) };
+  }
+  return null;
+}
+function cfiAt(v, node, offset) {
+  const r = v.contents.document.createRange();
+  r.setStart(node, offset); r.collapse(true);
+  return v.contents.cfiFromRange(r);
+}
+// The place of the first text at the top of the screen (its line whole)
+function firstShown() {
+  try {
+    const c = scroller(), box = c.getBoundingClientRect();
+    for (const v of shownViews().sort((x, y) => x.iframe.getBoundingClientRect().top - y.iframe.getBoundingClientRect().top)) {
+      const fr = v.iframe.getBoundingClientRect();
+      if (fr.bottom <= box.top + 1 || fr.top >= box.bottom) continue;
+      const t = textBelow(v.contents.document, box.top - fr.top);
+      if (t && t.box.top + fr.top >= box.bottom) return null;   // no text on the screen
+      if (t) return cfiAt(v, t.node, t.offset);
+    }
+  } catch {}
+  return null;
+}
+// Scroll so the place (a cfi, or a chapter / an anchor in it from the contents) is at the top.
+// false: its chapter is not laid out now
+function scrollToPlace(target) {
+  const c = scroller();
+  if (!c || !target) return true;
+  try {
+    let y;
+    if (typeof target === "string" && target.startsWith("epubcfi(")) {
+      const at = placeBox(target);
+      if (!at) return false;
+      y = at.y;
+    } else {
+      const section = book.spine.get(target);
+      const v = section && shownViews().find(v => v.section.index === section.index);
+      if (!v) return false;
+      const id = String(target).split("#")[1], el = id && v.contents.document.getElementById(id);
+      y = v.iframe.getBoundingClientRect().top + (el ? el.getBoundingClientRect().top : 0);
+    }
+    y -= c.getBoundingClientRect().top;
+    if (Math.abs(y - 1) >= 1) c.scrollTop += Math.round(y - 1);   // 1px of air above the letters
+    return true;
+  } catch { return true; }   // a place that can't be found: nothing to do
+}
+// Scrolls of the reader's own (finger, wheel, touchpad, scrollbar, keys) move the reading place:
+// once the scrolling stops, the text at the top is the place, saved as a deliberate move. Scrolls
+// of epub.js and of displayAt (opening, re-layout, a chapter added above) are not the reader's.
+let readerInputAt = 0, readerScrolling = false, readerScrolls = 0, scrollStop = 0, scrollbarHeld = false;
+const readerInput = () => { readerInputAt = Date.now(); };
+addEventListener("mouseup", () => { scrollbarHeld = false; });
+function watchScroll(r) {
+  const c = r.manager && r.manager.container;
+  if (!c) return;
+  c.addEventListener("mousedown", e => { if (e.target === c) { scrollbarHeld = true; readerInput(); } });
+  c.addEventListener("scroll", () => {
+    if (r !== rendition) return;
+    if (!readerScrolling && (scrollbarHeld || Date.now() - readerInputAt < 1000)) { readerScrolling = true; setBars(false); }
+    if (!readerScrolling) return;
+    readerScrolls++;
+    moved = true;   // a placing going on (a font change, opening) leaves the text where the reader took it
+    clearTimeout(scrollStop);
+    scrollStop = setTimeout(scrollEnded, 400);
+  }, { passive: true });
+}
+function scrollEnded() {
+  // still placing, or the scrollbar still held: once that is over
+  if (settling || scrollbarHeld) { scrollStop = setTimeout(scrollEnded, 300); return; }
+  readerScrolling = false;
+  if (!scrollMode) return;
+  const loc = here(), top = firstShown() || loc && loc.start.cfi;   // no text on the screen (a picture): epub.js's place
+  if (!top || top === anchor) return;
+  // the reading place is still on the top line (it may sit mid-line after a re-layout): not moved
+  if (anchor && sameTopLine(anchor, top)) return;
+  anchor = top;
+  savePlace(true);
+  updateMarkUi();
+}
+// Where a place is on the screen now: the top of its letter and its height (null: not laid out)
+function placeBox(cfi) {
+  try {
+    const r = rendition.getRange(cfi), n = r && r.startContainer;
+    if (!n) return null;
+    const v = shownViews().find(v => v.contents.document === n.ownerDocument);
+    if (!v) return null;
+    if (n.nodeType === 3) {   // the first letter at or after the place
+      let i = r.startOffset;
+      while (i < n.length - 1 && /\s/.test(n.nodeValue[i])) i++;
+      r.setStart(n, i); r.setEnd(n, Math.min(n.length, i + 1));
+    } else if (n.childNodes[r.startOffset]) r.selectNode(n.childNodes[r.startOffset]);
+    const bx = boxes(r)[0] || r.getBoundingClientRect();
+    return { y: bx.top + v.iframe.getBoundingClientRect().top, h: bx.height };
+  } catch { return null; }
+}
+function sameTopLine(a, b) {
+  const x = placeBox(a), y = placeBox(b);
+  return !!x && !!y && Math.abs(x.y - y.y) < Math.max(4, y.h / 2);
+}
+// Scrolling: is a place above the screen (-1), on it (0) or below it (1)? By where it really is:
+// epub.js's cfis don't always compare in reading order within a paragraph.
+function sideOfScreen(cfi) {
+  const box = scroller().getBoundingClientRect(), at = placeBox(cfi);
+  if (at) return at.y + Math.max(at.h, 1) <= box.top ? -1 : at.y >= box.bottom ? 1 : 0;
+  let spine = -1;
+  try { spine = new ePub.CFI(cfi).spinePos; } catch {}
+  const shown = shownViews().map(v => v.index);
+  return shown.length && spine > Math.max(...shown) ? 1 : -1;   // a chapter not laid out now
+}
+// A key, a button: scroll by lines or by a screen less a line (the line at the bottom comes to the top)
+function scrollText(dir, screen = true) {
+  const c = scroller();
+  if (!c) return;
+  const line = Math.round(16 * prefs.font / 100 * 1.6);
+  readerInput();
+  c.scrollBy({ top: dir * (screen ? c.clientHeight - line : 2 * line), behavior: "smooth" });
 }
 
 // What is saved is the reading place (anchor), not the start of the page shown.
@@ -1075,9 +1307,10 @@ function onRelocated(loc) {
   const d = loc.start.displayed;
   // Phones, tablets: numbers only ("10/30" and "43/560 2%"); with a mouse, with words
   const bare = touchUi.matches;
-  $("where").textContent = d && d.total ? `${d.page}/${d.total}` + (bare ? "" : " in chapter") : "";
+  // Scrolling there are no pages: % of the book only
+  $("where").textContent = d && d.total && !scrollMode ? `${d.page}/${d.total}` + (bare ? "" : " in chapter") : "";
   if (locationsReady) {   // else: progress text
-    const total = bookPages(loc), page = Math.min(total, Math.round(pct * total) + 1);
+    const total = scrollMode ? 0 : bookPages(loc), page = Math.min(total, Math.round(pct * total) + 1);
     $("pct").textContent = (total ? (bare ? `${page}/${total} ` : `p. ${page} of ${total} · `) : "")
                            + Math.round(pct * 100) + "%";
   }
@@ -1314,7 +1547,8 @@ function goToHit(i) {
   rendition.display(hit.cfi).then(() => {
     if (hits[hitIdx] !== hit || settling) return;
     try {
-      const range = rendition.getRange(hit.cfi), c = rendition.getContents()[0];
+      const range = rendition.getRange(hit.cfi), doc = range.startContainer.ownerDocument;
+      const c = rendition.getContents().find(c => c.document === doc);
       range.collapse(true);
       anchor = c.cfiFromRange(range);
       savePlace(true);
@@ -1399,16 +1633,21 @@ function here() {
   return loc && loc.start && loc.end ? loc : null;
 }
 
+// Where a place is against the page shown (or, scrolling, the screen): before it -1, on it 0, after it 1
+function sideOfShown(cfi, loc) {
+  if (scrollMode) return sideOfScreen(cfi);
+  return cfiCmp(cfi, loc.start.cfi) < 0 ? -1 : cfiCmp(cfi, loc.end.cfi) > 0 ? 1 : 0;
+}
 // Bookmarks that fall on the page being shown
 function marksOnPage(loc = here()) {
   if (!loc) return [];
-  return marks.filter(m => cfiCmp(m.cfi, loc.start.cfi) >= 0 && cfiCmp(m.cfi, loc.end.cfi) <= 0);
+  return marks.filter(m => sideOfShown(m.cfi, loc) === 0);
 }
 
 // First words of the page, to recognize the bookmark in the list
-function pageText(loc) {
+function pageText(cfi) {
   try {
-    const range = rendition.getRange(loc.start.cfi);
+    const range = rendition.getRange(cfi);
     const doc = range.startContainer.ownerDocument;
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
     walker.currentNode = range.startContainer;
@@ -1426,8 +1665,8 @@ function toggleMarkHere() {
   const onPage = marksOnPage(loc);
   if (onPage.length) { forgetMarks(onPage); marks = marks.filter(m => !onPage.includes(m)); }
   else {
-    const time = Date.now(), cfi = loc.start.cfi;
-    const m = { id: time + "|" + cfi, cfi, text: pageText(loc), name: "", note: "", time };
+    const time = Date.now(), cfi = scrollMode && anchor ? anchor : loc.start.cfi;   // scrolling: the reading place
+    const m = { id: time + "|" + cfi, cfi, text: pageText(cfi), name: "", note: "", time };
     marks.push(m);
     marks.sort((a, b) => cfiCmp(a.cfi, b.cfi));
     showToast("Bookmark added", () => { $("markFilter").value = ""; renderMarks(); toggleMarks(true); editNote(m); });
@@ -1457,8 +1696,8 @@ function goToMark(m) {
 function stepMark(dir) {
   const loc = here();
   if (!loc || !marks.length) return;
-  const m = dir > 0 ? marks.find(m => cfiCmp(m.cfi, loc.end.cfi) > 0)
-                    : marks.filter(m => cfiCmp(m.cfi, loc.start.cfi) < 0).pop();
+  const m = dir > 0 ? marks.find(m => sideOfShown(m.cfi, loc) > 0)
+                    : marks.filter(m => sideOfShown(m.cfi, loc) < 0).pop();
   if (m) displayAt(m.cfi, true);
 }
 
@@ -1597,8 +1836,8 @@ function updateMarkUi() {
   $("marksBtn").disabled = !marks.length;   // the list opens only when there is something in it
   $("markBtn").title = onPage.length ? "Remove bookmark from this page (M)" : "Bookmark this page (M)";
   for (const [m, row] of markRows) row.classList.toggle("current", onPage.includes(m));
-  $("markPrev").disabled = !loc || !marks.some(m => cfiCmp(m.cfi, loc.start.cfi) < 0);
-  $("markNext").disabled = !loc || !marks.some(m => cfiCmp(m.cfi, loc.end.cfi) > 0);
+  $("markPrev").disabled = !loc || !marks.some(m => sideOfShown(m.cfi, loc) < 0);
+  $("markNext").disabled = !loc || !marks.some(m => sideOfShown(m.cfi, loc) > 0);
 }
 
 function toggleMarks(open = !$("marks").classList.contains("open")) {
@@ -1689,6 +1928,10 @@ function onTouchUi() {
 touchUi.addEventListener("change", onTouchUi);
 onTouchUi();
 
+// Scrolling: only a finger that moves the text counts as the reader's scroll (a tap never moves;
+// a touch on a panel scrolls the panel, not the book)
+const PANELS = "#toc, #search, #marks, #typo, #acct";
+function touchMove(e) { if (!(e.target.closest && e.target.closest(PANELS))) readerInput(); }
 function touchStart(e) {
   const t = e.changedTouches[0];
   touch = { x: t.screenX, y: t.screenY, time: Date.now() };
@@ -1698,7 +1941,7 @@ function touchEnd(e) {
   const t = e.changedTouches[0], dx = t.screenX - touch.x, dy = t.screenY - touch.y;
   const quick = Date.now() - touch.time < 500;
   touch = null;
-  if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) { dx < 0 ? rendition.next() : rendition.prev(); return; }
+  if (!scrollMode && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) { dx < 0 ? rendition.next() : rendition.prev(); return; }
   if (!quick || Math.abs(dx) > 10 || Math.abs(dy) > 10) return;   // a long press or a drag, not a tap
   if (e.target.closest && e.target.closest("a[href], button, input, select, textarea, label")) return;   // links work as usual
   if ($("typo").classList.contains("open") || $("acct").classList.contains("open")) {   // a tap on the page closes it
@@ -1715,16 +1958,18 @@ function touchEnd(e) {
     if (y < stage.top || y > stage.bottom) return;
     e.preventDefault();
     const third = (x - stage.left) / stage.width;
-    if (third > 1 / 3 && third < 2 / 3) setBars(!document.body.classList.contains("bars"));
+    // scrolling: a tap anywhere shows / hides the bars (the finger scrolls, nothing turns)
+    if (scrollMode || (third > 1 / 3 && third < 2 / 3)) setBars(!document.body.classList.contains("bars"));
     else third <= 1 / 3 ? rendition.prev() : rendition.next();
     return;
   }
-  if (y < stage.top + stage.height / 2 || y > stage.bottom) return;
+  if (scrollMode || y < stage.top + stage.height / 2 || y > stage.bottom) return;
   e.preventDefault();   // no extra click / zoom after the tap
   x < stage.left + stage.width / 2 ? rendition.prev() : rendition.next();
 }
 // Taps on the page margins (outside the book's iframe) count too
 $("stage").addEventListener("touchstart", e => { if (!e.target.closest("iframe")) touchStart(e); }, { passive: true });
+$("stage").addEventListener("touchmove", e => { if (!e.target.closest("iframe")) touchMove(e); }, { passive: true });
 $("stage").addEventListener("touchend", e => { if (!e.target.closest("iframe") && $("viewer").contains(e.target)) touchEnd(e); });
 
 // Mouse wheel / touchpad: down or right — next page, up or left — previous. One page per
@@ -1733,6 +1978,16 @@ $("stage").addEventListener("touchend", e => { if (!e.target.closest("iframe") &
 let wheelSum = 0, wheelQuiet = 0, wheelBusy = false;
 function onWheel(e) {
   if (!rendition || e.ctrlKey) return;   // Ctrl+wheel is the browser's zoom
+  if (scrollMode) {   // the browser scrolls the text; over the margins and arrows, so does this
+    if (e.target.closest && e.target.closest(PANELS)) return;   // a panel scrolls itself
+    readerInput();
+    const c = scroller();
+    if (c && !c.contains(e.target) && e.currentTarget === $("stage")) {
+      e.preventDefault();
+      c.scrollBy(0, (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? c.clientHeight : 1) * e.deltaY);
+    }
+    return;
+  }
   if (["toc", "search", "marks", "typo", "acct"].some(id => $(id).classList.contains("open"))) return;
   e.preventDefault();
   const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;   // lines / pages → pixels
@@ -1763,7 +2018,11 @@ function onKey(e) {
   const t = e.target;
   if ((t.tagName === "INPUT" && t.type !== "range") || t.tagName === "TEXTAREA") return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (k === "ArrowRight" || k === "PageDown" || (k === " " && !e.shiftKey)) { e.preventDefault(); rendition.next(); }
+  if (scrollMode && (k === "ArrowDown" || k === "ArrowUp")) { e.preventDefault(); scrollText(k === "ArrowDown" ? 1 : -1, false); }
+  else if (scrollMode && (k === "ArrowRight" || k === "PageDown" || k === " " || k === "ArrowLeft" || k === "PageUp")) {
+    e.preventDefault(); scrollText(k === "ArrowLeft" || k === "PageUp" || (k === " " && e.shiftKey) ? -1 : 1);
+  }
+  else if (k === "ArrowRight" || k === "PageDown" || (k === " " && !e.shiftKey)) { e.preventDefault(); rendition.next(); }
   else if (k === "ArrowLeft" || k === "PageUp" || (k === " " && e.shiftKey)) { e.preventDefault(); rendition.prev(); }
   else if (k === "t" || k === "T" || k === "е" || k === "Е") toggleToc();
   else if (k === "Escape") { e.preventDefault(); escape(); }
@@ -1817,6 +2076,11 @@ if (!FACES[prefs.face]) prefs.face = "book";
 function typoCss() {
   // Phones, tablets: the same margin above and below the text, about 20px to the letters
   let css = touchUi.matches ? "body { padding-top: 17px !important; padding-bottom: 17px !important; }\n" : "";
+  // Scrolling on a wide screen: lines of a readable length, not across the whole window
+  // scrolling: epub.js pads the text by 1/12 of the width on each side, the pages by half their
+  // column gap (1/12 of the width): the same side margins as on pages, so 1/24 a side
+  if (scrollMode) css += "body { max-width: 44em !important; margin-left: auto !important; margin-right: auto !important;"
+    + " padding-left: calc(100vw / 24) !important; padding-right: calc(100vw / 24) !important; }\n";
   if (FACES[prefs.face])   // code and other monospaced text keeps its font
     css += `body, body *:not(pre, code, kbd, samp, tt, pre *, code *) { font-family: ${FACES[prefs.face].stack} !important; }\n`;
   // Plain paragraphs only, and weaker than any class rule: centred titles, epigraphs etc. keep the
@@ -1916,6 +2180,7 @@ function showTypo() {
     if (e.dataset.tab) e.setAttribute("aria-selected", on);
   }
   $("fontPct").textContent = prefs.font + "%";
+  $("scrollText").checked = !!prefs.scroll;
   $("smaller").disabled = !rendition || prefs.font <= 60;
   $("bigger").disabled = !rendition || prefs.font >= 200;
   for (const [seg, key] of [["faceSeg", "face"], ["layoutSeg", "layout"]])
@@ -1931,6 +2196,11 @@ function setTypo(key, value) {
 function relayout() { if (anchor) displayAt(anchor); }
 for (const [seg, key] of [["faceSeg", "face"], ["layoutSeg", "layout"]])
   $(seg).addEventListener("click", e => { const b = e.target.closest("button"); if (b) setTypo(key, b.dataset.v); });
+$("scrollText").addEventListener("change", e => {
+  prefs.scroll = e.target.checked;
+  savePrefs();
+  if (placeShown) remakeRendition();
+});
 function toggleTypo(open = !$("typo").classList.contains("open")) {
   if (open && !book) return;
   $("typo").classList.toggle("open", open);
@@ -1949,8 +2219,9 @@ document.addEventListener("click", e => {   // a click anywhere else closes it
 });
 showTypo();
 
-$("prev").onclick = () => rendition.prev();
-$("next").onclick = () => rendition.next();
+// Scrolling: the side arrows scroll a screen
+$("prev").onclick = () => scrollMode ? scrollText(-1) : rendition.prev();
+$("next").onclick = () => scrollMode ? scrollText(1) : rendition.next();
 $("tocBtn").onclick = () => toggleToc();
 $("smaller").onclick = () => setFont(-10);
 $("bigger").onclick = () => setFont(10);
@@ -1996,13 +2267,14 @@ Sync.onRemoteChange(rep => {
 function reloadPrefs() {
   const before = JSON.stringify(prefs);
   for (const k of Object.keys(prefs)) delete prefs[k];
-  Object.assign(prefs, { theme: "light", font: 100, face: "book", layout: "book" }, store.get("epubReader:prefs"));
+  Object.assign(prefs, PREFS, store.get("epubReader:prefs"));
   if (!FACES[prefs.face]) prefs.face = "book";
   if (JSON.stringify(prefs) === before) return;
   document.documentElement.dataset.theme = prefs.theme;
   showThemeColor();
   showTypo();
   if (!rendition) return;
+  if (placeShown && scrollMode !== !!prefs.scroll) { remakeRendition(); return; }   // with the new settings
   try {
     rendition.themes.select(prefs.theme);
     rendition.themes.fontSize(prefs.font + "%");

@@ -191,6 +191,9 @@ A single offline page (`reader/reader.html`) built on [epub.js](https://github.c
 and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). Nothing is uploaded.
 
 - Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows, mouse wheel / touchpad (one page per notch or swipe).
+- **Scroll text** (*Aa* → *Layout*): instead of pages, the whole book scrolls up as one ribbon, each
+  chapter right after the one before (finger, wheel, scrollbar; `↓` / `↑` a little, `PageDown` /
+  `Space` / the side arrows a screen). The place is the line at the top; the status line shows the %.
 - **Phones and tablets** read with the whole screen for the text: only a thin line at the bottom
   stays, numbers only — `4/24` (page in the chapter) on the left, `120/560 21%` (page in the
   book, % read) on the right — and the text has the same small margin
@@ -601,7 +604,10 @@ FULL=1 tests/reader/run.sh "Jane Doe/Jane Doe - A Quiet Harbour.epub"   # every 
 - `place.mjs` — the place kept through every font and size, quick changes, reopening, window
   resizes; bookmarks and search matches land on the page shown, also after a font change;
 - `hits.mjs` — every search match (or an even spread of them) is on the page shown;
-- `touch.mjs`, `status.mjs`, `typo.mjs` — taps and bars, the status line, the Aa panel.
+- `touch.mjs`, `status.mjs`, `typo.mjs` — taps and bars, the status line, the Aa panel;
+- `scroll.mjs` — *Scroll text*: switching keeps the first visible word, chapters follow one
+  another, the place saved on the reader's own scroll and kept on reopening, font changes and
+  resizes; contents, search, bookmarks and taps in scroll mode, on a phone and a desktop.
 
 Several books run side by side; the output keeps only failures and each check's verdict.
 `W`/`H` set the screen, `TOUCH=0` a desktop, `SHOTS=dir` saves screenshots.

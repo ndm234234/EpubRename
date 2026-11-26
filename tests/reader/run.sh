@@ -27,6 +27,7 @@ for book in "$@"; do
     node $T/place.mjs $B "$book" 15 "${WORD:-что}"
     node $T/hits.mjs $B "$book" "${WORD:-что}" 60 opendyslexic 120
     node $T/touch.mjs $B "$book"; node $T/status.mjs $B "$book"; node $T/typo.mjs $B "$book"
+    node $T/scroll.mjs $B "$book" "${WORD:-что}"
     # one sync check at a time: each tries one wrong library code, and wrong codes from checks side
     # by side would add up to the library-wide pause (after 5 in a row)
     flock "$LOGS/sync.lock" node $T/sync.mjs $B "$book"
