@@ -397,3 +397,35 @@ test('signedIn and lastSync', async () => {
   assert.equal(S.signedIn(), false);
   assert.deepEqual(S.account(), { login: 'ann' });
 });
+
+test('a failed PUT still announces what applyLocal changed (else nobody ever would)', async () => {
+  const S = env();
+  put('epubReader:marks:' + BOOK, [mark(10), mark(20)]);
+  srv.doc = M.merge(M.emptyDoc(), { marks: { [BOOK]: { '10|epubcfi(/6/10)': { deleted: GONE } } }, prefs: { computer: { reader: { theme: 'dark' }, readerTime: 900 } } });
+  const realFetch = srv.fetch;
+  globalThis.fetch = (url, opts = {}) => (opts.method === 'PUT' ? Promise.resolve({ status: 500, json: async () => ({}) }) : realFetch(url, opts));
+  const seen = [];
+  S.onRemoteChange((r) => seen.push(r));
+  assert.equal(await S.syncNow(), 'offline');
+  await flush();
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].marks, [BOOK]);
+  assert.equal(seen[0].prefs, true);
+  assert.deepEqual(get('epubReader:marks:' + BOOK).map((m) => m.time), [20]);
+});
+
+test('the deadline during the PUT still announces what applyLocal changed', async () => {
+  const S = env();
+  put('epubReader:marks:' + BOOK, [mark(10), mark(20)]);
+  srv.doc = M.merge(M.emptyDoc(), { marks: { [BOOK]: { '10|epubcfi(/6/10)': { deleted: GONE } } } });
+  const realFetch = srv.fetch;
+  globalThis.fetch = (url, opts = {}) => (opts.method === 'PUT'
+    ? new Promise((_, rej) => opts.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))))
+    : realFetch(url, opts));
+  const seen = [];
+  S.onRemoteChange((r) => seen.push(r));
+  assert.equal(await S.syncNow({ timeoutMs: 50 }), 'offline');
+  await flush();
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].marks, [BOOK]);
+});

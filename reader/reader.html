@@ -531,6 +531,7 @@ let bookId = "";   // the book's id in storage and sync: identifier, else title,
 // When the reading place shown was chosen (ms): set by the reader's own moves only. Opening the book,
 // a re-layout or a resize keep it, so a device with an old place never makes it the newest one.
 let placeTime = 0, placeShown = false;   // placeShown: the book is open at its place
+let offerShown = null;   // the action of the "Continue from …" toast (offerPlace)
 
 // ------------------------------------------------------------ opening a book
 
@@ -694,6 +695,7 @@ async function openBook(data, fileName) {
   try { await (saved && saved.cfi ? displayAt(saved.cfi) : atStart()); }
   catch { await atStart(); }   // saved place is no longer valid
   placeShown = true;
+  offerPlace();   // a newer place may have come in while the book was being opened
   $("start").classList.add("hidden");
   for (const id of ["prev", "next", "smaller", "bigger", "typoBtn", "searchBtn", "markBtn", "printBtn"]) $(id).disabled = false;
   showTypo();
@@ -1054,7 +1056,10 @@ function layoutSettled() {
 function savePlace(deliberate = false) {
   if (settling || !anchor) return;
   const old = store.get(bookKey);
-  if (deliberate) placeTime = Date.now();
+  if (deliberate) {
+    placeTime = Date.now();
+    if (offerShown && toastAction === offerShown) hideToast();   // the reader went on here: the offer is old
+  }
   else if (old && old.time > placeTime) return;
   const pct = locationsReady ? book.locations.percentageFromCfi(anchor) : null;
   const place = { cfi: anchor, pct, title: document.title, time: placeTime };
@@ -2016,8 +2021,15 @@ function offerPlace() {
   if (p.cfi === anchor) { placeTime = p.time; return; }
   let pct = typeof p.pct === "number" ? p.pct : null;
   if (pct == null && locationsReady) try { pct = book.locations.percentageFromCfi(p.cfi); } catch {}
+  // Taken only if that is still the newest place (the reader may have moved on meanwhile)
+  offerShown = () => {
+    const now = store.get(bookKey);
+    if (!now || now.time !== p.time || now.cfi !== p.cfi) return;
+    placeTime = p.time;
+    displayAt(p.cfi);
+  };
   showToast(pct != null ? `Continue from ${Math.round(pct * 100)}% (another device)?` : "Continue from another device's place?",
-            () => { placeTime = p.time; displayAt(p.cfi); }, "Continue", "right", 12000);
+            offerShown, "Continue", "right", 12000);
 }
 // Leaving (another app, the phone locked, the tab closed): the place goes at once
 function sendPlace() {

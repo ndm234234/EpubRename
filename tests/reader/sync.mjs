@@ -117,6 +117,10 @@ ok(s && s.time === T && s.cfi === C, "signed in, reopened: same place, same time
 
 // ---- a second device (another browser profile) on the same account
 {
+  // a bookmark the second device will delete
+  await p.eval("toggleMarkHere(); 0");
+  const MK = await p.eval("marks[marks.length - 1].id");
+  await p.eval("LibrarySync.syncNow()");
   const q = await launch({ width: W, height: H, touch: true });
   await q.goto(`${BASE}/reader/reader.html`);
   const r = JSON.parse(await q.eval(`LibrarySync.login(${JSON.stringify(LOGIN)}, "secret-pw").then(JSON.stringify)`));
@@ -124,6 +128,20 @@ ok(s && s.time === T && s.cfi === C, "signed in, reopened: same place, same time
   await open(q, BASE);
   const sq = await place(q);
   ok(sq && sq.cfi === C && sq.time === T, "second device: opens at the first one's place (the opening sync)");
+  ok(await q.eval(`marks.some(m => m.id === ${JSON.stringify(MK)})`), "second device: has the first one's bookmark");
+  await q.eval(`(() => { renderMarks(); const i = marks.findIndex(m => m.id === ${JSON.stringify(MK)});
+    document.querySelectorAll('#markList button[title="Delete bookmark"]')[i].click(); })(); 0`);
+  ok(await q.eval("LibrarySync.syncNow()") === "ok", "second device: deleted it and synced");
+  // the first device syncs, but its upload fails after the merge was written locally: the open book
+  // must still drop the bookmark (else a later edit would bring it back)
+  await p.eval(`window.__fetch = fetch; window.fetch = (u, o) => o && o.method === "PUT"
+    ? Promise.resolve(new Response("{}", { status: 500 })) : __fetch(u, o); 0`);
+  await p.eval("setFont(10); 0"); await settle(p);   // something of its own to upload
+  ok(await p.eval("LibrarySync.syncNow()") === "offline", "first device: upload fails");
+  await sleep(300);
+  ok(await p.eval(`!marks.some(m => m.id === ${JSON.stringify(MK)})`), "first device: the deleted bookmark is gone from the open book");
+  ok(await p.eval(`renderMarks(), document.querySelectorAll('#markList .mark').length`) === 0, "first device: and from the list");
+  await p.eval("window.fetch = __fetch; setFont(-10); 0"); await settle(p);
   for (let i = 0; i < 3; i++) { await q.eval("rendition.next().then(() => 0)"); await settle(q); }
   const moved = await place(q);
   await q.eval("sendPlace(); 0"); await sleep(800);   // as on leaving the page
@@ -139,6 +157,16 @@ ok(s && s.time === T && s.cfi === C, "signed in, reopened: same place, same time
   s = await place(p);
   ok(await p.eval("anchor") === moved.cfi && s.cfi === moved.cfi && s.time === moved.time,
      `"Continue": at the other device's place, with its time (${s && s.time} / ${moved.time})`);
+  // an offer left on the screen while the reader goes on is dropped, and can't be taken any more
+  await p.eval(`localStorage.setItem(bookKey, JSON.stringify({ cfi: ${JSON.stringify(C)}, pct: 0.01, title: "x", time: Date.now() }));
+    offerPlace(); window.__act = toastAction; 0`);
+  ok(await p.eval("document.getElementById('toast').classList.contains('show')"), "another offer shown");
+  await p.eval("rendition.next().then(() => 0)"); await settle(p);
+  ok(!(await p.eval("document.getElementById('toast').classList.contains('show')")), "a page turn hides it");
+  const mine = await place(p);
+  await p.eval("__act && __act(); 0"); await settle(p); await sleep(300); await settle(p);
+  s = await place(p);
+  ok(s.cfi === mine.cfi && s.time === mine.time && await p.eval("anchor") === mine.cfi, "the old offer taken late: nothing happens");
 }
 await p.eval("document.getElementById('acctBtn').click(); 0").catch(() => {}); await sleep(300);
 await p.eval("document.getElementById('acctSignOut').click(); 0").catch(() => {});

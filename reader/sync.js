@@ -221,12 +221,16 @@
       report.prefs = report.prefs || r.prefs;
       report.opened = report.opened || r.opened;
     }
-    function finish() {
-      lsSet(K_LAST, String(Date.now()));
-      if (seq === changeSeq) lsDel(K_DIRTY);
+    // What applyLocal changed is announced however the attempt ends (ok, offline, a failed PUT, the
+    // deadline): localStorage already holds it, and the next sync would find nothing new to report.
+    function announce() {
       if (report.places.length || report.marks.length || report.prefs || report.opened) {
         listeners.slice().forEach(function (fn) { try { fn(report); } catch (e) { /* ignore */ } });
       }
+    }
+    function finish() {
+      lsSet(K_LAST, String(Date.now()));
+      if (seq === changeSeq) lsDel(K_DIRTY);
       return 'ok';
     }
     function round(server, version, puts) {
@@ -247,7 +251,7 @@
       if (r.status === 401) return dropToken();
       if (r.status !== 200 || !isObj(r.body)) return 'offline';
       return round(isObj(r.body.doc) ? r.body.doc : {}, r.body.version, 0);
-    });
+    }).then(function (res) { announce(); return res; }, function (e) { announce(); throw e; });
   }
 
   function syncNow(opts) {
