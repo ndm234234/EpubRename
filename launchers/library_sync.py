@@ -234,12 +234,12 @@ class SyncStore:
     def _read_json(self, path, default=None):
         """Parsed file; `default` only if it does not exist; a file that can't be parsed raises Corrupt."""
         try:
-            text = path.read_text(encoding="utf-8-sig")
+            raw = path.read_bytes()
         except FileNotFoundError:
             return default
         try:
-            return json.loads(text)
-        except ValueError:
+            return json.loads(raw.decode("utf-8-sig"))
+        except ValueError:   # includes UnicodeDecodeError
             raise Corrupt(path.name) from None
 
     def _read_account(self, login):

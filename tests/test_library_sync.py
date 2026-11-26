@@ -313,3 +313,16 @@ def test_respond_turns_exceptions_into_500(store):
     h = Fake()
     respond(h, Boom())
     assert h.sent == [500]
+
+
+def test_invalid_utf8_files_are_corrupt_not_crashes(store, tmp_path):
+    token = new_token(store)
+    d = tmp_path / ".sync"
+    (d / "accounts" / "aaa.json").write_bytes(b'{"x":"\xff"}')
+    assert call(store, "GET", "/__sync/data", token=token)[0] == 200
+    f = d / "data" / "ann.json"
+    f.parent.mkdir(exist_ok=True)
+    f.write_bytes("{}".encode("utf-16"))
+    assert call(store, "GET", "/__sync/data", token=token)[0] == 500
+    assert call(store, "PUT", "/__sync/data", {"version": 0, "doc": {"v": 1}}, token)[0] == 500
+    assert f.read_bytes() == "{}".encode("utf-16")
