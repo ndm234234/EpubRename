@@ -245,7 +245,8 @@
   .seg.faces .wide2 { grid-column: 1 / -1; min-height: 36px; }
   .seg.faces b { font-size: 15px; font-weight: 400; }
   .seg.faces button.on b { font-weight: 700; }
-  .seg.faces small { font-size: 13px; color: var(--muted); }
+  .seg.faces small { font-size: 13px; font-weight: 400; color: var(--muted); }
+  #bookFont:empty { display: none; }
   #fontPct { flex: 1.3; display: grid; place-items: center; font-size: 14px; font-weight: 600;
              font-variant-numeric: tabular-nums; }
   @media (hover: none) and (pointer: coarse) { .seg button { height: 42px; } }
@@ -348,7 +349,7 @@
       </div></div>
     <div><h5>Font</h5>
       <div class="seg faces" id="faceSeg">
-        <button data-v="book" class="wide2">As in book</button>
+        <button data-v="book" class="wide2"><b>As in book</b><small id="bookFont"></small></button>
       </div></div>
     <div><h5>Layout</h5>
       <div class="seg" id="layoutSeg">
@@ -1584,6 +1585,69 @@ function applyTypo(doc) {
   st.textContent = typoCss();
   doc.head.appendChild(st);   // (re)append: must stay after the book's own styles
 }
+// The font the book itself sets for its text, for the "As in book" button: the family most of the
+// text of the open chapter gets from the book's own styles (the reader's font is switched off
+// while measuring). A font the book carries is named after its file ("LiberationSerif-Regular.ttf"
+// → "Liberation Serif"): books often give embedded fonts made-up names like "Font_e6e51c44-…".
+const GENERIC = { serif: "default serif", "sans-serif": "default sans", monospace: "default monospace",
+                  "system-ui": "system font", "ui-serif": "default serif", "ui-sans-serif": "default sans" };
+const madeUp = name => !name || /[0-9a-f]{8}-?[0-9a-f]{4}|^font[\s_-]*\d*$/i.test(name);
+const firstFamily = list => (list.match(/^\s*("[^"]*"|'[^']*'|[^,]*)/) || ["", ""])[1].trim().replace(/^["']|["']$/g, "");
+function fontFileName(url) {
+  // epub.js hands the page blob: copies of the book's files; find the file's own path
+  const res = book && book.resources, i = res && res.replacementUrls ? res.replacementUrls.indexOf(url) : -1;
+  if (i >= 0) url = res.urls[i];
+  let n = url.split(/[/\\]/).pop().replace(/[?#].*$/, "");
+  try { n = decodeURIComponent(n); } catch {}
+  n = n.replace(/\.(ttf|otf|woff2?|eot)$/i, "").replace(/[-_ ]+(regular|italic|bold|bolditalic|medium|light|semibold|oblique|book|roman|it)$/i, "");
+  return n.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").trim();
+}
+function bookFontName(doc) {
+  if (!doc || !doc.body) return "";
+  const own = doc.getElementById("readerTypo");
+  if (own && own.sheet) own.sheet.disabled = true;
+  const view = doc.defaultView, weight = new Map();
+  let initial;
+  try {
+    // Every piece of text counts with its length: the main text wins over headings and notes
+    const walk = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    for (let n, k = 0; (n = walk.nextNode()) && k < 5000; k++) {
+      const len = n.nodeValue.trim().length;
+      if (!len) continue;
+      const ff = view.getComputedStyle(n.parentElement).fontFamily;
+      weight.set(ff, (weight.get(ff) || 0) + len);
+    }
+    if (!weight.size) weight.set(view.getComputedStyle(doc.body).fontFamily, 1);
+    // What the browser uses when the book sets nothing
+    const probe = doc.createElement("span");
+    probe.style.fontFamily = "initial";
+    doc.body.append(probe);
+    initial = view.getComputedStyle(probe).fontFamily;
+    probe.remove();
+  } finally {
+    if (own && own.sheet) own.sheet.disabled = false;
+  }
+  const list = [...weight].sort((a, b) => b[1] - a[1])[0][0];
+  if (list === initial) return "default serif";
+  const family = firstFamily(list);
+  if (GENERIC[family.toLowerCase()]) return GENERIC[family.toLowerCase()];
+  for (const sheet of doc.styleSheets) {
+    let rules;
+    try { rules = sheet.cssRules; } catch { continue; }
+    for (const r of rules) {
+      if (r.type !== CSSRule.FONT_FACE_RULE || firstFamily(r.style.getPropertyValue("font-family")) !== family) continue;
+      const url = (r.style.getPropertyValue("src").match(/url\(\s*["']?([^"')]+)/) || [])[1];
+      const fromFile = url ? fontFileName(url) : "";
+      const name = !madeUp(fromFile) ? fromFile : !madeUp(family) ? family : "a font";
+      return name + " · in the book";
+    }
+  }
+  return family;
+}
+function showBookFont() {
+  const c = rendition && rendition.getContents()[0];
+  $("bookFont").textContent = c ? bookFontName(c.document) : "";
+}
 function showTypo() {
   $("fontPct").textContent = prefs.font + "%";
   $("smaller").disabled = !rendition || prefs.font <= 60;
@@ -1606,7 +1670,7 @@ function toggleTypo(open = !$("typo").classList.contains("open")) {
   $("typo").classList.toggle("open", open);
   $("typoBtn").classList.toggle("active", open);
   $("typoBtn").setAttribute("aria-expanded", open);
-  if (open) { toggleToc(false); toggleSearch(false); toggleMarks(false); showTypo(); }
+  if (open) { toggleToc(false); toggleSearch(false); toggleMarks(false); showTypo(); showBookFont(); }
 }
 $("typoBtn").onclick = e => { e.stopPropagation(); toggleTypo(); };
 document.addEventListener("click", e => {   // a click anywhere else closes it
