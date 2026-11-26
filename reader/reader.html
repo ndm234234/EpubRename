@@ -565,6 +565,10 @@ async function openBook(data, fileName) {
   rendition.hooks.content.register(contents => {
     applyTypo(contents.document);
     contents.document.addEventListener("wheel", onWheel, { passive: false });
+    // Taps on the text are heard here, not through epub.js: it listens passively, so the browser
+    // would ignore "this tap is the reader's" and act on it too (Chrome's "Touch to Search" sheet)
+    contents.document.addEventListener("touchstart", touchStart, { passive: true });
+    contents.document.addEventListener("touchend", touchEnd, { passive: false });
     // The chapter grew or shrank after it was shown (a font loaded late): page numbers anew
     let t = 0;
     contents.on("resize", () => { clearTimeout(t); t = setTimeout(() => {
@@ -619,8 +623,6 @@ async function openBook(data, fileName) {
   rendition.on("relocated", onRelocated);
   rendition.on("click", () => toggleTypo(false));
   rendition.on("keydown", onKey);
-  rendition.on("touchstart", touchStart);
-  rendition.on("touchend", touchEnd);
 
   const saved = store.get(bookKey);
   try { await (saved && saved.cfi ? displayAt(saved.cfi) : rendition.display()); }
