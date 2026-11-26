@@ -316,7 +316,16 @@ PAGE = r"""<!DOCTYPE html>
            -webkit-backdrop-filter: saturate(1.6) blur(16px); backdrop-filter: saturate(1.6) blur(16px);
            border-bottom: 1px solid var(--line); padding: 12px 28px; }
   .bar { max-width: 1400px; margin: 0 auto; display: flex; gap: 10px 14px; flex-wrap: wrap; align-items: center; }
-  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; margin-right: 6px; }
+  .brand { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; margin-right: 6px; }
+  .brand .names { display: grid; min-width: 0; }
+  /* With sync: the whole logo + name block is the account button (a button laid over it, so the
+     h1 stays a heading), with the account's state on a second line */
+  #acctBrand { position: absolute; inset: -4px -6px; z-index: 1; padding: 0; border: 0; border-radius: 12px;
+               background: none; cursor: pointer; }
+  #acctBrand:hover, #acctBrand[aria-expanded=true] { background: var(--accent-soft); }
+  .brand:has(#acctBrand:not([hidden])) h1 { line-height: 1.2; }
+  #acctLine { font-size: 12px; line-height: 1.25; color: var(--muted); white-space: nowrap; overflow: hidden;
+              text-overflow: ellipsis; }
   .logo { width: 34px; height: 34px; padding: 7px; border-radius: 10px; color: #fff; stroke-width: 2;
           background: linear-gradient(135deg, #5b8cff, #3563e9); box-shadow: 0 4px 12px -4px rgba(53,99,233,.6); }
   h1 { font-size: 19px; font-weight: 700; letter-spacing: -.01em; margin: 0; white-space: nowrap;
@@ -505,7 +514,7 @@ PAGE = r"""<!DOCTYPE html>
   footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 20px 32px; opacity: .8; }
 
   /* Account (sync between devices): same panel as in the reader */
-  #acctPop { gap: 8px; }
+  #acctPop { gap: 8px; right: auto; left: max(16px, calc((100vw - 1400px) / 2 + 28px)); }   /* under the logo */
   #acctPop .tabs { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--surface-2); }
   #acctPop .tabs button { flex: 1; height: 32px; padding: 0 8px; border: 0; border-radius: 8px; font: inherit; font-size: 14px;
                           color: var(--muted); background: none; cursor: pointer; }
@@ -531,6 +540,7 @@ PAGE = r"""<!DOCTYPE html>
     main { padding: 20px 16px 48px; }
     .note { margin: 12px 16px 0; }
     .pop { right: 16px; }
+    #acctPop { right: auto; left: 16px; }
     .search { order: 3; flex-basis: 100%; }
     .brand { flex: 1; }
     .chip span { display: none; }
@@ -565,8 +575,10 @@ PAGE = r"""<!DOCTYPE html>
 <header><div class="bar">
   <div class="brand">
     <svg class="ic logo" aria-hidden="true"><use href="#i-library"/></svg>
-    <h1>__TITLE__</h1>
+    <div class="names"><h1>__TITLE__</h1><span id="acctLine" hidden></span></div>
     <span id="count" class="badge"></span>
+    <button id="acctBrand" type="button" aria-expanded="false" aria-controls="acctPop" aria-label="Account" hidden
+      title="Account: your last-opened books and settings on all your devices"></button>
   </div>
   <label class="search" id="searchBox">
     <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
@@ -588,8 +600,6 @@ PAGE = r"""<!DOCTYPE html>
       <svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><span>Group by author</span></button>
     <button id="offBtn" class="chip" type="button" aria-expanded="false" aria-controls="offPanel" hidden
       title="Books kept on this device"><svg class="ic" aria-hidden="true"><use href="#i-cloud"/></svg><span>Offline</span><b id="offLabel" class="count"></b></button>
-    <button id="acctBtn" class="chip" type="button" aria-expanded="false" aria-controls="acctPop" hidden
-      title="Account: your last-opened books and settings on all your devices"><svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><span>Account</span></button>
     <a id="openFile" class="chip" href="__READER__" title="Open any EPUB file in the reader">
       <svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span>Open file</span></a>
   </div>
@@ -1321,7 +1331,17 @@ function syncedAt(t) {
   const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return d.toDateString() === now.toDateString() ? "at " + time : d.toLocaleDateString() + " " + time;
 }
+// Under the library name: the account and its last sync (one line), or "Sign in to sync"
+function showBrand() {
+  if (!Sync.available()) return;
+  const a = Sync.signedIn() && Sync.account(), t = Sync.lastSync();
+  const line = !a ? "Sign in to sync" : a.login + " · " + (syncResult === "busy" ? "syncing…"
+    : syncResult === "offline" || !t ? "waiting for the library computer" : "synced " + syncedAt(t));
+  $("acctLine").textContent = line;
+  $("acctBrand").setAttribute("aria-label", a ? "Account: " + a.login : "Account: sign in to sync");
+}
 function showAcct() {
+  showBrand();
   const on = Sync.signedIn(), a = Sync.account();
   $("acctIn").hidden = on;
   $("acctOut").hidden = !on;
@@ -1342,7 +1362,7 @@ function showAcct() {
 }
 function toggleAcct(open = $("acctPop").hidden) {
   $("acctPop").hidden = !open;
-  $("acctBtn").setAttribute("aria-expanded", open);
+  $("acctBrand").setAttribute("aria-expanded", open);
   if (open) { acctError(""); showAcct(); }
 }
 async function syncFromPanel() {
@@ -1389,15 +1409,18 @@ $("acctPop").querySelector(".tabs").addEventListener("click", e => {
 });
 $("acctPop").addEventListener("keydown", e => {
   e.stopPropagation();   // typing here never reaches the catalog's shortcuts
-  if (e.key === "Escape") { e.preventDefault(); toggleAcct(false); $("acctBtn").focus(); }
+  if (e.key === "Escape") { e.preventDefault(); toggleAcct(false); $("acctBrand").focus(); }
 });
 $("acctSync").onclick = () => { acctError(""); syncFromPanel(); };
 $("acctSignOut").onclick = async () => { await Sync.logout(); syncResult = ""; acctError(""); showAcct(); };
-$("acctBtn").onclick = e => { e.stopPropagation(); toggleAcct(); };
+$("acctBrand").onclick = e => { e.stopPropagation(); toggleAcct(); };
 document.addEventListener("click", e => {   // a click elsewhere closes the panel
-  if (!$("acctPop").hidden && !$("acctPop").contains(e.target) && !$("acctBtn").contains(e.target)) toggleAcct(false);
+  if (!$("acctPop").hidden && !$("acctPop").contains(e.target) && !$("acctBrand").contains(e.target)) toggleAcct(false);
 });
-if (Sync.available()) $("acctBtn").hidden = false;   // secure pages only: a password never crosses the Wi-Fi in the clear
+if (Sync.available()) {   // secure pages only: a password never crosses the Wi-Fi in the clear
+  $("acctBrand").hidden = $("acctLine").hidden = false;
+  showBrand();
+}
 
 // Signed in: what other devices opened and chose comes in at start (never waiting longer than 2 s
 // for the library computer), when the page comes back to the front, and whenever a sync brings news.
@@ -1406,6 +1429,7 @@ if (Sync.available()) $("acctBtn").hidden = false;   // secure pages only: a pas
     openedAt = openedTimes();
     applyPrefs();
     render(true);
+    showBrand();
     if (!$("acctPop").hidden) showAcct();
   };
   Sync.onRemoteChange(r => { if (r.opened || r.prefs) refresh(); });

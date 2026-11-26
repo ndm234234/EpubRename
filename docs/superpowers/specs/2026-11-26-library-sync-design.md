@@ -171,7 +171,9 @@ Files, in the library folder (`<library>/.sync/`, never served as static files):
 
 ## Interface
 
-- Catalog and reader: an account button. Signed out: "Sign in" (login, password) and "Create
+- Reader: an account button. Catalog: the logo and library name at the top left are the account
+  button, with a second line under the name ("Sign in to sync", or the email and the last sync).
+  Signed out: "Sign in" (login, password) and "Create
   account" (login, password twice, library code). Signed in: the login, the time of the last sync
   (or "waiting for the library computer"), "Sync now", "Sign out".
 - Signing out keeps the device's local data; nothing is deleted on the server.
@@ -179,7 +181,7 @@ Files, in the library folder (`<library>/.sync/`, never served as static files):
 - Errors show in that area, never as popups while reading.
 - Device kind: the reader's touch check plus screen width (phone below ~600px).
 - Accounts and sync are offered only on secure pages (`isSecureContext`: the router's https
-  address and `localhost`). On plain `http://192.168…` addresses the account button is hidden, so
+  address and `localhost`). On plain `http://192.168…` addresses there is no account button (the catalog's name is a plain title), so
   a password never crosses the Wi-Fi unencrypted; README says to use the https address. (Each
   address keeps its own local storage anyway.)
 - The sync files live in `<library>/.sync/` (`make_server.py` wipes `.index/` on every run). Both

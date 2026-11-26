@@ -283,14 +283,25 @@ const first = d => d.eval(`(document.querySelector('#list .title') || {}).textCo
 const catalog = async (d, url = CAT) => { await d.goto("about:blank"); await d.goto(url); await d.waitFor("document.querySelectorAll('#list .title').length > 0", 20000); };
 const calls2 = d => d.eval("performance.getEntriesByType('resource').filter(e => e.name.includes('/__sync')).length");
 const login = (d, who) => d.eval(`LibrarySync.login(${JSON.stringify(who)}, "secret-pw").then(r => r.ok)`);
+const BRAND_ON = "(e => !!e && e.tagName === 'BUTTON' && getComputedStyle(e).display !== 'none' && e.getAttribute('aria-controls') === 'acctPop')(document.getElementById('acctBrand'))";
+const LINE_SHOWN = "(e => !!e && getComputedStyle(e).display !== 'none' && e.textContent !== '')(document.getElementById('acctLine'))";
 {
   // signed out: as before
   const t = await device(false, ["--host-resolver-rules=MAP lib.test 127.0.0.1"]);
   await catalog(t);
-  ok(await t.eval("getComputedStyle(document.getElementById('acctBtn')).display !== 'none'"), "catalog, secure page: account button shown");
+  ok(await t.eval("document.getElementById('acctBtn') === null"), "catalog: no separate account chip");
+  ok(await t.eval(BRAND_ON), "catalog, secure page: the logo and library name are the account button");
+  ok(await t.eval("document.getElementById('acctLine').textContent") === "Sign in to sync" && await t.eval(LINE_SHOWN),
+     "catalog, signed out: \"Sign in to sync\" under the library name");
+  ok(await t.eval("document.getElementById('acctBrand').getAttribute('aria-label')") === "Account: sign in to sync", "catalog, signed out: the button's label");
+  ok(await t.eval(`(r => (e => !!e && !!e.closest('#acctBrand'))(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)))(document.querySelector('.brand h1').getBoundingClientRect())`),
+     "catalog: a tap on the library name hits the account button");
+  ok(await t.eval("document.querySelector('header').getBoundingClientRect().height") <= 111, `catalog, 390 px: the header is no taller than before (${await t.eval("document.querySelector('header').getBoundingClientRect().height")} px, was 111)`);
   ok(await calls2(t) === 0, "catalog, signed out: nothing sent to /__sync");
   await catalog(t, CAT.replace("127.0.0.1", "lib.test"));
-  ok(await t.eval("getComputedStyle(document.getElementById('acctBtn')).display === 'none'"), "catalog, plain http with a host name: account button hidden");
+  ok(!(await t.eval(BRAND_ON)) && !(await t.eval(LINE_SHOWN)), "catalog, plain http with a host name: the name is a plain title, no caption");
+  ok(await t.eval(`(r => (e => !!e && !e.closest('button'))(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)))(document.querySelector('.brand h1').getBoundingClientRect())`),
+     "catalog, plain http: the library name is not a button");
   ok(await calls2(t) === 0, "catalog, insecure page: nothing sent to /__sync");
   t.close();
 }
@@ -300,11 +311,20 @@ const reg = JSON.parse(await A.eval(`LibrarySync.register("cat" + Math.floor(Mat
 ok(reg.ok, "device A: account created");
 const LOGIN2 = reg.login;
 await catalog(A);
-await A.eval("document.getElementById('acctBtn').click(); 0");
+await A.waitFor(`document.getElementById('acctLine').textContent.startsWith(${JSON.stringify(LOGIN2 + " · ")})`, 5000).catch(() => {});
+ok((await A.eval("document.getElementById('acctLine').textContent")).startsWith(LOGIN2 + " · "),
+   `catalog, signed in: the email (and the sync) under the library name ("${await A.eval("document.getElementById('acctLine').textContent")}")`);
+ok(await A.eval("document.getElementById('acctBrand').getAttribute('aria-label')") === "Account: " + LOGIN2, "catalog, signed in: the button's label has the email");
+ok(await A.eval("document.getElementById('acctBrand').getAttribute('aria-expanded')") === "false", "catalog: aria-expanded false while closed");
+await A.eval("document.getElementById('acctBrand').click(); 0");
 await sleep(300);
 ok(await A.eval("!document.getElementById('acctPop').hidden"), "catalog: the button opens the panel");
+ok(await A.eval("document.getElementById('acctBrand').getAttribute('aria-expanded')") === "true", "catalog: aria-expanded true while open");
+ok(await A.eval(`(p => p.left < innerWidth / 2 && p.top >= document.querySelector('.brand').getBoundingClientRect().bottom - 1)(document.getElementById('acctPop').getBoundingClientRect())`),
+   "catalog: the panel opens on the left, under the library name");
 ok(await A.eval(SHOWN("#acctOut")) && (await A.eval("document.getElementById('acctLogin').textContent")) === LOGIN2, "catalog panel: signed in as the account");
-await A.eval("document.getElementById('acctBtn').click(); 0");
+await A.eval("document.getElementById('acctPop').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); 0");
+ok(await A.eval("document.getElementById('acctPop').hidden && document.activeElement === document.getElementById('acctBrand')"), "catalog: Esc closes the panel, focus back on the account button");
 // A reads the second book in the reader
 await A.goto("about:blank");
 await A.goto(`${B2}/.index/reader/reader.html#book=${encodeURIComponent("../../" + NAMES[1].split("/").map(encodeURIComponent).join("/"))}`);
@@ -343,7 +363,7 @@ ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: opened the second 
   const E = await device(false);
   await catalog(E);
   await E.eval(`window.__f = fetch; window.fetch = (u, o) => String(u).includes('/__sync/') ? Promise.resolve(new Response("{}", { status: 500 })) : __f(u, o);
-    (() => { document.getElementById('acctBtn').click(); const f = document.getElementById('acctSignIn');
+    (() => { document.getElementById('acctBrand').click(); const f = document.getElementById('acctSignIn');
     f.elements.login.value = "con"; f.elements.password.value = "x"; f.requestSubmit(); })(); 0`);
   await E.waitFor("/had a problem/.test(document.getElementById('acctErr').textContent)", 10000).catch(() => {});
   ok(/had a problem/.test(await E.eval("document.getElementById('acctErr').textContent")), "catalog: a 500 from the library computer is told apart from \"can't reach\"");
@@ -356,6 +376,7 @@ ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: opened the second 
     f.elements.login.value = ${JSON.stringify(LOGIN2)}; f.elements.password.value = "secret-pw"; f.requestSubmit(); })(); 0`);
   await E.waitFor("/Last synced/.test(document.getElementById('acctStatus').textContent)", 10000).catch(() => {});
   ok(await E.eval("LibrarySync.signedIn()"), "device E: signed in from the catalog panel");
+  ok((await E.eval("document.getElementById('acctLine').textContent")).startsWith(LOGIN2), "device E: the email under the library name after signing in from the panel");
   await A.eval(`(() => { const o = JSON.parse(localStorage.getItem('epubLibrary:opened') || '{}');
     o['made-up/later.epub'] = Date.now(); localStorage.setItem('epubLibrary:opened', JSON.stringify(o)); })(); 0`);
   ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: something new synced");

@@ -333,7 +333,8 @@ computer that runs the launcher; nothing goes to the internet.
   The reader syncs when a book is opened, when you come back to the page and when you leave it;
   while you read, changes go out at most once every 30 seconds. Changes made on two devices are
   merged, and a deleted bookmark stays deleted.
-- **Use the https address.** The account button is hidden on a plain `http://192.168.…` address:
+- **Use the https address.** On a plain `http://192.168.…` address there is no account (the
+  catalog's logo is just a title, without "Sign in to sync"; the reader has no account button):
   browsers allow it only on https (or on `localhost`, the same computer). Put the library behind
   https as for installing the app, above.
 - **Wrong codes and passwords are slowed down:** after 5 wrong in a row the library answers
@@ -356,8 +357,9 @@ computer that runs the launcher; nothing goes to the internet.
 The person whose account it is makes it, on their own device (the owner can't make one for
 someone else):
 
-1. Open the catalog or the reader on the library's **https** address and tap the **account
-   button** (in the catalog's header or the reader's toolbar).
+1. Open the catalog or the reader on the library's **https** address and open the account
+   panel: in the catalog tap the **blue book logo and library name** at the top left (it says
+   "Sign in to sync" under the name); in the reader, the account button in the toolbar.
 2. **Create account**: their email, a password twice, and the **library code**. The code (four
    words and two digits, like `river-paper-cold-moon-47`) is printed in the launcher window at
    every start and kept in `.sync/code.txt` in the library folder.
