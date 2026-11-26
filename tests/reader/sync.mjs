@@ -347,7 +347,7 @@ ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: opened the second 
   Bd.close();
 }
 {
-  // D: another fresh app gets B's settings; a browser tab (A) none of them
+  // D: another fresh app gets B's settings; a browser tab (A) only B's sort
   const D = await device(true);
   await D.goto(CAT);
   await login(D, LOGIN2);
@@ -357,9 +357,10 @@ ok(await A.eval("LibrarySync.syncNow()") === "ok", "device A: opened the second 
   ok(await D.eval("document.getElementById('group').getAttribute('aria-pressed')") === "true", "device D (app): and B's grouping");
   D.close();
   await catalog(A);
-  await sleep(1500);
-  ok(await A.eval("document.getElementById('sort').value") === "opened" && await A.eval("document.getElementById('group').getAttribute('aria-pressed')") === "false",
-     "browser tab: keeps its own settings, the default \"Recently opened\" (the app's don't reach it)");
+  await A.waitFor("document.getElementById('sort').value === 'title'", 10000).catch(() => {});
+  ok(await A.eval("document.getElementById('sort').value") === "title", "browser tab on a computer: the sort chosen on the phone's app comes along (one sort for all devices)");
+  ok(await A.eval("document.getElementById('group').getAttribute('aria-pressed')") === "false",
+     "browser tab: keeps its own grouping (the app's doesn't reach it)");
   // E signs in from the catalog's own panel (no reload): back in front, it syncs and gets news
   const E = await device(false);
   await catalog(E);

@@ -12,6 +12,11 @@
     { group: 'catalogTab', key: 'epubIndex', time: 'epubIndex:time' },
     { group: 'catalogApp', key: 'epubIndex:app', time: 'epubIndex:app:time' }
   ];
+  // Settings the same on every kind of device: the catalog's sort (prefs.all in the doc)
+  var SHARED_KIND = 'all';
+  var SHARED_KEYS = [
+    { group: 'catalogSort', key: 'epubIndex:sort', time: 'epubIndex:sort:time' }
+  ];
   var K_ACCOUNT = 'librarySync:account', K_DIRTY = 'librarySync:dirty', K_LAST = 'librarySync:lastSync';
   var THROTTLE_MS = 30000, DEFAULT_TIMEOUT = 8000, AUTH_TIMEOUT = 10000, MAX_PUTS = 3;
 
@@ -156,15 +161,19 @@
     Object.keys(bookMarks).forEach(function (id) { if (Object.keys(bookMarks[id]).length) doc.marks[id] = bookMarks[id]; });
     var op = lsJson(K_OPENED);
     if (isObj(op)) doc.opened = op;
-    var prefs = {};
-    PREF_KEYS.forEach(function (d) {
-      var v = lsJson(d.key);
-      if (!isObj(v)) return;
-      prefs[d.group] = v;
-      var t = Number(lsGet(d.time));
-      if (lsGet(d.time) !== null && isFinite(t)) prefs[d.group + 'Time'] = t;
-    });
-    if (Object.keys(prefs).length) doc.prefs[kind] = prefs;
+    var collect = function (keys, to) {
+      var prefs = {};
+      keys.forEach(function (d) {
+        var v = lsJson(d.key);
+        if (!isObj(v)) return;
+        prefs[d.group] = v;
+        var t = Number(lsGet(d.time));
+        if (lsGet(d.time) !== null && isFinite(t)) prefs[d.group + 'Time'] = t;
+      });
+      if (Object.keys(prefs).length) doc.prefs[to] = prefs;
+    };
+    collect(PREF_KEYS, kind);
+    collect(SHARED_KEYS, SHARED_KIND);
     return doc;
   }
 
@@ -209,12 +218,16 @@
       if (changed) rep.marks.push(id);
     });
     if (isObj(doc.opened) && writeJson(K_OPENED, doc.opened)) rep.opened = true;
-    var mine = isObj(doc.prefs) && isObj(doc.prefs[deviceKind()]) ? doc.prefs[deviceKind()] : {};
-    PREF_KEYS.forEach(function (d) {
-      if (isObj(mine[d.group]) && writeJson(d.key, mine[d.group])) rep.prefs = true;
-      var t = mine[d.group + 'Time'];
-      if (isNum(t) && lsGet(d.time) !== String(t)) { if (lsSet(d.time, String(t))) rep.prefs = true; }
-    });
+    var apply = function (keys, from) {
+      var mine = isObj(doc.prefs) && isObj(doc.prefs[from]) ? doc.prefs[from] : {};
+      keys.forEach(function (d) {
+        if (isObj(mine[d.group]) && writeJson(d.key, mine[d.group])) rep.prefs = true;
+        var t = mine[d.group + 'Time'];
+        if (isNum(t) && lsGet(d.time) !== String(t)) { if (lsSet(d.time, String(t))) rep.prefs = true; }
+      });
+    };
+    apply(PREF_KEYS, deviceKind());
+    apply(SHARED_KEYS, SHARED_KIND);
     return rep;
   }
 

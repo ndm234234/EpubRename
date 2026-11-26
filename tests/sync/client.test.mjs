@@ -301,6 +301,19 @@ test('prefs of another device kind: not applied locally, kept in the doc', async
   assert.equal(d.prefs.phone, undefined);
 });
 
+test('the catalog sort is the same on every kind of device', async () => {
+  const S = env({ kind: 'computer' });
+  put('epubIndex:sort', { sort: 'author' }); put('epubIndex:sort:time', '100');
+  srv.doc = M.merge(M.emptyDoc(), { prefs: { all: { catalogSort: { sort: 'opened' }, catalogSortTime: 200 } } });
+  await S.syncNow();
+  assert.deepEqual(get('epubIndex:sort'), { sort: 'opened' });           // a phone's newer choice reaches the computer
+  put('epubIndex:sort', { sort: 'title' }); put('epubIndex:sort:time', '300');
+  await S.syncNow();
+  assert.deepEqual(srv.doc.prefs.all.catalogSort, { sort: 'title' });      // and the computer's goes back to all
+  assert.equal(srv.doc.prefs.all.catalogSortTime, 300);
+  assert.equal(srv.doc.prefs.computer && srv.doc.prefs.computer.catalogSort, undefined);
+});
+
 test('non-synced keys are untouched and never uploaded', async () => {
   const S = env();
   seedLocal(); put('epubReader:other', 'zzz');

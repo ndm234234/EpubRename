@@ -325,9 +325,10 @@ computer that runs the launcher; nothing goes to the internet.
   sensitive); the library never sends mail, so nothing is verified and there is no "reset by mail".
   How to add and remove accounts: below.
 - **What is synced:** reading places, bookmarks (with their names and notes) and the recently
-  opened books are the same on all devices. The reader and catalog settings are shared only between
-  devices of the same kind (phone, tablet, computer), since what suits one screen doesn't suit
-  another.
+  opened books are the same on all devices, and so is the catalog's sort (choose "Recently
+  opened" on the phone and the computer shows it too). The reader's settings and the catalog's
+  grouping are shared only between devices of the same kind (phone, tablet, computer), since what
+  suits one screen doesn't suit another.
 - **What is not synced:** the books themselves and the offline copies on a device.
 - **Offline is fine:** changes are kept on the device and sent when the library is reachable again.
   The reader syncs when a book is opened, when you come back to the page and when you leave it;

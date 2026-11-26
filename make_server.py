@@ -680,11 +680,14 @@ const inApp = navigator.standalone === true ||
 const openedTimes = () => { try { return JSON.parse(localStorage.getItem("epubLibrary:opened")) || {}; } catch { return {}; } };
 let openedAt = openedTimes();
 
-// Settings survive page reloads (the app keeps its own)
-const PREFS = inApp ? "epubIndex:app" : "epubIndex";
+// Settings survive page reloads (the app keeps its own); the sort is one for all devices (synced)
+const PREFS = inApp ? "epubIndex:app" : "epubIndex", SORT = "epubIndex:sort";
 function applyPrefs() {
-  const saved = (() => { try { return JSON.parse(localStorage.getItem(PREFS)) || {}; } catch { return {}; } })();
-  $("sort").value = saved.sort || "opened";   // the books read last first, unless a sort was chosen
+  const read = k => { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } };
+  const saved = read(PREFS), shared = read(SORT);
+  // the sort chosen last on any device (and any of this device's catalogs), else this catalog's own,
+  // else the books read last first
+  $("sort").value = shared.sort || saved.sort || "opened";
   if (!$("sort").value) $("sort").value = "opened";
   $("group").setAttribute("aria-pressed", saved.group === true);
 }
@@ -1280,7 +1283,13 @@ function toast(text) {
 
 if (location.protocol === "file:") $("fileNote").hidden = false;
 $("q").addEventListener("input", () => { render(); savePlace(); });
-$("sort").addEventListener("change", () => { save(); render(); });
+$("sort").addEventListener("change", () => {
+  try {
+    localStorage.setItem(SORT, JSON.stringify({ sort: $("sort").value }));
+    localStorage.setItem(SORT + ":time", String(Date.now()));
+  } catch {}
+  save(); render();
+});
 $("group").addEventListener("click", e => {
   const b = e.currentTarget; b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") !== "true");
   save(); render();
