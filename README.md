@@ -194,6 +194,7 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
 - **Scroll text** (*Aa* → *Layout*): instead of pages, the whole book scrolls up as one ribbon, each
   chapter right after the one before (finger, wheel, scrollbar; `↓` / `↑` a little, `PageDown` /
   `Space` / the side arrows a screen). The place is the line at the top; the status line shows the %.
+  This device only: it is not synced to your other devices.
 - **Phones and tablets** read with the whole screen for the text: only a thin line at the bottom
   stays, numbers only — `4/24` (page in the chapter) on the left, `120/560 21%` (page in the
   book, % read) on the right — and the text has the same small margin
@@ -332,7 +333,8 @@ computer that runs the launcher; nothing goes to the internet.
   (choose "Recently opened" on the phone and the computer shows it too). The reader's settings
   (font, theme, layout) are shared only between devices of the same kind (phone, tablet,
   computer), since what suits one screen doesn't suit another.
-- **What is not synced:** the books themselves and the offline copies on a device.
+- **What is not synced:** the books themselves, the offline copies on a device, and *Scroll text*:
+  each device keeps its own (scroll on the phone, turn pages on the computer).
 - **Offline is fine:** changes are kept on the device and sent when the library is reachable again.
   The reader syncs when a book is opened, when you come back to the page and when you leave it;
   while you read, changes go out at most once every 30 seconds. Changes made on two devices are

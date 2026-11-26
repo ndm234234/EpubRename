@@ -527,9 +527,13 @@ const THEME_CSS = {
            "body.dark *": { color: "inherit !important", "background-color": "transparent !important" },
            "body.dark a, body.dark a *": { color: "#6ea0ff !important" } },
 };
-const PREFS = { theme: "light", font: 100, face: "book", layout: "book", scroll: false };
+const PREFS = { theme: "light", font: 100, face: "book", layout: "book" };
 const prefs = Object.assign({}, PREFS, store.get("epubReader:prefs"));
-const savePrefs = () => { store.set("epubReader:prefs", prefs); store.set("epubReader:prefsTime", Date.now()); Sync.changed(); };
+delete prefs.scroll;
+// "Scroll text" is this device's own (a phone may scroll, the computer turn pages): not in the
+// synced settings
+let scrollPref = store.get("epubReader:scroll") === true;
+const savePrefs = () => { delete prefs.scroll; store.set("epubReader:prefs", prefs); store.set("epubReader:prefsTime", Date.now()); Sync.changed(); };
 document.documentElement.dataset.theme = prefs.theme;
 // The phone's status bar (and an installed app's title bar) in the colour of the reader's bar
 const showThemeColor = () => $("themeColor").content = { light: "#fdfcf8", sepia: "#f4ecd8", dark: "#161618" }[prefs.theme] || "#fdfcf8";
@@ -657,7 +661,7 @@ async function openBook(data, fileName) {
 // all the chapters one after another (its scrolled flow with the continuous manager). Switching
 // makes it anew (remakeRendition).
 let quiet = false;   // opening at the start: not a move of the reader's
-let scrollMode = false;   // the rendition on the screen scrolls (prefs.scroll when it was made)
+let scrollMode = false;   // the rendition on the screen scrolls (scrollPref when it was made)
 const atStart = async () => { quiet = true; try { await rendition.display(); } finally { quiet = false; } };
 // The book's own content hooks before any rendition: each rendition adds its own there and
 // destroy() leaves them, so a new one starts from these (no dead hooks after mode switches)
@@ -665,7 +669,7 @@ let bookHooks = null;
 function makeRendition() {
   const hooks = book.spine.hooks.content.hooks;
   if (bookHooks) hooks.splice(0, hooks.length, ...bookHooks); else bookHooks = hooks.slice();
-  scrollMode = !!prefs.scroll;
+  scrollMode = scrollPref;
   rendition = book.renderTo("viewer", scrollMode
     ? { width: "100%", height: "100%", flow: "scrolled", manager: "continuous", spread: "none", allowScriptedContent: false }
     : { width: "100%", height: "100%", spread: "auto", allowScriptedContent: false });
@@ -754,7 +758,7 @@ function makeRendition() {
 }
 // "Scroll text" switched (here or on another device of the kind): the book anew, at the same place
 async function remakeRendition() {
-  if (!rendition || scrollMode === !!prefs.scroll) return;
+  if (!rendition || scrollMode === scrollPref) return;
   const at = anchor;
   ++placing; settling = false;   // a placing still going on in the old one stops there
   rendition.destroy();
@@ -2180,7 +2184,7 @@ function showTypo() {
     if (e.dataset.tab) e.setAttribute("aria-selected", on);
   }
   $("fontPct").textContent = prefs.font + "%";
-  $("scrollText").checked = !!prefs.scroll;
+  $("scrollText").checked = scrollPref;
   $("smaller").disabled = !rendition || prefs.font <= 60;
   $("bigger").disabled = !rendition || prefs.font >= 200;
   for (const [seg, key] of [["faceSeg", "face"], ["layoutSeg", "layout"]])
@@ -2197,8 +2201,8 @@ function relayout() { if (anchor) displayAt(anchor); }
 for (const [seg, key] of [["faceSeg", "face"], ["layoutSeg", "layout"]])
   $(seg).addEventListener("click", e => { const b = e.target.closest("button"); if (b) setTypo(key, b.dataset.v); });
 $("scrollText").addEventListener("change", e => {
-  prefs.scroll = e.target.checked;
-  savePrefs();
+  scrollPref = e.target.checked;
+  store.set("epubReader:scroll", scrollPref);
   if (placeShown) remakeRendition();
 });
 function toggleTypo(open = !$("typo").classList.contains("open")) {
@@ -2268,13 +2272,13 @@ function reloadPrefs() {
   const before = JSON.stringify(prefs);
   for (const k of Object.keys(prefs)) delete prefs[k];
   Object.assign(prefs, PREFS, store.get("epubReader:prefs"));
+  delete prefs.scroll;   // an older reader synced it; now each device keeps its own
   if (!FACES[prefs.face]) prefs.face = "book";
   if (JSON.stringify(prefs) === before) return;
   document.documentElement.dataset.theme = prefs.theme;
   showThemeColor();
   showTypo();
   if (!rendition) return;
-  if (placeShown && scrollMode !== !!prefs.scroll) { remakeRendition(); return; }   // with the new settings
   try {
     rendition.themes.select(prefs.theme);
     rendition.themes.fontSize(prefs.font + "%");

@@ -6,7 +6,8 @@
 //   and a resize keep the time; reopening shows the same first visible word
 // - contents, search hits and bookmarks land at the top; a bookmark stores the current place
 // - keys scroll (arrow a little, PageDown / Space a screen); a tap shows / hides the bars and
-//   never jumps; the setting is part of epubReader:prefs and a synced change switches the mode
+//   never jumps; the setting is this device's own (epubReader:scroll, not synced): reader settings
+//   that come from another device leave the mode as it is
 // A phone (390x844 touch) and a desktop (1280x800).
 import { launch, sleep } from "./cdp.mjs";
 import { HELPERS } from "./helpers.mjs";
@@ -116,7 +117,8 @@ for (const phone of [true, false]) {
   await scrollBox(p, true); await settle(p);
   await p.eval("document.getElementById('typoBtn').click(); 0"); await sleep(300);
   ok(await p.eval("__flow()") === "scrolled", "the checkbox: scroll mode");
-  ok((await J(p, "JSON.parse(localStorage.getItem('epubReader:prefs'))")).scroll === true, "kept as prefs.scroll in epubReader:prefs (synced with the other reader settings)");
+  ok(await p.eval("localStorage.getItem('epubReader:scroll')") === "true", "kept as epubReader:scroll, this device's own");
+  ok(!("scroll" in (await J(p, "JSON.parse(localStorage.getItem('epubReader:prefs'))"))), "not in epubReader:prefs (the reader settings that sync)");
   { const l = await sameWord(p, w0); ok(atTop(l), `scroll mode: the page's first word at the top (${fmt(l)})` + (l ? "" : await p.eval(`JSON.stringify({ w0: ${JSON.stringify(w0)}, anchor, settling, at: placeBox(anchor), views: shownViews().map(v => v.section.href + ":" + Math.round(v.iframe.getBoundingClientRect().top) + "/" + Math.round(v.iframe.getBoundingClientRect().height)) })`))); }
   if (phone) { const in1 = await J(p, "__inset()");
     ok(Math.abs(in1.left - in0.left) <= 3 && Math.abs(in1.right - in0.right) <= 12, `phone: the same side margins as on pages (pages ${in0.left}/${in0.right}px, scroll ${in1.left}/${in1.right}px)`); }
@@ -332,17 +334,16 @@ for (const phone of [true, false]) {
     ok(!(await p.eval(`marks.some(m => m.cfi === ${JSON.stringify(a)})`)), "pressed again: the bookmark removed");
   }
 
-  // 13. a synced change of the setting (another device of the kind) switches the mode
+  // 13. reader settings synced from another device (with an old "scroll" in them) leave the mode
   {
     const f = await J(p, "__first()");
-    await p.eval(`localStorage.setItem('epubReader:prefs', JSON.stringify(Object.assign({}, prefs, { scroll: false }))); reloadPrefs(); 0`);
+    await p.eval(`localStorage.setItem('epubReader:prefs', JSON.stringify(Object.assign({}, prefs, { scroll: false, font: 110 }))); reloadPrefs(); 0`);
     await sleep(300); await settle(p);
-    ok(await p.eval("__flow()") === "paginated" && await p.eval("document.getElementById('scrollText').checked") === false, "synced prefs.scroll=false: paged");
-    const st = await J(p, "__state()"), w = await J(p, "__wordAt(anchor)");
-    ok(w && w.href === f.href && Math.abs(w.k - f.k) <= 20 && Math.round(st.page) === await p.eval("__pageOf(anchor)"), `the place kept (page ${st.page}, "${st.first}", was "${f.t}")`);
-    await p.eval(`localStorage.setItem('epubReader:prefs', JSON.stringify(Object.assign({}, prefs, { scroll: true }))); reloadPrefs(); 0`);
-    await sleep(300); await settle(p);
-    ok(await p.eval("__flow()") === "scrolled" && await p.eval("document.getElementById('scrollText').checked"), "synced prefs.scroll=true: scroll mode");
+    ok(await p.eval("prefs.font") === 110, "synced settings applied (font 110%)");
+    ok(await p.eval("__flow()") === "scrolled" && await p.eval("document.getElementById('scrollText').checked"), "synced settings: still scroll mode (the setting is this device's)");
+    { const l = await sameWord(p, f); ok(atTop(l), `the place kept (${fmt(l)})`); }
+    await p.eval("savePrefs(); 0");
+    ok(!("scroll" in (await J(p, "JSON.parse(localStorage.getItem('epubReader:prefs'))"))), "saving again drops the old \"scroll\" from the synced settings");
   }
   p.close();
 }
