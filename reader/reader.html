@@ -231,7 +231,9 @@
   /* Text settings ("Aa"): size, font, layout */
   #typoBtn .aa { font-size: 17px; }
   #typo { position: absolute; z-index: 11; top: 8px; right: 8px; width: min(330px, calc(100vw - 16px));
-          padding: 12px; display: grid; gap: 12px; background: var(--panel); border: 1px solid var(--line);
+          padding: 12px; display: grid; gap: 12px; border: 1px solid var(--line);
+          /* see-through, so the text behind shows how a size or font change looks */
+          background: color-mix(in srgb, var(--panel) 80%, transparent);
           border-radius: 14px; box-shadow: var(--shadow); opacity: 0; visibility: hidden; transform: translateY(-6px);
           transition: opacity .15s, transform .15s, visibility .15s; max-height: calc(100% - 16px); overflow-y: auto; }
   #typo.open { opacity: 1; visibility: visible; transform: none; }
