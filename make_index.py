@@ -365,8 +365,10 @@ PAGE = r"""<!DOCTYPE html>
                        rgba(0,0,0,.08) 4.5%, transparent 9%); }
   .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .shelf { position: relative; transition: transform .2s ease; }
-  .book:hover .shelf, .shelf:focus-within { transform: translateY(-4px); }
-  .book:hover .cover, .shelf:focus-within .cover { box-shadow: var(--shadow-hover); }
+  /* Lifted under the mouse or when reached with the keyboard; not when focus just comes back
+     to it after a book's page is closed by a tap or click (that would look like an animation) */
+  .book:hover .shelf, .shelf:has(:focus-visible) { transform: translateY(-4px); }
+  .book:hover .cover, .shelf:has(:focus-visible) .cover { box-shadow: var(--shadow-hover); }
   .ph { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center;
         padding: 16px 14px 16px 20px; font-weight: 700; text-align: center; gap: 10px; line-height: 1.25;
         text-shadow: 0 1px 2px rgba(0,0,0,.25); }
@@ -708,7 +710,7 @@ const shelfCover = b => document.querySelector(`.book[data-key="${CSS.escape(b.h
 const onScreen = r => r.width > 0 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;
 const box = r => ({ left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px" });
 
-// The running transition (opening or closing): its animations, the flying cover copy, the
+// The running opening transition: its animations, the flying cover copy, the
 // covers hidden meanwhile and what to do at the end. Only one at a time; all clean-up is here,
 // so an interrupted transition never leaves a stray copy or a hidden cover behind.
 let flight = null;
@@ -741,15 +743,13 @@ function fly(from, to, b, o) {
   return { ghost, anim: ghost.animate([box(a), box(z)], o) };
 }
 
-// Text lines slide in from the right one after another (out in one go); the phone's
-// pinned Read bar rises from the bottom instead (moving its parent would drag it along)
-function slideParts(body, opening, o) {
+// Text lines slide in from the right one after another; the phone's pinned Read bar rises
+// from the bottom instead (moving its parent would drag it along)
+function slideParts(body, o) {
   return [...body.children].map((part, i) => {
     const pinned = getComputedStyle(part).position === "fixed";
     const away = { opacity: 0, transform: pinned ? "translateY(100%)" : "translateX(80px)" };
-    const here = { opacity: 1, transform: "none" };
-    return part.animate(opening ? [away, here] : [here, away],
-                        opening ? { ...o, delay: DUR * .22 + i * 45 } : o);
+    return part.animate([away, { opacity: 1, transform: "none" }], { ...o, delay: DUR * .22 + i * 45 });
   });
 }
 
@@ -762,7 +762,7 @@ function setCatalogInert(on) {
 function hideDetail() { detail.hidden = true; detail.replaceChildren(); detail.style.pointerEvents = ""; }
 
 function openDetail(b, animate = true) {
-  if (flight) endFlight(flight);   // e.g. a click while the previous book is still flying back
+  if (flight) endFlight(flight);   // e.g. a click on another book while one is still opening
   current = b;
   const read = el("a", { class: "btn primary", href: readerUrl(b) }, icon("read"), "Read");
   const body = el("div", { class: "dbody" },
@@ -788,7 +788,7 @@ function openDetail(b, animate = true) {
   startFlight("open", [
     detail.querySelector(".dbg").animate([{ opacity: 0 }, { opacity: 1 }], { ...o, duration: DUR * .8 }),
     detail.querySelector(".dback").animate([{ opacity: 0 }, { opacity: 1 }], { ...o, delay: DUR * .4 }),
-    ...slideParts(body, true, o),
+    ...slideParts(body, o),
     ...(trip ? [trip.anim] : [])], trip && trip.ghost, trip ? [shelf, cover] : [], null);
 }
 
@@ -797,29 +797,13 @@ function closeDetail() {
   const b = current;
   current = null;
   setCatalogInert(false);
-  detail.style.pointerEvents = "none";   // the fading page must not catch clicks on the shelf
   const shelf = shelfCover(b);
   const after = () => { hideDetail(); if (shelf && !current) shelf.querySelector(".cover").focus({ preventScroll: true }); };
 
-  // Still opening: play the same animations backwards from where they are now
-  if (flight && flight.phase === "open") {
-    const f = flight;
-    f.phase = "close";
-    f.end = after;
-    f.anims.forEach(a => a.reverse());
-    Promise.all(f.anims.map(a => a.finished)).then(() => { if (f.phase === "close") endFlight(f); }, () => {});
-    return;
-  }
+  // No animation on the way back: the shelf is there at once (only opening is animated).
+  // A book page still opening stops where it is.
   if (flight) endFlight(flight);
-  if (!motion.matches) return after();
-  const cover = detail.querySelector(".dcover");
-  const o = { duration: DUR * .8, easing: EASE, fill: "both" };
-  const trip = fly(cover, shelf, b, o);
-  startFlight("close", [
-    detail.querySelector(".dbg").animate([{ opacity: 1 }, { opacity: 0 }], o),
-    detail.querySelector(".dback").animate([{ opacity: 1 }, { opacity: 0 }], { ...o, duration: DUR * .3 }),
-    ...slideParts(detail.querySelector(".dbody"), false, { ...o, duration: DUR * .5 }),
-    ...(trip ? [trip.anim] : [])], trip && trip.ghost, trip ? [cover, shelf] : [], after);
+  after();
 }
 
 function showDetail(b) {

@@ -174,7 +174,7 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
 - The book's page: the cover flies from the shelf to the left and the description slides in on
   the right (or "This book has no description."), with **Read** and **Save** buttons. A click on
   the title copies it. `Esc`, the
-  **Catalog** button or the browser's Back return to the shelf (the cover flies back); leaving the
+  **Catalog** button or the browser's Back return to the shelf at once, without animation; leaving the
   reader brings you back to the book's page. `Ctrl`+click / middle click on a cover opens the reader
   in a new tab. With "reduce motion" turned on in the system there is no animation.
 - **Open file** opens any EPUB from disk in the reader.
