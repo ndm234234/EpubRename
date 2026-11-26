@@ -186,12 +186,17 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
 
 - Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows, mouse wheel / touchpad (one page per notch or swipe).
 - **Phones and tablets** read with the whole screen for the text: only a thin line at the bottom
-  (page in chapter, % of the book) stays. A tap in the **middle third** of the page brings the
+  stays — `4/24 in chapter` and `p. 120 of 560 · 21%` — and the page sits in the middle of the
+  screen. The first tap on the book goes fullscreen, hiding the phone's own status bar (clock,
+  Wi-Fi, battery) and buttons; the browser allows that only after a tap. A tap in the **middle third** of the page brings the
   toolbar and the slider over the text (the page doesn't move); another tap hides them. A tap in
   the **left / right third** or a swipe turns the page. The bars hide again after any move in the
   book (page turn, slider, contents, search, bookmark). Taps on links or while selecting text don't
   count. With a mouse the bars are always there and taps in the lower half of the page turn pages.
-- Table of contents (`T`), current chapter, page in chapter and % of the book.
+- Table of contents (`T`), current chapter, page in chapter, page in the book and % of the book.
+  Pages in the whole book are an estimate for this screen and text size (laying out every
+  chapter would take long): the book's length over the text a page holds in the chapters read so
+  far. It settles after the first chapters — within about 1% on a 500-page book.
 - `Esc` closes an open panel (contents, search, bookmarks), then clears search highlights,
   then closes the book and returns to the catalog, scrolled to where you left it
   (the **Catalog** button does the same).

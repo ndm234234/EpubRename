@@ -92,6 +92,7 @@
   #title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
            font-weight: 600; font-size: 14px; text-align: center; padding: 0 8px; }
   #where { flex: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 600px) { #where { text-align: left; } }   /* no chapter name on its left there */
   /* clip: closed side panels sit outside it, and focusing them must never scroll the page sideways */
   #stage { flex: 1; position: relative; display: flex; min-height: 0; overflow: hidden; overflow: clip; }
   #viewer { flex: 1; min-width: 0; margin: 16px 0; }
@@ -278,6 +279,8 @@
   body.touchui.bars header, body.touchui.bars #seek, body.touchui.bars #navLoad {
          opacity: 1; visibility: visible; transform: none; }
   body.touchui.bars #typo { top: 60px; max-height: calc(100% - 68px); }   /* below the toolbar */
+  /* The page sits in the middle of the screen: as much space above the text as the status line takes below */
+  body.touchui #viewer { margin-top: calc(8px + var(--foot, 30px)); }
 </style>
 </head>
 <body>
@@ -876,14 +879,36 @@ function onRelocated(loc) {
   const pct = locationsReady ? book.locations.percentageFromCfi(loc.start.cfi) : null;
   savePlace();
   const d = loc.start.displayed;
-  $("where").textContent = d && d.total ? `page ${d.page} of ${d.total} in chapter` : "";
-  if (locationsReady) $("pct").textContent = Math.round(pct * 100) + "%";   // else: progress text
+  $("where").textContent = d && d.total ? `${d.page}/${d.total} in chapter` : "";
+  if (locationsReady) {   // else: progress text
+    const total = bookPages(loc);
+    $("pct").textContent = (total ? `p. ${Math.min(total, Math.round(pct * total) + 1)} of ${total} · ` : "")
+                           + Math.round(pct * 100) + "%";
+  }
   if (pct != null && !seeking) setSeek(pct);
   $("seek").disabled = pct == null;   // enabled once page positions are computed
   $("prev").disabled = !!loc.atStart;
   $("next").disabled = !!loc.atEnd;
   markCurrent();
   updateMarkUi();
+}
+
+// Pages in the whole book, as on this screen with these text settings. Laying out every chapter
+// would take long, so it is estimated: the book's length in characters (from the positions computed
+// for the slider, LOC_CHARS each) over the characters a page holds in the chapters read so far.
+// Short chapters (title pages) don't count; any change of size, font or screen starts over.
+const pageStats = new Map();   // spine index → { chars, pages }
+let pageStatsKey = "";
+function bookPages(loc) {
+  const key = [prefs.font, prefs.face, prefs.layout, innerWidth, innerHeight].join();
+  if (key !== pageStatsKey) { pageStats.clear(); pageStatsKey = key; }
+  const d = loc.start.displayed, c = rendition.getContents()[0];
+  if (d && d.total >= 3 && c && c.document && c.document.body)
+    pageStats.set(loc.start.index, { chars: c.document.body.textContent.replace(/\s+/g, " ").trim().length, pages: d.total });
+  let chars = 0, pages = 0;
+  for (const st of pageStats.values()) { chars += st.chars; pages += st.pages; }
+  if (!pages || !chars) return 0;
+  return Math.max(1, Math.round(book.locations.total * LOC_CHARS / (chars / pages)));
 }
 
 // Slider: drag to preview where you'll land, release to go there
@@ -1436,7 +1461,19 @@ let touch = null;
 // Phones and tablets read with the bars hidden (see body.touchui in the styles)
 const touchUi = matchMedia("(hover: none) and (pointer: coarse)");
 function setBars(on) { document.body.classList.toggle("bars", on && touchUi.matches); }
-function onTouchUi() { document.body.classList.toggle("touchui", touchUi.matches); setBars(false); }
+function onTouchUi() {
+  document.body.classList.toggle("touchui", touchUi.matches);
+  document.body.style.setProperty("--foot", document.querySelector("footer").offsetHeight + "px");
+  setBars(false);
+}
+// Only the page on the screen: Android's status bar (clock, Wi-Fi, battery) and its buttons hide.
+// A browser allows this only in answer to a tap, so the first tap on the book does it; after
+// leaving it (the Back gesture) the next tap comes back to it.
+function goFullscreen() {
+  const root = document.documentElement;
+  if (!touchUi.matches || document.fullscreenElement || !root.requestFullscreen) return;
+  root.requestFullscreen({ navigationUI: "hide" }).catch(() => {});
+}
 touchUi.addEventListener("change", onTouchUi);
 onTouchUi();
 
@@ -1461,6 +1498,7 @@ function touchEnd(e) {
   const x = r.left + t.clientX, y = r.top + t.clientY;
   const stage = $("stage").getBoundingClientRect();
   if (touchUi.matches) {   // phones, tablets: the middle third shows / hides the bars, the sides turn pages
+    goFullscreen();
     if (y < stage.top || y > stage.bottom) return;
     e.preventDefault();
     const third = (x - stage.left) / stage.width;
