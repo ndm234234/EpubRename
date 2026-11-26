@@ -192,6 +192,22 @@ for (const phone of [true, false]) {
     await sleep(800); await settle(p);
   }
 
+  // 4b. Home / End: the start / the end of the chapter at the top, saved as the reader's move
+  {
+    const key = async k => { await p.eval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true })); 0`); await sleep(1500); await settle(p); };
+    const edge = href => J(p, `(v => v && (r => ({ top: Math.round(r.top - __box().top), bottom: Math.round(r.bottom - __box().bottom) }))(v.iframe.getBoundingClientRect()))(__views().find(v => v.section.href === ${JSON.stringify(href)}))`);
+    const href = (await J(p, "__first()")).href;
+    let t = (await J(p, "__place()")).time;
+    await key("End");
+    { const e = await edge(href); ok(e && Math.abs(e.bottom) <= 2, `End: the chapter's end at the bottom (${JSON.stringify(e)})`); }
+    { const t2 = (await J(p, "__place()")).time; ok(t2 > t, "End: the place saved as the reader's move (newer time)"); t = t2; }
+    await key("Home");
+    { const e = await edge(href); ok(e && Math.abs(e.top) <= 2, `Home: the chapter's start at the top (${JSON.stringify(e)})`); }
+    ok((await J(p, "__place()")).time > t, "Home: the place saved as the reader's move (newer time)");
+    { const f = await J(p, "__first()"), a = await J(p, "__wordAt(__place().cfi)");
+      ok(f && a && f.href === a.href && Math.abs(f.k - a.k) <= 20, `Home: the saved place is the text at the top ("${f && f.t}", saved "${a && a.t}")`); }
+  }
+
   // 5. reopen: the same first visible word, the time unchanged
   {
     const f = await J(p, "__first()"), pl = await J(p, "__place()");
@@ -332,6 +348,20 @@ for (const phone of [true, false]) {
     { const l = await sameWord(p, w); ok(atTop(l) && await p.eval("document.getElementById('markBtn').classList.contains('on')"), `Previous bookmark: back on it (${fmt(l)})`); }
     await p.eval("toggleMarkHere(); 0");
     ok(!(await p.eval(`marks.some(m => m.cfi === ${JSON.stringify(a)})`)), "pressed again: the bookmark removed");
+  }
+
+  // 12b. the mode switched while a contents jump is still going: the saved place is the place shown
+  // (the switch right away and a little later: the jump's own work may end before or after it)
+  for (const [target, delay, n] of [[false, 0, 5], [true, 0, 2], [false, 150, 6], [true, 150, 3], [false, 400, 5], [true, 400, 2]]) {
+    const entries = await J(p, "tocItems.map((t, i) => ({ i, href: t.href }))");
+    const e = entries[Math.min(n, entries.length - 1)];
+    await p.eval(`tocItems[${e.i}].a.click(); setTimeout(() => { document.getElementById('scrollText').checked = ${target}; document.getElementById('scrollText').dispatchEvent(new Event('change')); }, ${delay}); 0`);
+    await sleep(2500); await settle(p); await sleep(1200); await settle(p);
+    const pl = await J(p, "__place()");
+    ok(await p.eval("__flow()") === (target ? "scrolled" : "paginated"), `jump + switch to ${target ? "scroll" : "pages"} after ${delay}ms: the new mode`);
+    ok(pl.cfi === await p.eval("anchor"), "jump + switch: the saved place is the reading place");
+    if (target) { const w = await J(p, "__wordAt(anchor)"), l = w && await sameWord(p, w); ok(atTop(l), `jump + switch: the place is shown at the top (${fmt(l)})`); }
+    else { const v = await J(p, "__vis(anchor)"); ok(v.at === v.page, `jump + switch: the place is on the page shown (page ${v.page}, place on ${v.at})`); }
   }
 
   // 13. reader settings synced from another device (with an old "scroll" in them) leave the mode

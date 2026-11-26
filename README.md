@@ -193,7 +193,7 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
 - Paging: `←` / `→`, `PageUp` / `PageDown`, `Space`, side arrows, mouse wheel / touchpad (one page per notch or swipe).
 - **Scroll text** (*Aa* → *Layout*): instead of pages, the whole book scrolls up as one ribbon, each
   chapter right after the one before (finger, wheel, scrollbar; `↓` / `↑` a little, `PageDown` /
-  `Space` / the side arrows a screen). The place is the line at the top; the status line shows the %.
+  `Space` / the side arrows a screen, `Home` / `End` the chapter's start / end). The place is the line at the top; the status line shows the %.
   This device only: it is not synced to your other devices.
 - **Phones and tablets** read with the whole screen for the text: only a thin line at the bottom
   stays, numbers only — `4/24` (page in the chapter) on the left, `120/560 21%` (page in the

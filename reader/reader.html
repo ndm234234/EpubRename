@@ -721,7 +721,8 @@ function makeRendition() {
   const byReader = f => async (...a) => {
     moved = true;
     setBars(false);   // after any move the text is read again, without the bars
-    const res = await f(...a);
+    const r = rendition, res = await f(...a);
+    if (r !== rendition) return res;   // the mode switched meanwhile: the new one keeps the place
     const loc = here();
     if (loc) {
       if (scrollMode) anchor = firstShown() || loc.start.cfi;   // the text now at the top
@@ -1275,6 +1276,18 @@ function sideOfScreen(cfi) {
   try { spine = new ePub.CFI(cfi).spinePos; } catch {}
   const shown = shownViews().map(v => v.index);
   return shown.length && spine > Math.max(...shown) ? 1 : -1;   // a chapter not laid out now
+}
+// Home / End: to the start / the end of the chapter at the top of the screen (the rest of the book
+// is not laid out, so the ribbon has no real start or end to go to)
+function scrollChapter(dir) {
+  const c = scroller();
+  if (!c) return;
+  const box = c.getBoundingClientRect();
+  const v = shownViews().find(v => v.iframe.getBoundingClientRect().bottom > box.top + 1);
+  if (!v) return;
+  const fr = v.iframe.getBoundingClientRect();
+  readerInput();
+  c.scrollTo({ top: c.scrollTop + (dir < 0 ? fr.top - box.top : Math.max(fr.bottom - box.bottom, 0)) });
 }
 // A key, a button: scroll by lines or by a screen less a line (the line at the bottom comes to the top)
 function scrollText(dir, screen = true) {
@@ -2022,7 +2035,8 @@ function onKey(e) {
   const t = e.target;
   if ((t.tagName === "INPUT" && t.type !== "range") || t.tagName === "TEXTAREA") return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (scrollMode && (k === "ArrowDown" || k === "ArrowUp")) { e.preventDefault(); scrollText(k === "ArrowDown" ? 1 : -1, false); }
+  if (scrollMode && (k === "Home" || k === "End")) { e.preventDefault(); scrollChapter(k === "End" ? 1 : -1); }
+  else if (scrollMode && (k === "ArrowDown" || k === "ArrowUp")) { e.preventDefault(); scrollText(k === "ArrowDown" ? 1 : -1, false); }
   else if (scrollMode && (k === "ArrowRight" || k === "PageDown" || k === " " || k === "ArrowLeft" || k === "PageUp")) {
     e.preventDefault(); scrollText(k === "ArrowLeft" || k === "PageUp" || (k === " " && e.shiftKey) ? -1 : 1);
   }
