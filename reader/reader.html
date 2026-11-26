@@ -565,6 +565,11 @@ async function openBook(data, fileName) {
   rendition.hooks.content.register(contents => {
     applyTypo(contents.document);
     contents.document.addEventListener("wheel", onWheel, { passive: false });
+    // The chapter grew or shrank after it was shown (a font loaded late): page numbers anew
+    let t = 0;
+    contents.on("resize", () => { clearTimeout(t); t = setTimeout(() => {
+      if (!settling && rendition.getContents()[0] === contents) rendition.reportLocation();
+    }, 100); });
   });
   rendition.started.then(() => keepOldPageUntilNewIsReady(rendition));
   // Window resized: back to the reading place, not to the start of the page shown (see displayAt)
@@ -575,19 +580,42 @@ async function openBook(data, fileName) {
   // The reader's own moves (page turns any way: buttons, keys, swipes, wheel; contents, search,
   // slider) set the reading place and stop displayAt's second jump. displayAt itself uses the
   // originals (turnPage), so a re-layout never moves the reading place.
-  turnPage = { next: rendition.next.bind(rendition), prev: rendition.prev.bind(rendition),
-               display: rendition.display.bind(rendition) };
+  const next = rendition.next.bind(rendition), prev = rendition.prev.bind(rendition);
+  turnPage = { next, display: rendition.display.bind(rendition),
+    // Back into the chapter before: epub.js goes to its last page before the chapter is fully
+    // laid out (fonts, pictures); it then grows and that page is no longer the last. Go on to it.
+    prev: async () => {
+      const before = here();
+      await prev();
+      const after = here();
+      if (!before || !after || after.start.index === before.start.index) return;
+      await layoutSettled();
+      for (let i = 0, k = pagesToChapterEnd(); i < Math.min(k, 50); i++) await next();
+    } };
   const byReader = f => async (...a) => {
     moved = true;
     setBars(false);   // after any move the text is read again, without the bars
     const r = await f(...a);
     const loc = here();
-    if (loc) { anchor = loc.start.cfi; savePlace(); }
+    if (loc) {
+      // epub.js may give the start of a paragraph begun on the page before; then find the page's first word
+      const off = pagesFromShown(loc.start.cfi);
+      anchor = off === null || off === 0 ? loc.start.cfi : firstOnShownPage() || loc.start.cfi;
+      savePlace();
+    }
     return r;
   };
   rendition.next = byReader(turnPage.next);
   rendition.prev = byReader(turnPage.prev);
-  rendition.display = byReader(turnPage.display);
+  // A place in the book (search match, slider, saved place) is checked to be on the page shown
+  // (again once the chapter is laid out: a font still loading moves the text)
+  rendition.display = byReader(async t => {
+    if (!(typeof t === "string" && t.startsWith("epubcfi("))) return turnPage.display(t);
+    await placeAt(t);
+    const shown = here() && here().start.cfi;
+    await layoutSettled();
+    if (here() && here().start.cfi === shown && pagesFromShown(t)) await placeAt(t);
+  });
   rendition.on("relocated", onRelocated);
   rendition.on("click", () => toggleTypo(false));
   rendition.on("keydown", onKey);
@@ -859,17 +887,79 @@ async function displayAt(cfi) {
   settling = true; moved = false;
   anchor = cfi;
   try {
-    await placeAt(cfi);
+    await placeAt(cfi, my);
     await layoutSettled();
-    if (!moved && my === placing) await placeAt(cfi);
+    if (!moved && my === placing) await placeAt(cfi, my);
   } finally { if (my === placing) settling = false; }
   if (my === placing && !moved) savePlace();
 }
-// The place starts a page, so it must be on the page shown; if it is just after it, step forward
-async function placeAt(cfi) {
+// The place must be on the page shown. epub.js sometimes stops a page short of it; where the text
+// really is tells (its page end, loc.end, is not exact: on a one-page chapter it can come before
+// the last words). Without that, compare with the page end.
+async function placeAt(cfi, my) {
   await turnPage.display(cfi);
-  const loc = here();
-  if (loc && !loc.atEnd && new ePub.CFI().compare(cfi, loc.end.cfi) > 0) await turnPage.next();
+  if (my !== undefined && my !== placing) return;   // a newer placing has started: its moves count
+  let shift = pagesFromShown(cfi);
+  if (shift === null) {
+    const loc = here();
+    shift = loc && !loc.atEnd && new ePub.CFI().compare(cfi, loc.end.cfi) > 0 ? 1 : 0;
+  }
+  const mine = () => my === undefined || my === placing;
+  for (let i = 0; i < Math.min(shift, 3) && mine(); i++) await turnPage.next();
+  for (let i = 0; i < Math.min(-shift, 3) && mine(); i++) await turnPage.prev();
+}
+// The page shown, as a column of the chapter's document; null where pages are not columns
+function shownColumn() {
+  const m = rendition.manager, v = m.views.first(), delta = m.layout.delta;
+  if (!v || !delta || m.settings.direction === "rtl" || m.settings.axis !== "horizontal") return null;
+  return { m, v, delta, doc: v.contents.document, col: Math.round((m.container.scrollLeft - v.element.offsetLeft) / delta) };
+}
+function pagesToChapterEnd() {
+  const s = shownColumn();
+  return s ? Math.round(s.v.element.offsetWidth / s.delta) - 1 - s.col : 0;
+}
+// The first word on the page shown, as a place (null if the page has no text)
+function firstOnShownPage() {
+  try {
+    const s = shownColumn();
+    if (!s) return null;
+    const r = s.doc.createRange();
+    // page of the first visible character at or after offset i of text node n (-1: none)
+    const pageAt = (n, i) => {
+      r.setStart(n, i); r.setEnd(n, n.length);
+      const b = [...r.getClientRects()].find(x => x.width || x.height);
+      return b ? Math.floor((b.left + 1) / s.delta) : -1;
+    };
+    const w = s.doc.createTreeWalker(s.doc.body, NodeFilter.SHOW_TEXT);
+    for (let n; (n = w.nextNode()); ) {
+      if (!n.nodeValue.trim()) continue;
+      const first = pageAt(n, 0);
+      if (first > s.col) return null;          // the page has no text of its own
+      if (first < 0) continue;
+      // does the node reach this page? (its last character)
+      r.setStart(n, 0); r.setEnd(n, n.length);
+      const rects = [...r.getClientRects()].filter(x => x.width || x.height);
+      if (!rects.length || Math.floor((rects[rects.length - 1].left + 1) / s.delta) < s.col) continue;
+      let a = 0, b = n.length - 1;           // first offset whose text is on this page
+      while (a < b) { const mid = (a + b) >> 1; if (pageAt(n, mid) >= s.col) b = mid; else a = mid + 1; }
+      r.setStart(n, a); r.collapse(true);
+      return s.v.contents.cfiFromRange(r);
+    }
+  } catch {}
+  return null;
+}
+// How many pages after the one shown the place is (before it: negative); null if it can't be told
+function pagesFromShown(cfi) {
+  try {
+    const s = shownColumn();
+    const r = s && rendition.getRange(cfi);
+    if (!r || r.startContainer.ownerDocument !== s.doc) return null;
+    const n = r.startContainer;
+    if (n.nodeType === 3) r.setEnd(n, n.length);   // the text from the place on
+    else if (n.childNodes[r.startOffset]) r.selectNode(n.childNodes[r.startOffset]);
+    const b = [...r.getClientRects()].find(x => x.width || x.height);
+    return b ? Math.floor((b.left + 1) / s.delta) - s.col : null;
+  } catch { return null; }
 }
 function layoutSettled() {
   const c = rendition.getContents()[0], doc = c && c.document;
@@ -1136,7 +1226,17 @@ function goToHit(i) {
   setHighlight(hit, HL_CURRENT);
   hit.a.classList.add("current");
   scrollToCurrent();
-  rendition.display(hit.cfi);
+  // The reading place is the match itself, not the start of its page: after a font change the
+  // match may flow onto the next page, and the place must follow it
+  rendition.display(hit.cfi).then(() => {
+    if (hits[hitIdx] !== hit || settling) return;
+    try {
+      const range = rendition.getRange(hit.cfi), c = rendition.getContents()[0];
+      range.collapse(true);
+      anchor = c.cfiFromRange(range);
+      savePlace();
+    } catch {}
+  });
   updateHitUi();
 }
 
