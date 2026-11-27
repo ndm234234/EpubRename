@@ -180,6 +180,20 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
   **Catalog** button or the browser's Back return to the shelf at once, without animation; leaving the
   reader brings you back to the book's page. `Ctrl`+click / middle click on a cover opens the reader
   in a new tab. With "reduce motion" turned on in the system there is no animation.
+- **Folders**: your own sets of books, e.g. "To read" or "Holiday" (each person has their own;
+  they are names in the catalog only, nothing on disk moves or changes). The first one is made from
+  a book's page: **Folders** next to Read lists your folders with a tick box each (tick to put the
+  book in, untick to take it out, it takes effect at once) and **＋ New folder**. A book can be in
+  several folders. Then a strip of chips appears under the search: your folders by name with
+  their counts, **＋** for a new folder, *Unfiled* (the books in none of them) and *All* (all
+  books) at the right end. The chips wrap onto as many rows as they need; on a computer the strip
+  stays at the top with the search bar, on a phone it scrolls away with the list while the bar
+  stays. A tap on a folder (or on *Unfiled*) shows only its books (search, sort and grouping work
+  inside it; Back returns to All books). The open folder's **⋯**
+  renames it or deletes it (it asks first; the books stay in the library, and a deleted folder
+  stays deleted). Names are up to 60 characters and two folders can't share a name (whatever the
+  case). With an account (below) your folders are the same on all your devices; without one they
+  stay on the device.
 - **Open file** opens any EPUB from disk in the reader.
 - The catalog returns to where you were: after reading it shows the same place in the shelf, and
   after the browser or app is restarted on a book's page it opens that page again. This is kept
@@ -321,7 +335,8 @@ address to type on the phone, e.g. `http://192.168.1.64:48865/`.
 
 #### Accounts: the same place on every device
 
-Optional. Without an account everything works as before, each device on its own. With one, your
+Optional. Without an account everything works as before, each device on its own (folders
+too: they stay on the device they were made on). With one, your
 phone, tablet and computer share what you read. The account lives in the library itself, on the
 computer that runs the launcher; nothing goes to the internet.
 
@@ -330,7 +345,10 @@ computer that runs the launcher; nothing goes to the internet.
   How to add and remove accounts: below.
 - **What is synced:** reading places, bookmarks (with their names and notes) and the recently
   opened books are the same on all devices, and so is the catalog's view: its sort and grouping
-  (choose "Recently opened" on the phone and the computer shows it too). The reader's settings
+  (choose "Recently opened" on the phone and the computer shows it too), and your **folders**
+  (made, renamed, deleted, books put in or taken out on one device: the others follow; a book
+  taken out on one device while another puts a different one in keeps both changes). Which folder
+  is open stays each device's own. The reader's settings
   (font, theme, layout) are shared only between devices of the same kind (phone, tablet,
   computer), since what suits one screen doesn't suit another.
 - **What is not synced:** the books themselves, the offline copies on a device, and *Scroll text*:

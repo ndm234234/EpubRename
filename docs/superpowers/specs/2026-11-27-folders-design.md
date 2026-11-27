@@ -127,8 +127,15 @@ The catalog's words stay English like the rest of it; the UI word is **"Folders"
 The "Open file" chip already uses a folder icon; folders get a different one, e.g. a stack of
 books or a tag (builder's call), so the two aren't confused.
 
-**Folder strip.** A row of chips under the header: `All books` · `To read 12` · `Holiday 5` … ·
-`＋`. On a phone it scrolls sideways with a finger and doesn't wrap; the chosen chip stays in view.
+**Folder strip.** A row of chips under the header's bar: `To read 12` · `Holiday 5` … · `＋` ·
+`Unfiled 4` · `All` (the owner's order; the last two are the Not in folders and All books chips,
+each with an icon and a short label, the full meaning in its title and accessible name: "Books
+not in any folder", "All books"). *(Owner's follow-up, replacing "on a phone it
+scrolls sideways and doesn't wrap; the chosen chip stays in view":)* the chips wrap onto as many
+rows as they need on every screen, nothing scrolls sideways, and an open chip stays on one row
+with its `⋯`. On a computer (wider than 640px) the strip stays with the sticky header; on a phone
+it is not part of what sticks: it scrolls away with the list while the bar (name, search, sort…)
+stays on top, and an open `＋` / `⋯` box closes once its chip goes under the bar.
 Folders are listed by name (the catalog's collator), the same order on every device. The strip is
 **hidden while the person has no folders**, so the catalog looks as it does today for people who
 don't use them; the first folder is made from a book's page (below).
@@ -138,6 +145,15 @@ To read` (`3 of 12 in To read` while searching). Search, sort and grouping apply
 phone's Back button goes back to All books (the folder is a history step, like a book's page).
 An empty folder says: "No books here yet. Open a book and choose Folders to add it." Which folder
 is open is remembered by that catalog on that device, like its scroll place, and not synced.
+
+**Not in folders** *(owner's follow-up)*. A chip next to All books, shown as a tray icon and
+`Unfiled 4` (strip order: the folders by name · `＋` · `Unfiled 4` · `All`), shows the library's books that are in no live
+folder (a book taken out of every folder counts; deleted folders don't). It is viewed like a
+folder: search, sort and grouping inside; the count reads `4 books not in folders` (`2 of 4 not in
+folders` while searching); with every book in a folder it says "Every book is in a folder." It is
+the one folder step above All books and is remembered in the same per-device setting, under a
+reserved id that is never a folder's (`~unfiled`); it is a catalog view only, not a folder: no
+`⋯`, nothing stored with the folders or synced. Shown only while the strip is.
 
 **Putting a book in / taking it out.** On the book's page (which a tap on a cover already opens),
 next to Read and Save, a **Folders** button. It opens a list of the person's folders with a

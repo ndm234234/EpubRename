@@ -42,7 +42,7 @@
     return best;
   }
 
-  function emptyDoc() { return { v: 1, places: {}, marks: {}, opened: {}, prefs: {} }; }
+  function emptyDoc() { return { v: 1, places: {}, marks: {}, opened: {}, prefs: {}, shelves: {} }; }
 
   function markId(m) { return m.id || (m.time + '|' + m.cfi); }
 
@@ -132,7 +132,36 @@
     return out;
   }
 
-  var KNOWN_TOP = { v: 1, places: 1, marks: 1, opened: 1, prefs: 1 };
+  function isGone(f) { return isObj(f) && isNum(f.deleted); }
+
+  // A deleted folder stays deleted. Otherwise the later name, the earlier creation, and per book
+  // the later entry (at a tie the one taken out) win.
+  function mergeFolder(items) {
+    var gone = items.filter(isGone);
+    if (gone.length) {
+      return { deleted: Math.max.apply(null, gone.map(function (f) { return f.deleted; })) };
+    }
+    var out = {};
+    var namer = pickMax(items, function (f) { return { t: time(f.named), k: 0, s: ser({ name: f.name, named: f.named }) }; });
+    if (has(namer, 'name')) out.name = clone(namer.name);
+    if (has(namer, 'named')) out.named = clone(namer.named);
+    var made = items.map(function (f) { return f.created; }).filter(isNum);
+    if (made.length) out.created = Math.min.apply(null, made);
+    var a = mapOf(items[0], 'books'), b = items.length > 1 ? mapOf(items[1], 'books') : {};
+    out.books = mergeMapOfEntries(a, b, function (e) { return { t: time(e.time), k: e.out ? 1 : 0, s: ser(e) }; });
+    return out;
+  }
+
+  function mergeShelves(a, b) {
+    var out = {};
+    keysOf(a, b).forEach(function (id) {
+      var items = [get(a, id), get(b, id)].filter(isObj);
+      if (items.length) out[id] = mergeFolder(items);
+    });
+    return out;
+  }
+
+  var KNOWN_TOP = { v: 1, places: 1, marks: 1, opened: 1, prefs: 1, shelves: 1 };
 
   function merge(a, b) {
     a = isObj(a) ? a : {};
@@ -148,6 +177,7 @@
     out.marks = mergeMarks(mapOf(a, 'marks'), mapOf(b, 'marks'));
     out.opened = mergeOpened(mapOf(a, 'opened'), mapOf(b, 'opened'));
     out.prefs = mergePrefs(mapOf(a, 'prefs'), mapOf(b, 'prefs'));
+    out.shelves = mergeShelves(mapOf(a, 'shelves'), mapOf(b, 'shelves'));
     return out;
   }
 
@@ -164,6 +194,19 @@
       if (!Object.keys(bm).length) delete marks[book];
     });
     out.marks = marks;
+    var shelves = isObj(out.shelves) ? out.shelves : {};
+    Object.keys(shelves).forEach(function (id) {
+      var f = shelves[id];
+      if (isGone(f)) {
+        if (f.deleted < limit) delete shelves[id];
+      } else if (isObj(f) && isObj(f.books)) {
+        Object.keys(f.books).forEach(function (bk) {
+          var e = f.books[bk];
+          if (isObj(e) && e.out && time(e.time) < limit) delete f.books[bk];
+        });
+      }
+    });
+    out.shelves = shelves;
     return out;
   }
 

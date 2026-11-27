@@ -11,11 +11,11 @@ vm.runInThisContext(src, { filename: 'sync-merge.js' });
 const M = globalThis.SyncMerge;
 
 const BOOK = 'Jane Doe - A Quiet Harbour';
-const doc = (o) => Object.assign({ v: 1, places: {}, marks: {}, opened: {}, prefs: {} }, o);
+const doc = (o) => Object.assign({ v: 1, places: {}, marks: {}, opened: {}, prefs: {}, shelves: {} }, o);
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
 test('emptyDoc and null handling', () => {
-  assert.deepEqual(M.emptyDoc(), { v: 1, places: {}, marks: {}, opened: {}, prefs: {} });
+  assert.deepEqual(M.emptyDoc(), { v: 1, places: {}, marks: {}, opened: {}, prefs: {}, shelves: {} });
   const x = doc({ opened: { 'a.epub': 5 } });
   assert.deepEqual(M.merge(null, x), x);
   assert.deepEqual(M.merge(x, null), x);
@@ -159,7 +159,7 @@ function prng(seed) {
 function randDoc(r) {
   const pick = (a) => a[Math.floor(r() * a.length)];
   const t = () => pick([undefined, 'bad', 1, 2, 3, 4, 5]);
-  const d = { v: 1, places: {}, marks: {}, opened: {}, prefs: {} };
+  const d = { v: 1, places: {}, marks: {}, opened: {}, prefs: {}, shelves: {} };
   for (const b of ['A', 'B']) {
     if (r() < 0.6) d.places[b] = { cfi: pick(['x', 'y', 'z']), pct: pick([0.1, 0.2]), time: t() };
     if (r() < 0.7) {
@@ -227,4 +227,83 @@ test('malformed server input: __proto__ keys, null, arrays, wrong types', () => 
     assert.equal(m.v, 1);
   }
   assert.deepEqual(M.merge(null, junk[6]).places, {});
+});
+
+const F = 'f1';
+const BOOK2 = 'urn:uuid:2222';
+const folder = (o) => Object.assign({ name: 'To read', named: 100, created: 100, books: {} }, o);
+const both = (a, b) => {
+  const r = M.merge(a, b);
+  assert.deepEqual(r, M.merge(b, a));
+  return r.shelves;
+};
+
+test('shelves: union of folders', () => {
+  const s = both(doc({ shelves: { f1: folder() } }), doc({ shelves: { f2: folder({ name: 'Other' }) } }));
+  assert.deepEqual(Object.keys(s).sort(), ['f1', 'f2']);
+});
+
+test('shelves: deleted stays deleted', () => {
+  const a = doc({ shelves: { [F]: { deleted: 100 } } });
+  const b = doc({ shelves: { [F]: folder({ named: 500, books: { [BOOK]: { time: 600 } } }) } });
+  assert.deepEqual(both(a, b)[F], { deleted: 100 });
+  assert.deepEqual(both(a, doc({ shelves: { [F]: { deleted: 300 } } }))[F], { deleted: 300 });
+});
+
+test('shelves: later name wins', () => {
+  const s = both(doc({ shelves: { [F]: folder({ name: 'To read', named: 100 }) } }), doc({ shelves: { [F]: folder({ name: 'Later', named: 200 }) } }));
+  assert.equal(s[F].name, 'Later');
+  assert.equal(s[F].named, 200);
+});
+
+test('shelves: junk named with the same name merges the same both ways', () => {
+  const a = doc({ shelves: { [F]: folder({ name: 'X', named: 'bad' }) } });
+  const b = doc({ shelves: { [F]: folder({ name: 'X', named: 'worse' }) } });
+  const s = both(a, b);
+  assert.equal(s[F].name, 'X');
+});
+
+test('shelves: per book the later time wins', () => {
+  const a = doc({ shelves: { [F]: folder({ books: { [BOOK]: { time: 100 }, [BOOK2]: { time: 50 } } }) } });
+  const b = doc({ shelves: { [F]: folder({ books: { [BOOK]: { time: 200, out: true } } }) } });
+  const s = both(a, b);
+  assert.deepEqual(s[F].books[BOOK], { time: 200, out: true });
+  assert.deepEqual(s[F].books[BOOK2], { time: 50 });
+});
+
+test('shelves: equal times end identical', () => {
+  both(doc({ shelves: { [F]: folder({ name: 'One' }) } }), doc({ shelves: { [F]: folder({ name: 'Two' }) } }));
+  both(doc({ shelves: { [F]: folder({ books: { [BOOK]: { time: 5 } } }) } }), doc({ shelves: { [F]: folder({ books: { [BOOK]: { time: 5, out: true } } }) } }));
+});
+
+test('shelves: created is the earlier', () => {
+  const s = both(doc({ shelves: { [F]: folder({ created: 100 }) } }), doc({ shelves: { [F]: folder({ created: 50 }) } }));
+  assert.equal(s[F].created, 50);
+});
+
+test('shelves: junk is dropped', () => {
+  const good = doc({ shelves: { [F]: folder({ books: { [BOOK]: { time: 1 } } }) } });
+  assert.deepEqual(both(doc({ shelves: 'x' }), good), good.shelves);
+  const junk = doc({ shelves: { [F]: folder({ books: { [BOOK]: { time: 1 }, [BOOK2]: 5 } }), g: null } });
+  const s = both(junk, doc({}));
+  assert.deepEqual(Object.keys(s), [F]);
+  assert.deepEqual(Object.keys(s[F].books), [BOOK]);
+});
+
+test('shelves: an older doc without shelves', () => {
+  const old = doc({});
+  delete old.shelves;
+  const b = doc({ shelves: { [F]: folder() } });
+  assert.deepEqual(both(old, b), b.shelves);
+});
+
+test('pruneTombstones drops old outs and old deleted folders', () => {
+  const YEAR = 365 * 24 * 3600 * 1000, now = 10 * YEAR;
+  const d = doc({ shelves: {
+    old: { deleted: 1 },
+    [F]: folder({ books: { a: { time: 1, out: true }, b: { time: now - 1000, out: true }, c: { time: 1 } } }),
+  } });
+  const r = M.pruneTombstones(d, now).shelves;
+  assert.equal(r.old, undefined);
+  assert.deepEqual(Object.keys(r[F].books).sort(), ['b', 'c']);
 });

@@ -15,7 +15,7 @@ for _ in $(seq 100); do grep -q "^Library:" "$LOGS/server.out" && break; sleep 0
 PORT=$(sed -n 's|^Library: http://127.0.0.1:\([0-9]*\)/.*|\1|p' "$LOGS/server.out")
 [ -n "$PORT" ] || { echo "Error: the server did not start"; cat "$LOGS/server.out"; exit 1; }
 B=http://127.0.0.1:$PORT T=tests/reader
-# the catalog's place: once, in a library of its own (not per book)
+# the catalog's place: once, not per book
 node $T/catalog-place.mjs $B > "$LOGS/0-catalog.txt" 2>&1 &
 i=0 PIDS=($!)
 for book in "$@"; do
@@ -35,5 +35,8 @@ for book in "$@"; do
   PIDS+=($!)
 done
 wait "${PIDS[@]}"   # the checks, not the server
+# the folders check after the others, not beside them: its own library build and three more Chromes
+# slow the per-book checks enough to break the timing of scroll.mjs
+node $T/folders.mjs $B > "$LOGS/0-folders.txt" 2>&1
 cat "$LOGS"/*.txt | grep -v "^  ok"
 ! grep -q "FAIL\|Error" "$LOGS"/*.txt   # exit status: 0 when every check passed

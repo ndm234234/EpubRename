@@ -136,7 +136,7 @@ test('collect then apply leaves localStorage byte-identical; only synced keys up
   assert.ok(!JSON.stringify(doc).includes('PLACE-MARK'), 'the catalog place is not synced');
   const rep = S.applyLocal(doc);
   assert.equal(JSON.stringify([...ls.m]), before);
-  assert.deepEqual(rep, { places: [], marks: [], prefs: false, opened: false });
+  assert.deepEqual(rep, { places: [], marks: [], prefs: false, opened: false, shelves: false });
 });
 
 test('account: register / login / logout and error mapping', async () => {
@@ -469,4 +469,59 @@ test('the deadline during the PUT still announces what applyLocal changed', asyn
   await flush();
   assert.equal(seen.length, 1);
   assert.deepEqual(seen[0].marks, [BOOK]);
+});
+
+test('collectLocal reads epubLibrary:shelves', () => {
+  const S = env();
+  const sh = { f1: { name: 'To read', named: 1, created: 1, books: { [BOOK]: { time: 2 } } } };
+  put('epubLibrary:shelves', sh);
+  assert.deepEqual(S.collectLocal().shelves, sh);
+  put('epubLibrary:shelves', '[1]');
+  assert.deepEqual(S.collectLocal().shelves, {});
+  ls.setItem('epubLibrary:shelves', '{bad json');
+  assert.deepEqual(S.collectLocal().shelves, {});
+});
+
+test('applyLocal writes shelves and reports it', () => {
+  const S = env();
+  const sh = { f1: { name: 'To read', named: 1, created: 1, books: { [BOOK]: { time: 2 } } } };
+  const doc = Object.assign(M.emptyDoc(), { shelves: sh });
+  assert.equal(S.applyLocal(doc).shelves, true);
+  assert.deepEqual(get('epubLibrary:shelves'), sh);
+  assert.equal(S.applyLocal(doc).shelves, false);
+});
+
+test('applyLocal: empty shelves never create the key, but empty a present one', () => {
+  const S = env();
+  assert.equal(S.applyLocal(M.emptyDoc()).shelves, false);
+  assert.equal(ls.getItem('epubLibrary:shelves'), null);
+  put('epubLibrary:shelves', { f1: { name: 'To read', named: 1, created: 1, books: {} } });
+  assert.equal(S.applyLocal(M.emptyDoc()).shelves, true);
+  assert.deepEqual(get('epubLibrary:shelves'), {});
+});
+
+test("a sync brings another device's folder and announces shelves", async () => {
+  const S = env();
+  const f1 = { name: 'To read', named: 1, created: 1, books: { [BOOK]: { time: 2 } } };
+  const f2 = { name: 'Favourites', named: 1, created: 3, books: {} };
+  srv.doc = M.merge(M.emptyDoc(), { shelves: { f1 } });
+  put('epubLibrary:shelves', { f2 });
+  const seen = [];
+  S.onRemoteChange((r) => seen.push(r));
+  await S.syncNow();
+  assert.deepEqual(Object.keys(get('epubLibrary:shelves')).sort(), ['f1', 'f2']);
+  assert.deepEqual(Object.keys(srv.doc.shelves).sort(), ['f1', 'f2']);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].shelves, true);
+});
+
+test('a folder taken out offline is not brought back', async () => {
+  const S = env();
+  const NOW = Date.now() - 1000;
+  const mk = (b) => ({ f1: { name: 'To read', named: 1, created: 1, books: { [BOOK]: b } } });
+  srv.doc = M.merge(M.emptyDoc(), { shelves: mk({ time: NOW - 100 }) });
+  put('epubLibrary:shelves', mk({ time: NOW, out: true }));
+  await S.syncNow();
+  assert.deepEqual(get('epubLibrary:shelves').f1.books[BOOK], { time: NOW, out: true });
+  assert.deepEqual(srv.doc.shelves.f1.books[BOOK], { time: NOW, out: true });
 });
