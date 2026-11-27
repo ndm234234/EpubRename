@@ -286,8 +286,7 @@ PAGE = r"""<!DOCTYPE html>
 <link rel="icon" href=".index/reader/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href=".index/reader/icon.png">
 <link rel="manifest" href=".index/manifest.webmanifest">
-<meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" id="themeColor" content="#f7f7f5">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <style>
@@ -299,13 +298,19 @@ PAGE = r"""<!DOCTYPE html>
     --shadow-hover: 0 2px 4px rgba(0,0,0,.08), 0 18px 34px -12px rgba(0,0,0,.4);
     color-scheme: light;
   }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #111113; --surface: #1b1b1e; --surface-2: #26262a; --text: #f2f2f4; --muted: #a0a0a8;
-            --line: rgba(255,255,255,.09); --accent: #7ea2ff; --accent-soft: rgba(126,162,255,.15);
-            --ring: rgba(126,162,255,.4); --header: rgba(17,17,19,.75); --danger: #ff6b6b;
-            --shadow-cover: 0 1px 2px rgba(0,0,0,.5), 0 8px 18px -8px rgba(0,0,0,.8);
-            --shadow-hover: 0 2px 4px rgba(0,0,0,.5), 0 18px 34px -12px rgba(0,0,0,.9);
-            color-scheme: dark; }
+  /* the app's theme (reader/theme.js sets data-theme: light, sepia or dark; Auto is the system's) */
+  :root[data-theme=sepia] {
+    --bg: #f4ecd8; --surface: #f9f3e3; --surface-2: #ebe1c8; --text: #3b2f1e; --muted: #7a6a52;
+    --line: rgba(59,47,30,.13); --accent: #a0522d; --accent-soft: rgba(160,82,45,.12); --ring: rgba(160,82,45,.35);
+    --header: rgba(244,236,216,.78); --danger: #b3261e;
+  }
+  :root[data-theme=dark] {
+    --bg: #111113; --surface: #1b1b1e; --surface-2: #26262a; --text: #f2f2f4; --muted: #a0a0a8;
+    --line: rgba(255,255,255,.09); --accent: #7ea2ff; --accent-soft: rgba(126,162,255,.15);
+    --ring: rgba(126,162,255,.4); --header: rgba(17,17,19,.75); --danger: #ff6b6b;
+    --shadow-cover: 0 1px 2px rgba(0,0,0,.5), 0 8px 18px -8px rgba(0,0,0,.8);
+    --shadow-hover: 0 2px 4px rgba(0,0,0,.5), 0 18px 34px -12px rgba(0,0,0,.9);
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
@@ -339,6 +344,10 @@ PAGE = r"""<!DOCTYPE html>
        overflow: hidden; text-overflow: ellipsis; }
   .badge { font-size: 12px; font-weight: 600; color: var(--muted); background: var(--surface-2);
            padding: 2px 8px; border-radius: 999px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  /* the theme button, next to the account (the logo): over #acctBrand, which covers the brand */
+  #themeBtn { position: relative; z-index: 2; flex: none; display: grid; place-items: center; width: 36px; height: 36px;
+              padding: 0; border: 0; border-radius: 10px; color: var(--muted); background: none; cursor: pointer; }
+  #themeBtn:hover { color: var(--text); background: var(--accent-soft); }
   .search { flex: 1 1 280px; position: relative; display: flex; align-items: center; min-width: 200px; }
   .search .ic { position: absolute; left: 12px; color: var(--muted); pointer-events: none; }
   .search input { width: 100%; height: 40px; padding: 0 40px 0 38px; font: inherit; color: var(--text);
@@ -625,11 +634,14 @@ PAGE = r"""<!DOCTYPE html>
   }
   @media (max-width: 420px) { .brand .badge { display: none; } }   /* the library name needs the room */
 </style>
+<!-- the app's theme (Auto, light, sepia, dark), set before the page shows -->
+<script src=".index/reader/theme.js"></script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></symbol>
   <symbol id="i-sort" viewBox="0 0 24 24"><path d="m3 16 4 4 4-4M7 20V4M21 8l-4-4-4 4M17 4v16"/></symbol>
   <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
@@ -650,6 +662,7 @@ PAGE = r"""<!DOCTYPE html>
     <span class="logoBox"><svg class="ic logo" aria-hidden="true"><use href="#i-library"/></svg><svg id="acctMark" class="ic" aria-hidden="true" hidden><use href="#i-check"/></svg></span>
     <div class="names"><h1>__TITLE__</h1></div>
     <span id="count" class="badge"></span>
+    <button id="themeBtn" type="button" title="Theme: Auto (as the system)" aria-label="Theme: Auto (as the system)"><svg class="ic" aria-hidden="true"><use href="#i-theme"/></svg></button>
     <button id="acctBrand" type="button" aria-expanded="false" aria-controls="acctPop" aria-label="Account" hidden
       title="Account: your last-opened books and settings on all your devices"></button>
   </div>
@@ -809,6 +822,16 @@ const Sync = window.LibrarySync || { available: () => false, signedIn: () => fal
   lastSync: () => null, changed() {}, onRemoteChange() {},
   syncNow: async () => "signed-out", logout: async () => ({ ok: true }),
   login: async () => ({ ok: false, error: "offline" }), register: async () => ({ ok: false, error: "offline" }) };
+
+// The app's theme (reader/theme.js), one setting with the reader: its button cycles Auto, light,
+// sepia, dark; the page follows the system (Auto), another tab and the account's other devices
+const AppTheme = window.AppTheme || { stored: () => "auto", next: t => t, label: () => "Theme",
+  paint() {}, save() {}, watch() {} };
+const showThemeBtn = () => { const t = AppTheme.label(AppTheme.stored()); $("themeBtn").title = t; $("themeBtn").setAttribute("aria-label", t); };
+showThemeBtn();
+$("themeBtn").onclick = () => { AppTheme.save(AppTheme.next(AppTheme.stored())); Sync.changed(); showThemeBtn(); };
+AppTheme.watch(() => { AppTheme.paint(); showThemeBtn(); });
+Sync.onRemoteChange(r => { if (r.prefs) { AppTheme.paint(); showThemeBtn(); } });
 
 const NS = "http://www.w3.org/2000/svg";
 function icon(name) {

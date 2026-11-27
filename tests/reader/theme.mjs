@@ -9,6 +9,15 @@
 //   3. the system turns light with the book open on Auto: the bars and the book follow
 //   4. the button: light, sepia, dark (the book too), then Auto; the other settings kept
 //   5. a theme stored before (sepia, with a font size): kept
+// Catalog:
+//   6. nothing stored, the system dark: dark already when parsed; the status bar colour is dark
+//   7. its button (next to the account): Auto, light, sepia (the page in sepia colours), dark, Auto;
+//      the reader's other settings kept, the settings' time moves on
+//   8. one setting: sepia chosen in the catalog shows in the reader; dark chosen in the reader shows
+//      back in the catalog
+//   9. two tabs: the reader's button repaints the catalog open in another tab
+//  10. the bar still fits a phone (nothing sideways), the button is a finger's size; on a computer
+//      it sits on the bar's first row
 import { mkdtempSync, mkdirSync, copyFileSync, readdirSync, statSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,6 +111,77 @@ ok((await stored(d)).theme === "auto" && (await btnTitle(d)).startsWith("Theme: 
 await d.eval(`localStorage.setItem("epubReader:prefs", JSON.stringify({ theme: "sepia", font: 110, face: "book", layout: "book" }))`);
 await openBook(d);
 ok(await theme(d) === "sepia" && (await stored(d)).theme === "sepia", `reader: a stored sepia is kept (${await theme(d)})`);
+
+// ======== 6. the catalog: nothing stored, the system dark
+const catalog = async d => { await d.goto("about:blank"); await d.goto(CAT);
+  await d.waitFor("document.querySelectorAll('#list .book').length > 0", 20000); };
+await d.eval(`localStorage.removeItem("epubReader:prefs")`);
+await system(d, true);
+await catalog(d);
+ok(await d.eval("window.__early") === "dark", `catalog, system dark: dark already when parsed (${await d.eval("window.__early")})`);
+ok(await d.eval(`document.getElementById("themeColor") && document.getElementById("themeColor").content`) === "#111113",
+  `catalog, system dark: the status bar colour is the catalog's dark (${await d.eval(`(m => m && m.content)(document.getElementById("themeColor"))`)})`);
+ok(await d.eval(`document.querySelectorAll('meta[name="theme-color"]').length`) === 1, "catalog: one theme-color meta");
+
+// ======== 7. the catalog's button
+await d.eval(`localStorage.setItem("epubReader:prefs", JSON.stringify({ theme: "auto", font: 130 }))`);
+await catalog(d);
+ok((await btnTitle(d)).startsWith("Theme: Auto (as the system) |"), `catalog: the button says Auto (${await btnTitle(d)})`);
+const bodyBg = () => d.eval("getComputedStyle(document.body).backgroundColor");
+let t0 = +(await d.eval(`localStorage.getItem("epubReader:prefsTime")`) || 0);
+for (const t of ["light", "sepia", "dark", "auto"]) {
+  await press(d);
+  const shownT = t === "auto" ? "dark" : t;
+  ok(await theme(d) === shownT && (await btnTitle(d)).startsWith(t === "auto" ? "Theme: Auto" : `Theme: ${t} |`),
+    `catalog button → ${t} (${await theme(d)}, ${await btnTitle(d)})`);
+  const p = await stored(d), time = +(await d.eval(`localStorage.getItem("epubReader:prefsTime")`));
+  ok(p && p.theme === t && p.font === 130 && time >= t0 && time > 0, `catalog button → ${t}: stored, the font size kept, the time moved (${JSON.stringify(p)})`);
+  t0 = time;
+  if (t === "sepia") ok(await bodyBg() === "rgb(244, 236, 216)", `catalog on sepia: the sepia background (${await bodyBg()})`);
+  await d.shot(`catalog-${t}.png`);
+}
+
+// ======== 8. one setting for the catalog and the reader
+await system(d, false);
+await d.eval(`localStorage.setItem("epubReader:prefs", JSON.stringify({ theme: "sepia" }))`);
+await catalog(d);
+ok(await theme(d) === "sepia", "catalog: sepia");
+await openBook(d);
+ok(await theme(d) === "sepia" && /\bsepia\b/.test((await bookLook(d)).cls), `the reader shows the catalog's sepia (${await theme(d)})`);
+await press(d);   // sepia → dark
+await catalog(d);
+ok(await theme(d) === "dark" && (await btnTitle(d)).startsWith("Theme: dark |"), `the catalog shows the reader's dark (${await theme(d)})`);
+
+// ======== 9. two tabs
+{
+  await d.eval(`localStorage.setItem("epubReader:prefs", JSON.stringify({ theme: "light" }))`);
+  await catalog(d);
+  // the reader in another tab of the same browser, opened from the catalog (same site, so the
+  // catalog can press the reader's button itself)
+  await d.send("Runtime.evaluate", { expression: `window.__tab = window.open(${JSON.stringify(READER)}, "_blank"); !!window.__tab`, userGesture: true });
+  let ready = false;
+  try { await d.waitFor("!!window.__tab && window.__tab.eval(\"typeof rendition !== 'undefined' && !!rendition && placeShown\")", 30000); ready = true; } catch {}
+  ok(ready, "two tabs: the reader opened in the other tab");
+  await d.eval(`window.__tab.document.getElementById("themeBtn").click()`);   // light → sepia
+  await waitTheme(d, "sepia", 2000);
+  ok(await theme(d) === "sepia" && (await btnTitle(d)).startsWith("Theme: sepia |"), `two tabs: the catalog follows the reader's button (${await theme(d)})`);
+  await d.eval("window.__tab.close()");
+}
+
+// ======== 10. the bar fits
+await catalog(d);
+{ const fit = await d.eval(`({ sw: document.documentElement.scrollWidth, w: innerWidth,
+    r: (r => [r.width, r.height])(document.getElementById("themeBtn").getBoundingClientRect()) })`);
+  ok(fit.sw <= fit.w, `catalog on a phone: nothing sideways (${fit.sw} ≤ ${fit.w})`);
+  ok(fit.r[0] >= 36 && fit.r[1] >= 36, `catalog on a phone: the button is a finger's size (${fit.r.map(Math.round).join("×")})`);
+}
+await d.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+await catalog(d);
+{ const at = await d.eval(`(b => ({ btn: b.getBoundingClientRect().top, bar: document.querySelector("header .bar").getBoundingClientRect().top,
+    q: document.getElementById("q").getBoundingClientRect().top }))(document.getElementById("themeBtn"))`);
+  await d.shot("catalog-computer.png");
+  ok(at.btn - at.bar < 40 && Math.abs(at.btn - at.q) < 30, `catalog on a computer: the button on the bar's first row (${JSON.stringify(at)})`);
+}
 
 d.close();
 console.log(fails ? `${fails} FAILED` : "ALL OK");
