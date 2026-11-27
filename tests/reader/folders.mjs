@@ -91,6 +91,10 @@ ok(await count(d) === "6 books", `no folders: the count reads "6 books" (${await
 const ids = await d.eval(`Object.fromEntries(books.map(b => [b.file.split("/").pop(), b.id]))`);
 const id = n => ids[`Jane Doe - A Quiet Harbour ${String(n).padStart(2, "0")}.epub`];
 ok([1, 2, 3, 4, 5, 6].every(n => id(n)) && new Set(Object.values(ids)).size === 6, "each book has its own id");
+{ // a library of one book: "1 book"
+  const one = await d.eval("(() => { const keep = books.splice(1); render(); const t = document.getElementById('count').textContent; books.push(...keep); render(); return t; })()");
+  ok(one === "1 book", `one book: the count reads "1 book" (${one})`);
+}
 
 // ======== 2. two folders
 await seeded(d, { f1: folder("To read", [id(1), id(2)]), f2: folder("Holiday", [id(3)]), gone: { deleted: 5 } });
@@ -131,7 +135,7 @@ ok(await d.eval("localStorage.getItem('epubIndex:folder')") === "", "All books i
   await catalog(d);   // about:blank, then the catalog with All books
   const len = await d.eval("history.length");
   await open("f1", 2); await open("f2", 1);
-  ok(await count(d) === "1 books in Holiday", `folder A, then B: B is open (${await count(d)})`);
+  ok(await count(d) === "1 book in Holiday", `folder A, then B: B is open (${await count(d)})`);
   ok(await d.eval("history.length") === len + 1, "folder A, then B: one history step above All books");
   await back();
   ok(await cards(d) === 6 && await count(d) === "6 books", `A, B, Back: All books (${await count(d)})`);
@@ -174,6 +178,19 @@ ok(await d.eval("localStorage.getItem('epubIndex:folder')") === "", "All books i
   await sleep(300);
   const r = await d.eval("(r => [Math.round(r.left), Math.round(r.right)])(document.querySelector('#folders .fchip[data-folder=\"g8\"]').getBoundingClientRect())");
   ok(r[0] >= 0 && r[1] <= 390 + 1, `the last folder opened: its chip is in view (${r})`);
+  // the open one renamed so it sorts to the far end: its chip stays in view
+  const inView = id => d.eval(`((s, c) => { const a = s.getBoundingClientRect(), b = (c.closest('.fopen') || c).getBoundingClientRect();
+    return b.left >= a.left - 1 && b.right <= a.right + 1; })(document.getElementById('folders'), document.querySelector('#folders .fchip[data-folder="${id}"]'))`);
+  await d.eval("openFolder('g1')");
+  await sleep(300);
+  ok(await inView("g1"), "the first folder open: its chip is in view");
+  await d.eval("openMenu('g1')");
+  await d.eval("document.querySelector('#folderMenu [data-act=rename]').click()");
+  await d.eval(`(() => { const e = document.getElementById('folderMenuName'); e.value = "Zz the very last one";
+    e.dispatchEvent(new Event('input')); e.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+  await sleep(300);
+  ok(await d.eval("document.querySelector('#folders').lastElementChild.previousElementSibling.querySelector('.fchip').dataset.folder") === "g1", "renamed: it sorts last");
+  ok(await inView("g1"), "renamed to the far end: its chip is still in view");
   await d.eval("openFolder(null)");
 }
 
@@ -211,11 +228,16 @@ const tapFolders = async d => {
 };
 const rows = d => d.eval("[...document.querySelectorAll('#folderPick label')].map(l => [l.textContent.trim(), l.querySelector('input[type=checkbox]').checked])");
 const tapRow = (d, name) => tapAt(d, `[...document.querySelectorAll('#folderPick label')].find(l => l.textContent.trim() === ${JSON.stringify(name)})`, `the row ${name}`);
-const typeNew = async (d, name) => {
+// button: tap Create instead of Enter
+const typeNew = async (d, name, button = false) => {
   await tapAt(d, "document.getElementById('folderNew')", "＋ New folder");
   ok(await d.eval("document.activeElement === document.getElementById('folderNewName')"), "＋ New folder: the name field has the focus");
   await d.eval(`(() => { const e = document.getElementById('folderNewName'); e.value = ${JSON.stringify(name)};
-    e.dispatchEvent(new Event('input')); e.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+    e.dispatchEvent(new Event('input'));${button ? "" : " e.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));"} })()`);
+  if (button) {
+    ok(await d.eval("(b => !!b && b.textContent.trim())(document.querySelector('#folderNewBox button'))") === "Create", "＋ New folder: a Create button by the field");
+    await tapAt(d, "document.querySelector('#folderNewBox button')", "the Create button");
+  }
   await sleep(200);
 };
 const back = async d => { await d.eval("setTimeout(() => history.back())"); await sleep(600); };
@@ -261,7 +283,7 @@ await tapRow(d, "To read");
 ok((await chips(d)).includes("To read 1"), `unticked: To read 1 (${(await chips(d)).join(" | ")})`);
 await tapRow(d, "To read");
 ok((await chips(d)).includes("To read 2") && JSON.stringify(await rows(d)) === JSON.stringify([["To read", true]]), `ticked again: To read 2 (${(await chips(d)).join(" | ")})`);
-await typeNew(d, "Holiday");
+await typeNew(d, "Holiday", true);   // by the Create button
 ok(JSON.stringify(await rows(d)) === JSON.stringify([["Holiday", true], ["To read", true]]), `a second folder, by name, both ticked (${JSON.stringify(await rows(d))})`);
 ok(JSON.stringify(await chips(d)) === JSON.stringify(["All books", "Holiday 1", "To read 2"]), `book 2 in both (${(await chips(d)).join(" | ")})`);
 await d.eval("document.getElementById('folderPick').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
@@ -319,15 +341,18 @@ await back(d); await back(d);
   await tapChip(d, "r1");
   try { await d.waitFor("document.querySelectorAll('#list .book').length === 1", 3000); } catch {}
   ok(await d.eval(`!!${fileSel(to.split("/").pop())}`), "renamed: the folder shows it under the new name");
-  if (b3) {
-    const key = "epubReader:book:" + b3.id;
+  // every book of the library: the reader saves its place under the catalog's id
+  const all = await d.eval("books.map(b => ({ file: b.file.split('/').pop(), id: b.id, href: readerUrl(b) }))");
+  ok(all.length === 6, `all 6 books (${all.length})`);
+  for (const b of all) {
+    const key = "epubReader:book:" + b.id;
     await d.eval(`localStorage.removeItem(${JSON.stringify(key)})`);
-    await d.goto(new URL(b3.href, CAT).href);
+    await d.goto(new URL(b.href, CAT).href);
     let saved = false;
     try { await d.waitFor(`localStorage.getItem(${JSON.stringify(key)}) !== null`, 30000); saved = true; } catch {}
-    ok(saved, `the reader saves its place under the catalog's id (${key})`);
+    ok(saved, `${b.file}: the reader saves its place under the catalog's id (${key})`);
+    await catalog(d);
   }
-  await catalog(d);
 }
 
 // ======== 10. a name already used, empty, too long
@@ -349,6 +374,17 @@ await d.eval(`(() => { const e = document.getElementById('folderNewName'); e.val
 ok(await err(d) === "At most 60 characters.", `61 characters: a short message (${await err(d)})`);
 ok(liveIds(await stored(d)).length === 1, "still nothing created");
 await d.shot("folders-pick-taken.png");
+// unique ignoring case only: "Vol 1" is not "Vol 01", "Café" is not "Cafe"
+await back(d); await back(d);
+await seeded(d, { v1: folder("Vol 01", []), c1: folder("Cafe", []), t1: folder("To read", []) });
+await openBook(d, book(2));
+await tapFolders(d);
+await typeNew(d, "Vol 1");
+ok(!!byName(await stored(d), "Vol 1"), `"Vol 1" beside "Vol 01": made (${await err(d)})`);
+await typeNew(d, "Café");
+ok(!!byName(await stored(d), "Café"), `"Café" beside "Cafe": made (${await err(d)})`);
+await typeNew(d, "TO READ");
+ok(await err(d) === "You already have a folder with that name." && liveIds(await stored(d)).length === 5, `"TO READ" beside "To read": refused (${await err(d)})`);
 d.close();
 
 // ======== 11. a computer screen: a popover
@@ -387,10 +423,16 @@ const tapMore = async d => { await tapAt(d, "document.querySelector('#folders bu
   try { await d.waitFor(MENU, 2000); } catch {} };
 const menuShown = d => d.eval("[...document.querySelectorAll('#folderMenu button, #folderMenu p')].filter(e => e.offsetParent).map(e => e.textContent.trim())");
 const tapItem = (d, name) => tapAt(d, `[...document.querySelectorAll('#folderMenu button')].find(e => e.offsetParent && e.textContent.trim() === ${JSON.stringify(name)})`, `the menu's ${name}`);
-const typeName = async (d, name) => {
+// button: tap the field's button (Create / Save) instead of Enter
+const typeName = async (d, name, button = "") => {
   ok(await d.eval("document.activeElement === document.getElementById('folderMenuName')"), "the name field has the focus");
   await d.eval(`(() => { const e = document.getElementById('folderMenuName'); e.value = ${JSON.stringify(name)};
-    e.dispatchEvent(new Event('input')); e.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+    e.dispatchEvent(new Event('input'));${button ? "" : " e.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));"} })()`);
+  if (button) {
+    const t = await d.eval("(b => !!b && b.textContent.trim())(document.querySelector('#folderMenuBox button'))");
+    ok(t === button, `the name field has a ${button} button (${t})`);
+    await tapAt(d, "document.querySelector('#folderMenuBox button')", `the ${button} button`);
+  }
   await sleep(300);
 };
 const menuErr = d => d.eval("(e => e && e.offsetParent ? e.textContent.trim() : '')(document.getElementById('folderMenuErr'))");
@@ -404,8 +446,13 @@ const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.q
      "the strip ends with ＋ (New folder)");
   ok(await p.eval("document.querySelector('#folders').lastElementChild.matches('button.fadd')"), "＋ is the last on the strip");
   ok(await p.eval("document.querySelectorAll('#folders button.fmore').length") === 0, "All books open: no ⋯");
-  await tapPlus(p);
+  // the Account popover open (on a phone it covers the strip: the button's own click, which stops there)
+  await p.eval("toggleAcct(true); document.querySelector('#folders button.fadd').click()");
+  await sleep(200);
   ok(await p.eval(MENU), "＋: the box is open");
+  ok(await p.eval("document.getElementById('acctPop').hidden"), "＋: the Account popover closes");
+  ok(await p.eval("(m => m.getAttribute('role') === 'dialog' && m.getAttribute('aria-label') === 'Folders')(document.getElementById('folderMenu'))"),
+     "＋: the box is a dialog named Folders");
   ok(await p.eval("(r => r.left >= 0 && r.right <= 390 && r.bottom <= 844)(document.getElementById('folderMenu').getBoundingClientRect())"), "＋: the box is on the screen");
   await typeName(p, "TO READ");
   ok(await menuErr(p) === "You already have a folder with that name.", `＋, a name used: the same message (${await menuErr(p)})`);
@@ -414,7 +461,7 @@ const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.q
   ok(await p.eval("document.getElementById('folderMenuName').maxLength") === 60, "＋: the field takes at most 60 characters");
   ok(liveIds(await stored(p)).length === 1, "＋: nothing made yet");
   await p.shot("folders-plus.png");
-  await typeName(p, "Holiday");
+  await typeName(p, "Holiday", "Create");
   const hol = byName(await stored(p), "Holiday");
   ok(!!hol, "＋ Holiday: the folder is made");
   ok(await p.eval("document.getElementById('folderMenu').hidden"), "＋ Holiday: the box closes");
@@ -427,8 +474,11 @@ const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.q
   ok(await p.eval("document.querySelectorAll('#folders button.fmore').length") === 1, "a folder open: one ⋯");
   ok(await p.eval(`(m => !!m && !!m.closest('.fopen') && m.closest('.fopen').querySelector('button.fchip').dataset.folder === ${JSON.stringify(hol)})(document.querySelector('#folders button.fmore'))`),
      "the ⋯ is on the open folder's chip");
-  await tapMore(p);
+  await p.eval("toggleAcct(true); document.querySelector('#folders button.fmore').click()");
+  await sleep(200);
+  ok(await p.eval("document.getElementById('acctPop').hidden"), "⋯: the Account popover closes");
   ok(await p.eval("(m => !!m && m.offsetParent !== null)(document.querySelector('#folderMenu [role=menu]'))"), "⋯: a menu");
+  ok(await p.eval("document.getElementById('folderMenu').getAttribute('role')") === null, "⋯: the box itself is no dialog (the menu inside is named)");
   ok(JSON.stringify(await p.eval("[...document.querySelectorAll('#folderMenu [role=menuitem]')].map(e => e.textContent.trim())")) === JSON.stringify(["Rename", "Delete folder"]),
      "⋯: Rename, Delete folder");
   ok(await p.eval("document.querySelector('#folders button.fmore').getAttribute('aria-expanded')") === "true", "⋯: aria-expanded");
@@ -437,7 +487,7 @@ const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.q
   ok(await p.eval("document.getElementById('folderMenuName').value") === "Holiday", "Rename: the field holds the name");
   await typeName(p, "to read");
   ok(await menuErr(p) === "You already have a folder with that name.", `Rename to a name used: the same message (${await menuErr(p)})`);
-  await typeName(p, "Summer");
+  await typeName(p, "Summer", "Save");
   ok(await p.eval("document.getElementById('folderMenu').hidden"), "Rename: the box closes");
   ok(await p.eval(`(c => c && [...c.childNodes].map(n => n.textContent.trim()).filter(Boolean).join(' '))(document.querySelector('#folders button.fchip[data-folder="${hol}"]'))`) === "Summer 0",
      "Rename: the chip reads Summer");
@@ -445,6 +495,7 @@ const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.q
   await tapMore(p);
   await tapItem(p, "Delete folder");
   const ask = await menuShown(p);
+  ok(await p.eval("document.getElementById('folderMenu').getAttribute('role')") === "dialog", "Delete asks: the box is a dialog");
   ok(ask[0] === 'Delete the folder "Summer"? The books stay in the library.', `Delete asks first (${ask[0]})`);
   ok(JSON.stringify(ask.slice(1)) === JSON.stringify(["Delete", "Cancel"]), `Delete: buttons Delete / Cancel (${ask.slice(1).join(" | ")})`);
   await p.shot("folders-delete.png");
@@ -474,7 +525,7 @@ const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.q
   await tapMore(p);
   await tapAt(p, "document.getElementById('q')", "the search field");   // not a cover: nothing else opens
   ok(await p.eval("document.getElementById('folderMenu').hidden"), "a tap elsewhere closes the menu");
-  ok(await count(p) === "1 books in To read" && await p.eval("document.getElementById('detail').hidden"), `a tap elsewhere: the folder stays open (${await count(p)})`);
+  ok(await count(p) === "1 book in To read" && await p.eval("document.getElementById('detail').hidden"), `a tap elsewhere: the folder stays open (${await count(p)})`);
 
   // ======== 16. the book page's bottom bar on a phone fits
   const fits = async (d, what) => {
@@ -495,6 +546,12 @@ const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.q
   await catalog(app);
   ok(await app.eval("typeof offline === 'object' && offline !== null"), "the app: books can be kept offline");
   await openBook(app, book(1));
+  await app.eval("toggleAcct(true); offline.panel(true)");
+  await tapFolders(app);
+  ok(await app.eval(PICK), "the app: the Folders list is open");
+  ok(await app.eval("document.getElementById('acctPop').hidden && document.getElementById('offPanel').hidden"),
+     "the app: the Folders list closes the Account and Offline popovers");
+  await back(app);
   ok(await app.eval("document.querySelectorAll('#detail .dact > *').length") === 4, `the app: Read, Folders, offline, Save (${await app.eval("document.querySelectorAll('#detail .dact > *').length")})`);
   await back(app);
   await fits(app, "390 px, the app");
@@ -551,7 +608,7 @@ const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.q
   }
 
   // ======== 15. A deletes the folder B has open
-  ok(await count(B) === "1 books in To read", `B: To read is open (${await count(B)})`);
+  ok(await count(B) === "1 book in To read", `B: To read is open (${await count(B)})`);
   await tapMore(A);
   await tapItem(A, "Delete folder");
   await tapItem(A, "Delete");

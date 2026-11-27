@@ -571,6 +571,10 @@ PAGE = r"""<!DOCTYPE html>
   .fname { height: 40px; min-width: 0; font: inherit; color: var(--text); background: var(--bg);
                    border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; }
   .fname:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .frow { display: flex; gap: 6px; min-width: 0; }
+  .frow .fname { flex: 1; }
+  .fgo { flex: none; height: 40px; padding: 0 14px; border: 0; border-radius: 10px; font: inherit; font-weight: 600;
+    color: #fff; background: var(--accent); cursor: pointer; }
   .ferr { margin: 0 2px; font-size: 13px; color: var(--danger); }
   .ferr:empty { display: none; }
   /* The strip's ＋ and ⋯: a small box under the chip (the menu, a name field, or "Delete …?") */
@@ -591,6 +595,7 @@ PAGE = r"""<!DOCTYPE html>
     #folderPick label { min-height: 48px; }
     #folderNew { height: 48px; }
     .fname { font-size: 16px; }   /* iPhone zooms in on smaller text fields */
+    .fgo { height: 48px; }
     #folderMenu [role=menuitem] { min-height: 48px; }
     #folderMenuAsk .row button { height: 48px; }
   }
@@ -689,8 +694,8 @@ PAGE = r"""<!DOCTYPE html>
   <div id="folderRows"></div>
   <button id="folderNew" class="btn" type="button">＋ New folder</button>
   <div id="folderNewBox" class="fpnew" hidden>
-    <input id="folderNewName" class="fname" type="text" maxlength="60" placeholder="Folder name" aria-label="New folder name"
-      autocomplete="off" enterkeyhint="done">
+    <div class="frow"><input id="folderNewName" class="fname" type="text" maxlength="60" placeholder="Folder name" aria-label="New folder name"
+      autocomplete="off" enterkeyhint="done"><button id="folderNewGo" class="fgo" type="button">Create</button></div>
     <div id="folderErr" class="ferr" role="alert"></div>
   </div>
 </div>
@@ -701,8 +706,8 @@ PAGE = r"""<!DOCTYPE html>
   </div>
   <div id="folderMenuBox" class="fpnew" hidden>
     <div id="folderMenuHead" class="pophead"></div>
-    <input id="folderMenuName" class="fname" type="text" maxlength="60" placeholder="Folder name" aria-label="Folder name"
-      autocomplete="off" enterkeyhint="done">
+    <div class="frow"><input id="folderMenuName" class="fname" type="text" maxlength="60" placeholder="Folder name" aria-label="Folder name"
+      autocomplete="off" enterkeyhint="done"><button id="folderMenuGo" class="fgo" type="button">Create</button></div>
     <div id="folderMenuErr" class="ferr" role="alert"></div>
   </div>
   <div id="folderMenuAsk" role="group" aria-labelledby="folderMenuQ" hidden>
@@ -756,6 +761,8 @@ PAGE = r"""<!DOCTYPE html>
 const books = JSON.parse(document.getElementById("data").textContent);
 const $ = id => document.getElementById(id);
 const coll = new Intl.Collator("ru", { sensitivity: "base", numeric: true });
+// folder names are unique ignoring case only ("Vol 1" is not "Vol 01", "Café" is not "Cafe")
+const nameColl = new Intl.Collator("ru", { sensitivity: "accent" });
 const norm = s => s.toLowerCase().replace(/ё/g, "е");
 const authorLine = b => b.authors.length ? b.authors.join(", ") : "Unknown Author";
 const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB";
@@ -1055,8 +1062,8 @@ function renderList() {
   const inside = open ? books.filter(b => Shelves.has(map, open.id, b.id)) : books;
   const shown = inside.filter(b => words.every(w => b._search.includes(w))).sort(sorters[$("sort").value]);
   $("count").textContent = open
-    ? (shown.length === inside.length ? `${inside.length} books in ${open.name}` : `${shown.length} of ${inside.length} in ${open.name}`)
-    : (shown.length === books.length ? `${books.length} books` : `${shown.length} of ${books.length} books`);
+    ? (shown.length === inside.length ? `${inside.length} book${inside.length === 1 ? "" : "s"} in ${open.name}` : `${shown.length} of ${inside.length} in ${open.name}`)
+    : (shown.length === books.length ? `${books.length} book${books.length === 1 ? "" : "s"}` : `${shown.length} of ${books.length} books`);
   const list = $("list"); list.replaceChildren();
   if (open && !inside.length) {
     list.append(el("div", { class: "empty" }, icon("shelf"), "No books here yet. Open a book and choose Folders to add it."));
@@ -1203,6 +1210,7 @@ function placePick() {
   p.style.top = (b.bottom + 8 + h <= innerHeight - 16 || b.top - 8 - h < 16 ? b.bottom + 8 : b.top - 8 - h) + "px";
 }
 function openPick(b) {
+  closeOtherPops();
   pickBook = b;
   pickRows();
   pickNew(false);
@@ -1220,21 +1228,25 @@ function closePick(back = true) {
   if (btn) { btn.setAttribute("aria-expanded", "false"); if (current) btn.focus({ preventScroll: true }); }
   if (back && history.state && history.state.pick) history.back();
 }
-// A folder name field (the book page's ＋ New folder, the strip's ＋, Rename): Enter tries the name
-// (attempt returns an error code of shelves.js, or nothing when done); the short message shows
-// under the field until the next key
-function nameField(input, err, attempt) {
+// A folder name field (the book page's ＋ New folder, the strip's ＋, Rename): Enter or the button
+// beside it (Create / Save) tries the name (attempt returns an error code of shelves.js, or nothing
+// when done); the short message shows under the field until the next key
+function nameField(input, go, err, attempt) {
+  const tryName = () => {
+    const code = attempt(input.value);
+    if (code) { err.textContent = PICK_ERR[code] || PICK_ERR.empty; if (input.isConnected) input.focus({ preventScroll: true }); }
+  };
   input.addEventListener("input", () => { err.textContent = ""; });
   input.addEventListener("keydown", e => {
     if (e.key !== "Enter" || e.isComposing) return;
     e.preventDefault();
-    const code = attempt(input.value);
-    if (code) err.textContent = PICK_ERR[code] || PICK_ERR.empty;
+    tryName();
   });
+  go.addEventListener("click", tryName);
 }
 $("folderNew").onclick = e => { e.stopPropagation(); pickNew(true); };
-nameField($("folderNewName"), $("folderErr"), name => {
-  const r = Shelves.create(shelves(), name, Date.now(), coll.compare);
+nameField($("folderNewName"), $("folderNewGo"), $("folderErr"), name => {
+  const r = Shelves.create(shelves(), name, Date.now(), nameColl.compare);
   if (r.error) return r.error;
   saveShelves(Shelves.setBook(r.map, r.id, pickBook.id, true, Date.now()));
   pickRows();
@@ -1259,24 +1271,35 @@ detail.addEventListener("scroll", placePick);
 // under the button it came from; menuFor is its folder, null for ＋.
 function menuAnchor() { return $("folders").querySelector(menuFor === null ? ".fadd" : ".fmore"); }
 function menuMode(mode, focus) {
+  const m = $("folderMenu");   // a name field or a question: a dialog; a menu: the menu inside is named
+  if (mode === "menu") { m.removeAttribute("role"); m.removeAttribute("aria-label"); }
+  else { m.setAttribute("role", "dialog"); m.setAttribute("aria-label", "Folders"); }
   $("folderMenuItems").hidden = mode !== "menu";
   $("folderMenuBox").hidden = mode !== "name";
   $("folderMenuAsk").hidden = mode !== "ask";
   placeMenu();
   focus.focus({ preventScroll: true });
 }
-function menuName(head, value) {
+function menuName(head, value, go) {
   $("folderMenuHead").textContent = head;
+  $("folderMenuGo").textContent = go;
   $("folderMenuName").value = value;
   $("folderMenuErr").textContent = "";
   menuMode("name", $("folderMenuName"));
   $("folderMenuName").select();
 }
+// a folder popover opening closes the Account and Offline ones (their click-elsewhere never sees
+// the click: the folder buttons stop it)
+function closeOtherPops() {
+  if (!$("acctPop").hidden) toggleAcct(false);
+  if (offline && !$("offPanel").hidden) offline.panel(false);
+}
 function openMenu(id) {
+  closeOtherPops();
   menuFor = id;
   $("folderMenu").hidden = false;
   const a = menuAnchor(); if (a) a.setAttribute("aria-expanded", "true");
-  if (id === null) menuName("New folder", "");
+  if (id === null) menuName("New folder", "", "Create");
   else menuMode("menu", $("folderMenuItems").querySelector("[role=menuitem]"));
 }
 // focus: back to the button it came from (when it is still there)
@@ -1297,9 +1320,9 @@ function placeMenu() {
   m.style.top = b.bottom + 8 + "px";
 }
 const menuFolderName = () => (liveFolders(shelves()).find(f => f.id === menuFor) || {}).name;
-nameField($("folderMenuName"), $("folderMenuErr"), name => {
+nameField($("folderMenuName"), $("folderMenuGo"), $("folderMenuErr"), name => {
   if (menuFor === null) {
-    const r = Shelves.create(shelves(), name, Date.now(), coll.compare);
+    const r = Shelves.create(shelves(), name, Date.now(), nameColl.compare);
     if (r.error) return r.error;
     closeMenu(false);
     saveShelves(r.map);
@@ -1307,16 +1330,17 @@ nameField($("folderMenuName"), $("folderMenuErr"), name => {
     const c = $("folders").querySelector(".fmore"); if (c) c.focus({ preventScroll: true });
     return;
   }
-  const r = Shelves.rename(shelves(), menuFor, name, Date.now(), coll.compare);
+  const r = Shelves.rename(shelves(), menuFor, name, Date.now(), nameColl.compare);
   if (r.error === "missing") { closeMenu(false); return; }   // deleted meanwhile (another device)
   if (r.error) return r.error;
   saveShelves(r.map);
   closeMenu();
+  showOpenChip();   // it may sort elsewhere on the strip: still in view on a phone
 });
 $("folderMenu").addEventListener("click", e => {
   const act = e.target.closest("[data-act]"), id = menuFor;
   if (!act || id === null) return;
-  if (act.dataset.act === "rename") menuName("Rename", menuFolderName() || "");
+  if (act.dataset.act === "rename") menuName("Rename", menuFolderName() || "", "Save");
   else if (act.dataset.act === "delete") {
     $("folderMenuQ").textContent = `Delete the folder "${menuFolderName()}"? The books stay in the library.`;
     menuMode("ask", $("folderMenuAsk").querySelector("[data-act=no]"));
@@ -1804,10 +1828,13 @@ if (Sync.available()) {   // secure pages only: a password never crosses the Wi-
 // Signed in: what other devices opened and chose comes in at start (never waiting longer than 2 s
 // for the library computer), when the page comes back to the front, and whenever a sync brings news.
 {
+  const openName = () => (liveFolders(shelves()).find(f => f.id === folderId) || {}).name;
   const refresh = () => {
+    const was = openName();
     openedAt = openedTimes();
     applyPrefs();
     render(true);
+    if (openName() !== was) showOpenChip();   // renamed on another device: it may sort elsewhere
     showBrand();
     if (!$("acctPop").hidden) showAcct();
     if (!$("folderPick").hidden) pickRows();
