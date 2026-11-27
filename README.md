@@ -162,7 +162,9 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
   Many books mark a tiny cover (e.g. 126×200) and keep the same picture full size elsewhere
   (usually on the first page): then the big copy is used, so covers stay sharp on the book's page.
 - Title, authors, series, year, publisher, file size.
-- Follows the system light / dark theme.
+- The app's theme, shared with the reader: **Auto** (the system's light or dark, following it
+  as it changes; an "A" on the button) · light · sepia · dark. The button next to the library's
+  name cycles them; the reader's theme button is the same setting.
 - Instant search across title, authors, series, description and file path
   (case-insensitive, `ё` = `е`, all words must match). `/` focuses search, `Esc` clears it.
 - Click an author to see all their books.
@@ -256,7 +258,8 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
   type (by name, the page's first words, chapter and note; all words must match, case and ё/е
   don't matter; `Esc` clears it). The book search (`Ctrl+F`) also lists matching bookmarks and notes,
   in a separate group above the matches in the text.
-- Light / sepia / dark theme, remembered.
+- Theme: Auto (the system's light or dark, also inside an open book) · light · sepia · dark,
+  remembered; one setting with the catalog (changing it in one changes the other).
 - **Print** (computer; also `Ctrl+P` or the browser's Print menu) prints exactly what is on the
   screen, like a picture of it: the open pages, without the bars and buttons, scaled to fit an
   A4 sheet (landscape for a wide window, portrait for a tall one), black on white whatever the theme.
