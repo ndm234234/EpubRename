@@ -54,7 +54,8 @@ const device = async app => {
 };
 const LISTED = "document.querySelectorAll('#list .book').length > 0";
 const catalog = async d => { await d.goto("about:blank"); await d.goto(CAT); await d.waitFor(LISTED, 20000); };
-const HEAD = "document.querySelector('header').getBoundingClientRect().bottom";
+// what sticks at the top: the header; on a phone only its bar (the header box is display: contents)
+const HEAD = "(h => (getComputedStyle(h).display === 'contents' ? h.querySelector('.bar') : h).getBoundingClientRect().bottom)(document.querySelector('header'))";
 // the first book whose card shows below the header: its key, its distance from the window top, the scroll
 const top = d => d.eval(`(() => { const h = ${HEAD};
   for (const a of document.querySelectorAll('#list .book')) { const r = a.getBoundingClientRect();

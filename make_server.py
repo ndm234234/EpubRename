@@ -358,9 +358,10 @@ PAGE = r"""<!DOCTYPE html>
   .chip:hover, .select select:hover { background: var(--surface-2); }
   .chip[aria-pressed=true] { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
   .select { position: relative; display: flex; align-items: center; }
-  /* Folders: chips under the header, wrapped onto as many rows as they need (the owner's follow-up:
-     nothing scrolls sideways); not sticky, they scroll away with the list; hidden while there are none */
-  .folders { max-width: 1400px; margin: 16px auto 0; padding: 0 28px; display: flex; flex-wrap: wrap; gap: 8px; }
+  /* Folders: chips under the bar, wrapped onto as many rows as they need (the owner's follow-up:
+     nothing scrolls sideways); in the sticky header on a computer, scrolled away on a phone (below);
+     hidden while there are none */
+  .folders { max-width: 1400px; margin: 10px auto 0; display: flex; flex-wrap: wrap; gap: 8px; }
   .fchip { flex: none; max-width: 100%; height: 34px; padding: 0 12px; gap: 6px; }
   .fchip .flabel { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }   /* a long name: … */
   .fchip .count { font-weight: 600; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -601,7 +602,11 @@ PAGE = r"""<!DOCTYPE html>
   }
 
   @media (max-width: 640px) {
-    header { padding: 10px 16px; }
+    /* only the bar sticks: the header box goes, the bar takes its look; the strip scrolls away */
+    header { display: contents; }
+    .bar { position: sticky; top: 0; z-index: 5; padding: 10px 16px; background: var(--header);
+           -webkit-backdrop-filter: saturate(1.6) blur(16px); backdrop-filter: saturate(1.6) blur(16px);
+           border-bottom: 1px solid var(--line); }
     main { padding: 20px 16px 48px; }
     .note { margin: 12px 16px 0; }
     .pop { right: 16px; }
@@ -671,8 +676,8 @@ PAGE = r"""<!DOCTYPE html>
       <svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span>Open file</span></a>
   </div>
 </div>
-</header>
 <nav id="folders" class="folders" aria-label="Folders" hidden></nav>
+</header>
 <div id="fileNote" class="note" hidden><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>
   <div>Opened directly from disk: books ask you to choose the file. For one-click reading open
   the catalog with <b>Open Library</b> (<code>Open Library.bat</code> on Windows,
@@ -1373,15 +1378,25 @@ document.addEventListener("click", e => {   // a click elsewhere closes it
   if (!$("folderMenu").hidden && e.target.isConnected && !$("folderMenu").contains(e.target)) closeMenu(false);
 });
 addEventListener("resize", placeMenu);
-addEventListener("scroll", placeMenu, { passive: true });   // the strip scrolls with the page
+// on a phone the strip scrolls with the page: the box follows its chip, and closes once the chip
+// goes under the bar or off the screen
+addEventListener("scroll", () => {
+  const a = menuAnchor();
+  if ($("folderMenu").hidden || !a || sticky().contains(a)) return;
+  const b = a.getBoundingClientRect();
+  if (b.top < sticky().getBoundingClientRect().bottom || b.top > innerHeight) closeMenu(false); else placeMenu();
+}, { passive: true });
 
 // ------------------------------------------------------------ Where you were (this device only)
 // <PREFS>:place = {href, offset, q, time}: the book row at the top of the screen (its key in the
 // library), its distance from the top of the window, the search text. Kept for the catalog to come
 // back to it (after the reader, after a restart on a book); never part of what is synced.
 const PLACE = PREFS + ":place";
+// what sticks at the top: the header (bar and folder strip), on a phone only the bar
+const sticky = () => getComputedStyle(document.querySelector("header")).display === "contents"
+  ? document.querySelector("header .bar") : document.querySelector("header");
 const topRow = () => {
-  const h = document.querySelector("header").getBoundingClientRect().bottom;   // the header sticks
+  const h = sticky().getBoundingClientRect().bottom;
   for (const a of document.querySelectorAll("#list .book")) {
     const r = a.getBoundingClientRect();
     if (r.bottom > h + 1) return { href: a.dataset.key, offset: Math.round(r.top) };

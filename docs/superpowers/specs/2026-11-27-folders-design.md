@@ -127,11 +127,13 @@ The catalog's words stay English like the rest of it; the UI word is **"Folders"
 The "Open file" chip already uses a folder icon; folders get a different one, e.g. a stack of
 books or a tag (builder's call), so the two aren't confused.
 
-**Folder strip.** A row of chips under the header: `All books` · `To read 12` · `Holiday 5` … ·
-`＋`. *(Owner's follow-up, replacing "on a phone it scrolls sideways and doesn't wrap; the chosen
-chip stays in view":)* the chips wrap onto as many rows as they need on every screen, nothing
-scrolls sideways, and an open chip stays on one row with its `⋯`; the strip is not part of the
-sticky header (it scrolls away with the list, the bar with the name and search stays on top).
+**Folder strip.** A row of chips under the header's bar: `To read 12` · `Holiday 5` … · `＋` ·
+`Not in folders 4` · `All books` (the owner's order). *(Owner's follow-up, replacing "on a phone it
+scrolls sideways and doesn't wrap; the chosen chip stays in view":)* the chips wrap onto as many
+rows as they need on every screen, nothing scrolls sideways, and an open chip stays on one row
+with its `⋯`. On a computer (wider than 640px) the strip stays with the sticky header; on a phone
+it is not part of what sticks: it scrolls away with the list while the bar (name, search, sort…)
+stays on top, and an open `＋` / `⋯` box closes once its chip goes under the bar.
 Folders are listed by name (the catalog's collator), the same order on every device. The strip is
 **hidden while the person has no folders**, so the catalog looks as it does today for people who
 don't use them; the first folder is made from a book's page (below).

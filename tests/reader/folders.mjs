@@ -9,7 +9,8 @@
 //      then All books; a tap opens one (only its books, the count says so), search works inside
 //      it; Back goes to All books; a reload comes back to the open folder
 //   3. a phone screen: the strip wraps onto rows (nothing scrolls sideways) and scrolls away with
-//      the list while the bar stays; the place in the list is still found
+//      the list while the bar stays (an open ＋ / ⋯ box closes); on a computer it stays with the
+//      header; the place in the list is still found on both
 //   4. an empty folder says how to add books
 // Part 2, the book's page (Folders: tick to put the book in, untick to take it out, a new folder):
 //   5. no folders: the list has only "＋ New folder"; a new one is made ticked; the strip appears
@@ -167,6 +168,28 @@ ok(await d.eval("localStorage.getItem('epubIndex:folder')") === "", "All books i
   ok(await d.eval("location.href") === CAT, "then Back: still the catalog");
 }
 
+// scrolled down (600 px on a phone, 200 on a computer, where the 6 books are a short list): on a phone the strip is gone above the screen and the bar stays; on a
+// computer the strip stays with the header; the place in the list is taken under what sticks
+const MENU_OPEN = "!document.getElementById('folderMenu').hidden";
+const scrolledDown = async (d, phone) => {
+  const what = phone ? "phone" : "computer", by = phone ? 600 : 200;
+  await d.eval(`scrollTo(0, ${by})`);
+  await sleep(300);
+  const top = await d.eval(`({ strip: (r => [r.top, r.bottom])(document.getElementById('folders').getBoundingClientRect()),
+    bar: (r => [r.top, r.bottom])(document.querySelector('header .bar').getBoundingClientRect()), y: scrollY, h: innerHeight })`);
+  ok(top.y === by, `${what}: scrolled down ${by} px (${top.y})`);
+  if (phone) ok(top.strip[1] <= 0, `${what}, scrolled down: the strip is above the screen (its bottom at ${top.strip[1]})`);
+  else ok(top.strip[0] >= top.bar[1] - 1 && top.strip[1] < top.h / 2, `${what}, scrolled down: the strip is still at the top under the bar (${top.strip})`);
+  ok(top.bar[0] >= 0 && top.bar[1] > 0 && top.bar[1] < top.h, `${what}, scrolled down: the bar is still on the screen (${top.bar})`);
+  // where you were: the first book below what sticks (the bar on a phone, bar and strip on a computer)
+  const edge = phone ? top.bar[1] : top.strip[1];
+  const want = await d.eval(`(b => b && b.dataset.key)([...document.querySelectorAll('#list .book')].find(a => a.getBoundingClientRect().bottom > ${edge} + 1))`);
+  const got = await d.eval("(r => r && r.href)(topRow())");
+  ok(!!want && got === want, `${what}: the book at the top is the first one below what sticks (${got})`);
+  const again = await d.eval("(r => { scrollTo(0, 0); placeRow(r); return [!!r, Math.round(scrollY)]; })(topRow())");
+  ok(again[0] && Math.abs(again[1] - by) <= 2, `${what}: the place in the list is found again (${again})`);
+};
+
 // ======== 3. the strip on a phone screen: it wraps onto rows, nothing scrolls sideways; it scrolls
 // away with the list while the bar stays
 {
@@ -200,20 +223,32 @@ ok(await d.eval("localStorage.getItem('epubIndex:folder')") === "", "All books i
   await sleep(300);
   ok(await d.eval("(s => s.children[s.children.length - 4].querySelector('.fchip').dataset.folder)(document.querySelector('#folders'))") === "g1", "renamed: it sorts last");
   ok(await oneRow("g1"), "renamed: its chip and its ⋯ still on one row");
-  // scrolled down: the strip is gone above the screen, the bar stays
-  await d.eval("openFolder(null)");
+  // the ＋ / ⋯ box closes once the page scrolls its chip under the bar
   await d.eval("document.getElementById('list').style.minHeight = '3000px'");   // room to scroll
-  await d.eval("scrollTo(0, 600)");
-  await sleep(300);
-  const top = await d.eval(`({ strip: document.getElementById('folders').getBoundingClientRect().bottom,
-    bar: (r => [r.top, r.bottom])(document.querySelector('header .bar').getBoundingClientRect()), y: scrollY })`);
-  ok(top.y === 600, `scrolled down 600 px (${top.y})`);
-  ok(top.strip <= 0, `scrolled down: the strip is above the screen (its bottom at ${top.strip})`);
-  ok(top.bar[0] >= 0 && top.bar[1] > 0 && top.bar[1] < 844, `scrolled down: the bar is still on the screen (${top.bar})`);
-  // where you were: the book at the top, found again
-  const back600 = await d.eval("(r => { scrollTo(0, 0); placeRow(r); return [!!r, Math.round(scrollY)]; })(topRow())");
-  ok(back600[0] && Math.abs(back600[1] - 600) <= 2, `the place in the list is found again (${back600})`);
-  await d.eval("document.getElementById('list').style.minHeight = ''; scrollTo(0, 0)");
+  try {
+    for (const [what, sel] of [["⋯", "button.fmore"], ["＋", "button.fadd"]]) {
+      await d.eval("scrollTo(0, 0)");
+      await sleep(100);
+      await d.eval(`document.querySelector('#folders ${sel}').click()`);
+      await sleep(200);
+      ok(await d.eval(MENU_OPEN), `phone, ${what}: the box is open`);
+      await d.eval("scrollTo(0, 600)");
+      await sleep(300);
+      ok(await d.eval("document.getElementById('folderMenu').hidden"), `phone, ${what}: scrolled under the bar, the box closes`);
+    }
+    await d.eval("openFolder(null)");
+    await scrolledDown(d, true);
+  } finally { await d.eval("document.getElementById('list').style.minHeight = ''; scrollTo(0, 0)"); }
+}
+// a computer screen: the strip stays with the header
+{
+  const map = {};
+  for (let i = 1; i <= 8; i++) map["g" + i] = folder(`Folder number ${i}`, [id(1 + i % 6)]);
+  const w = await launch({ width: 1280, height: 800, touch: false });
+  await seeded(w, map);
+  await w.eval("document.getElementById('list').style.minHeight = '3000px'");
+  try { await scrolledDown(w, false); }
+  finally { await w.eval("document.getElementById('list').style.minHeight = ''"); w.close(); }
 }
 
 // ======== 4. an empty folder
