@@ -68,6 +68,8 @@ const bookLook = d => d.eval(`(() => { const doc = rendition.getContents()[0].do
   return { cls: doc.body.className, bg: getComputedStyle(doc.body).backgroundColor }; })()`);
 const isDarkRgb = s => { const m = /(\d+), (\d+), (\d+)/.exec(s || ""); return !!m && +m[1] + +m[2] + +m[3] < 150; };
 const btnTitle = d => d.eval(`(b => b ? b.title + " | " + b.getAttribute("aria-label") : "")(document.getElementById("themeBtn"))`);
+// the "A" over the button's circle: only while Auto is chosen
+const badge = d => d.eval(`getComputedStyle(document.getElementById("themeBtn"), "::after").content`);
 const press = async d => { await d.eval(`document.getElementById("themeBtn").click()`); await sleep(250); };
 const waitTheme = async (d, t, ms = 1000) => { try { await d.waitFor(`document.documentElement.dataset.theme === ${JSON.stringify(t)}`, ms); } catch {} };
 
@@ -79,6 +81,7 @@ await system(d, false);
 await openBook(d);
 ok(await theme(d) === "light", `reader, nothing stored, system light: shown light (${await theme(d)})`);
 ok(await btnTitle(d) === "Theme: Auto (as the system) | Theme: Auto (as the system)", `reader: the button says Auto (${await btnTitle(d)})`);
+ok(await badge(d) === '"A"', `reader, Auto: an "A" over the button (${await badge(d)})`);
 
 // ======== 2. the system dark, reloaded
 await system(d, true);
@@ -102,6 +105,7 @@ for (const t of ["light", "sepia", "dark"]) {
   ok(await theme(d) === t && (await btnTitle(d)).startsWith(`Theme: ${t} |`), `reader button → ${t} (${await theme(d)}, ${await btnTitle(d)})`);
   const b = await bookLook(d);
   ok(new RegExp(`\\b${t}\\b`).test(b.cls), `reader button → ${t}: the book too (${b.cls})`);
+  ok(await badge(d) === "none", `reader button → ${t}: no "A" (${await badge(d)})`);
 }
 { const p = await stored(d); ok(p && p.theme === "dark" && p.font === 120, `reader: stored dark, the font size kept (${JSON.stringify(p)})`); }
 await press(d);
@@ -137,6 +141,7 @@ for (const t of ["light", "sepia", "dark", "auto"]) {
   const p = await stored(d), time = +(await d.eval(`localStorage.getItem("epubReader:prefsTime")`));
   ok(p && p.theme === t && p.font === 130 && time >= t0 && time > 0, `catalog button → ${t}: stored, the font size kept, the time moved (${JSON.stringify(p)})`);
   t0 = time;
+  ok(await badge(d) === (t === "auto" ? '"A"' : "none"), `catalog button → ${t}: ${t === "auto" ? "an" : "no"} "A" (${await badge(d)})`);
   if (t === "sepia") ok(await bodyBg() === "rgb(244, 236, 216)", `catalog on sepia: the sepia background (${await bodyBg()})`);
   await d.shot(`catalog-${t}.png`);
 }

@@ -348,6 +348,10 @@ PAGE = r"""<!DOCTYPE html>
   #themeBtn { position: relative; z-index: 2; flex: none; display: grid; place-items: center; width: 36px; height: 36px;
               padding: 0; border: 0; border-radius: 10px; color: var(--muted); background: none; cursor: pointer; }
   #themeBtn:hover { color: var(--text); background: var(--accent-soft); }
+  /* Auto chosen: an "A" over the theme button's circle */
+  :root[data-theme-choice=auto] #themeBtn::after { content: "A"; position: absolute; right: 2px; bottom: 2px;
+    min-width: 14px; height: 14px; border-radius: 7px; font: 700 9.5px/14px system-ui, sans-serif; text-align: center;
+    color: var(--bg); background: var(--text); box-shadow: 0 0 0 1.5px var(--bg); pointer-events: none; }
   .search { flex: 1 1 280px; position: relative; display: flex; align-items: center; min-width: 200px; }
   .search .ic { position: absolute; left: 12px; color: var(--muted); pointer-events: none; }
   .search input { width: 100%; height: 40px; padding: 0 40px 0 38px; font: inherit; color: var(--text);

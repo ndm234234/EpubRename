@@ -163,8 +163,8 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
   (usually on the first page): then the big copy is used, so covers stay sharp on the book's page.
 - Title, authors, series, year, publisher, file size.
 - The app's theme, shared with the reader: **Auto** (the system's light or dark, following it
-  as it changes) · light · sepia · dark. The button next to the library's name cycles them; the
-  reader's theme button is the same setting.
+  as it changes; an "A" on the button) · light · sepia · dark. The button next to the library's
+  name cycles them; the reader's theme button is the same setting.
 - Instant search across title, authors, series, description and file path
   (case-insensitive, `ё` = `е`, all words must match). `/` focuses search, `Esc` clears it.
 - Click an author to see all their books.

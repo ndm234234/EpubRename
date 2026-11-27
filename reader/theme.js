@@ -2,7 +2,8 @@
 // light, sepia or dark. It lives in the reader's settings (epubReader:prefs.theme), which sync.js
 // already carries between devices of the same kind. Loaded at the end of <head>, before the page
 // shows, so a dark evening never starts with a white flash: <html data-theme> holds the theme
-// shown (never "auto") and the theme-color meta (#themeColor) the page's --bg.
+// shown (never "auto"), data-theme-choice the one chosen (auto too), and the theme-color meta
+// (#themeColor) the page's --bg.
 (function () {
   "use strict";
   var KEY = "epubReader:prefs", TIME = "epubReader:prefsTime";
@@ -27,7 +28,9 @@
   function label(t) { return LABELS[known(t)]; }
   function paint(t) {
     var html = document.documentElement;
-    html.dataset.theme = shown(arguments.length ? t : stored());
+    t = known(arguments.length ? t : stored());
+    html.dataset.theme = shown(t);
+    html.dataset.themeChoice = t;   // the chosen one: Auto puts an "A" over the theme button
     var meta = document.getElementById("themeColor");
     if (!meta) return;
     try {

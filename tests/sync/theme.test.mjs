@@ -82,6 +82,15 @@ test('loading paints the shown theme and the status bar colour at once', () => {
   assert.equal(s.meta.content, BG.sepia);
 });
 
+test('paint marks the chosen value too (Auto gets its "A" on the button)', () => {
+  const p = page({ dark: true });
+  assert.equal(p.html.dataset.themeChoice, 'auto');
+  p.T.save('sepia');
+  assert.equal(p.html.dataset.themeChoice, 'sepia');
+  p.T.paint('blue');
+  assert.equal(p.html.dataset.themeChoice, 'auto');
+});
+
 test('loading with storage blocked still paints (Auto), no exception', () => {
   const p = page({ throwing: true, dark: true });
   assert.equal(p.html.dataset.theme, 'dark');
