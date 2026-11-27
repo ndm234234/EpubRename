@@ -1030,7 +1030,11 @@ const liveFolders = map => Shelves ? Shelves.list(map, id => bookIds.has(id), co
 function renderFolders(map) {
   const live = liveFolders(map);
   let open = live.find(f => f.id === folderId) || null;
-  if (folderId !== null && !open) { folderId = null; try { localStorage.setItem(FOLDER, ""); } catch {} }
+  if (folderId !== null && !open && Shelves) {   // gone (deleted on another device): All books, its step left
+    folderId = null;
+    try { localStorage.setItem(FOLDER, ""); } catch {}
+    if (onFolderStep()) history.back();   // popstate then finds All books already open
+  }
   const strip = $("folders");
   strip.hidden = !live.length;
   const chip = (id, ...label) => el("button", { class: "chip fchip", type: "button", "data-folder": id,
@@ -1043,21 +1047,29 @@ const showOpenChip = () => {
   const c = $("folders").querySelector(".fchip[aria-pressed=true]");
   if (c && !$("folders").hidden) c.scrollIntoView({ inline: "nearest", block: "nearest" });
 };
+// At most one folder step above All books: another folder replaces it, All books leaves it (as
+// closing a book page does), so Back from any folder goes to All books
+const onFolderStep = () => !!(history.state && history.state.folder && !history.state.book);
 function openFolder(id, push = true) {
   folderId = id || null;
   try { localStorage.setItem(FOLDER, folderId || ""); } catch {}
-  if (push) history.pushState({ folder: folderId }, "");
+  if (push) {
+    if (folderId) history[onFolderStep() ? "replaceState" : "pushState"]({ folder: folderId }, "");
+    else if (onFolderStep()) history.back();   // popstate then finds All books already open
+  }
   render();
   scrollTo(0, 0);
   showOpenChip();
 }
 // At start: the folder of this history step, else the one open last here (then Back leads to All books)
 {
-  const st = history.state || {};
-  if (st.folder !== undefined) folderId = st.folder || null;
-  else {
+  const st = history.state || {}, live = id => liveFolders(shelves()).some(f => f.id === id);
+  if (st.folder !== undefined) {
+    folderId = st.folder || null;
+    if (folderId && Shelves && !live(folderId)) { folderId = null; history.replaceState({}, ""); }   // gone meanwhile
+  } else {
     let saved = null; try { saved = localStorage.getItem(FOLDER) || null; } catch {}
-    if (saved && liveFolders(shelves()).some(f => f.id === saved)) {
+    if (saved && live(saved)) {
       folderId = saved;
       if (!st.book) { history.replaceState({}, ""); history.pushState({ folder: saved }, ""); }
     }

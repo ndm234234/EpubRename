@@ -105,6 +105,44 @@ ok(await cards(d) === 6 && await count(d) === "6 books", `Back: All books (${awa
 ok(await d.eval("location.href") === CAT, "Back stays on the catalog");
 ok(await d.eval("localStorage.getItem('epubIndex:folder')") === "", "All books is remembered");
 
+// ======== 2b. Back always goes to All books: one folder step at most
+{
+  const open = async (id, n) => { await tapChip(d, id);
+    try { await d.waitFor(`document.querySelectorAll('#list .book').length === ${n}`, 3000); } catch {} };
+  const back = async () => { await d.eval("setTimeout(() => history.back())"); await sleep(600); };   // may leave the page
+  const state = () => d.eval("JSON.stringify(history.state)");
+  // (a) folder A, folder B, Back: All books
+  await catalog(d);   // about:blank, then the catalog with All books
+  const len = await d.eval("history.length");
+  await open("f1", 2); await open("f2", 1);
+  ok(await count(d) === "1 books in Holiday", `folder A, then B: B is open (${await count(d)})`);
+  ok(await d.eval("history.length") === len + 1, "folder A, then B: one history step above All books");
+  await back();
+  ok(await cards(d) === 6 && await count(d) === "6 books", `A, B, Back: All books (${await count(d)})`);
+  ok(await d.eval("location.href") === CAT, "A, B, Back: still the catalog");
+  // (b) folder A, the All books chip, Back: leaves the catalog as before (does not reopen A)
+  await catalog(d);
+  await open("f1", 2);
+  await open("", 6);
+  await sleep(300);
+  ok(await cards(d) === 6 && await count(d) === "6 books", `A, All books chip: All books (${await count(d)})`);
+  ok(await state() === "null" || await state() === "{}", `A, All books chip: the folder step is left (state ${await state()})`);
+  await back();
+  ok(await d.eval("location.href") === "about:blank", `A, All books chip, Back: the page before the catalog (${await d.eval("location.href")})`);
+  // (c) folder, a book's page, Back: the folder with its books; Back again: All books
+  await catalog(d);
+  await open("f1", 2);
+  await d.eval("document.querySelector('#list .book .cover').click()");
+  try { await d.waitFor("!document.getElementById('detail').hidden", 3000); } catch {}
+  ok(await d.eval("!document.getElementById('detail').hidden"), "folder: a cover opens the book page");
+  await back();
+  ok(await d.eval("document.getElementById('detail').hidden"), "book page, Back: the book page is closed");
+  ok(await cards(d) === 2 && await count(d) === "2 books in To read", `book page, Back: the folder with its books (${await count(d)})`);
+  await back();
+  ok(await cards(d) === 6 && await count(d) === "6 books", `then Back: All books (${await count(d)})`);
+  ok(await d.eval("location.href") === CAT, "then Back: still the catalog");
+}
+
 // ======== 3. the strip on a phone screen: it scrolls sideways, the page does not
 {
   const map = {};
