@@ -300,7 +300,7 @@ PAGE = r"""<!DOCTYPE html>
   }
   /* the app's theme (reader/theme.js sets data-theme: light, sepia or dark; Auto is the system's) */
   :root[data-theme=sepia] {
-    --bg: #f4ecd8; --surface: #f9f3e3; --surface-2: #ebe1c8; --text: #3b2f1e; --muted: #7a6a52;
+    --bg: #f4ecd8; --surface: #f9f3e3; --surface-2: #ebe1c8; --text: #3b2f1e; --muted: #6f604a;
     --line: rgba(59,47,30,.13); --accent: #a0522d; --accent-soft: rgba(160,82,45,.12); --ring: rgba(160,82,45,.35);
     --header: rgba(244,236,216,.78); --danger: #b3261e;
   }
