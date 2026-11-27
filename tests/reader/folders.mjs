@@ -459,8 +459,12 @@ const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.q
   ok(await p.eval(`!document.querySelector('#folders button.fchip[data-folder="${hol}"]')`), "Delete: the chip is gone");
   ok((await stored(p))[hol].deleted > 0, "Delete: kept as deleted (it stays deleted)");
   ok(await p.eval("document.getElementById('folderMenu').hidden"), "Delete: the menu is closed");
+  // its history step is gone (as with the All books chip): one Back leaves the catalog
+  ok(await p.eval("!(history.state && history.state.folder)"), `Delete: off the folder step (state ${await p.eval("JSON.stringify(history.state)")})`);
   await back(p);
-  ok(await p.eval("location.href") === CAT && await count(p) === "6 books", `Delete, then Back: the catalog, All books (${await count(p)})`);
+  ok(await p.eval("location.href") === "about:blank", `Delete, then Back: the page before the catalog (${await p.eval("location.href")})`);
+  await catalog(p);
+  ok(await count(p) === "6 books", `the catalog again: All books (${await count(p)})`);
   // Esc closes the menu, the focus goes back to ⋯
   await tapChip(p, "f1");
   await tapMore(p);

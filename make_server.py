@@ -1324,8 +1324,7 @@ $("folderMenu").addEventListener("click", e => {
   else if (act.dataset.act === "yes") {   // no undo: the folder stays deleted, its books stay in the library
     closeMenu(false);
     const map = Shelves.remove(shelves(), id, Date.now());
-    if (onFolderStep()) history.replaceState({}, "");
-    openFolder(null, false);
+    openFolder(null);   // leaves its history step (Back), as the All books chip does
     saveShelves(map);
     const c = $("folders").querySelector('.fchip[data-folder=""]');
     if (c && !$("folders").hidden) c.focus({ preventScroll: true });
