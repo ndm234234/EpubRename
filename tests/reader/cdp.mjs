@@ -40,7 +40,7 @@ export async function launch({ width = 390, height = 844, touch = true, args = [
   const send = (method, params = {}) => new Promise((res, rej) => { const i = ++id; pending.set(i, { res, rej }); ws.send(JSON.stringify({ id: i, method, params })); });
   await send("Page.enable"); await send("Runtime.enable");
   listeners.push(m => { if (m.method === "Runtime.exceptionThrown") console.log("PAGE ERROR", m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text); });
-  await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 2, mobile: touch });
+  await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: +(process.env.DPR || 2), mobile: touch });
   if (touch) {
     await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
     await send("Emulation.setEmulatedMedia", { features: [{ name: "hover", value: "none" }, { name: "pointer", value: "coarse" }] }).catch(() => {});
