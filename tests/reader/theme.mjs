@@ -13,6 +13,7 @@
 //   6. nothing stored, the system dark: dark already when parsed; the status bar colour is dark
 //   7. its button (next to the account): Auto, light, sepia (the page in sepia colours), dark, Auto;
 //      the reader's other settings kept, the settings' time moves on
+//  7b. the button's picture (A, sun, warm sun, moon) changes with a movement, none for less motion
 //   8. one setting: sepia chosen in the catalog shows in the reader; dark chosen in the reader shows
 //      back in the catalog
 //   9. two tabs: the reader's button repaints the catalog open in another tab, and the catalog's
@@ -69,8 +70,15 @@ const bookLook = d => d.eval(`(() => { const doc = rendition.getContents()[0].do
   return { cls: doc.body.className, bg: getComputedStyle(doc.body).backgroundColor }; })()`);
 const isDarkRgb = s => { const m = /(\d+), (\d+), (\d+)/.exec(s || ""); return !!m && +m[1] + +m[2] + +m[3] < 150; };
 const btnTitle = d => d.eval(`(b => b ? b.title + " | " + b.getAttribute("aria-label") : "")(document.getElementById("themeBtn"))`);
-// the "A" over the button's circle: only while Auto is chosen
-const badge = d => d.eval(`getComputedStyle(document.getElementById("themeBtn"), "::after").content`);
+// the button's picture: one drawing per choice (auto: an "A" in a circle, light: a sun, sepia: a
+// warm sun, dark: a moon); which one shows once the change has played out, and its colour
+const ICON = `[...document.querySelectorAll("#themeBtn .ti")]`;
+const icon = async d => { await sleep(700); return d.eval(`(() => { const on = ${ICON}.filter(g => +getComputedStyle(g).opacity > 0.99);
+  return on.length === 1 ? on[0].dataset.t : on.map(g => g.dataset.t).join("+") || "none"; })()`); };
+const iconStroke = (d, t) => d.eval(`getComputedStyle(document.querySelector('#themeBtn .ti[data-t="${t}"]')).stroke`);
+// a change plays out: the drawings are moving right after the press
+const pressMoving = d => d.eval(`(() => { document.getElementById("themeBtn").click();
+  return ${ICON}.some(g => g.getAnimations().length > 0); })()`);
 // contrast of two of the page's colour variables (WCAG): the muted text must reach 4.5 on sepia
 const contrast = (d, a, b) => d.eval(`(() => {
   const css = getComputedStyle(document.documentElement), lum = n => {
@@ -90,7 +98,7 @@ await system(d, false);
 await openBook(d);
 ok(await theme(d) === "light", `reader, nothing stored, system light: shown light (${await theme(d)})`);
 ok(await btnTitle(d) === "Theme: Auto (as the system) | Theme: Auto (as the system)", `reader: the button says Auto (${await btnTitle(d)})`);
-ok(await badge(d) === '"A"', `reader, Auto: an "A" over the button (${await badge(d)})`);
+ok(await icon(d) === "auto", `reader, Auto: the "A" picture (${await icon(d)})`);
 
 // ======== 2. the system dark, reloaded
 await system(d, true);
@@ -114,7 +122,7 @@ for (const t of ["light", "sepia", "dark"]) {
   ok(await theme(d) === t && (await btnTitle(d)).startsWith(`Theme: ${t} |`), `reader button → ${t} (${await theme(d)}, ${await btnTitle(d)})`);
   const b = await bookLook(d);
   ok(new RegExp(`\\b${t}\\b`).test(b.cls), `reader button → ${t}: the book too (${b.cls})`);
-  ok(await badge(d) === "none", `reader button → ${t}: no "A" (${await badge(d)})`);
+  ok(await icon(d) === t, `reader button → ${t}: its picture (${await icon(d)})`);
 }
 { const p = await stored(d); ok(p && p.theme === "dark" && p.font === 120, `reader: stored dark, the font size kept (${JSON.stringify(p)})`); }
 await press(d);
@@ -154,7 +162,7 @@ for (const t of ["light", "sepia", "dark", "auto"]) {
   const p = await stored(d), time = +(await d.eval(`localStorage.getItem("epubReader:prefsTime")`));
   ok(p && p.theme === t && p.font === 130 && time >= t0 && time > 0, `catalog button → ${t}: stored, the font size kept, the time moved (${JSON.stringify(p)})`);
   t0 = time;
-  ok(await badge(d) === (t === "auto" ? '"A"' : "none"), `catalog button → ${t}: ${t === "auto" ? "an" : "no"} "A" (${await badge(d)})`);
+  ok(await icon(d) === t, `catalog button → ${t}: its picture (${await icon(d)})`);
   if (t === "sepia") ok(await bodyBg() === "rgb(244, 236, 216)", `catalog on sepia: the sepia background (${await bodyBg()})`);
   if (t === "sepia") for (const bg of ["--bg", "--surface", "--surface-2"]) {
     const c = await contrast(d, "--muted", bg);
@@ -162,6 +170,21 @@ for (const t of ["light", "sepia", "dark", "auto"]) {
   }
   await d.shot(`catalog-${t}.png`);
 }
+
+// ======== 7b. the picture changes with a movement (none when the system asks for less motion);
+// the sepia sun is warm, not the plain sun's colour
+await d.eval(`localStorage.setItem("epubReader:prefs", JSON.stringify({ theme: "auto" }))`);
+await catalog(d);
+ok(await pressMoving(d), "catalog: the picture moves when the theme changes");
+await icon(d);
+await pressMoving(d);   // light → sepia
+await icon(d);
+{ const warm = await iconStroke(d, "sepia"), plain = await iconStroke(d, "light");
+  ok(warm !== plain && /^rgb/.test(warm), `catalog: the sepia sun is warm (${warm}, the plain one ${plain})`); }
+await d.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: "dark" }] });
+ok(!(await pressMoving(d)), "catalog, less motion asked for: the picture just changes");
+ok(await icon(d) === "dark", `catalog, less motion: the moon (${await icon(d)})`);
+await system(d, true);
 
 // ======== 8. one setting for the catalog and the reader
 await system(d, false);
