@@ -300,7 +300,7 @@ PAGE = r"""<!DOCTYPE html>
   }
   /* the app's theme (reader/theme.js sets data-theme: light, sepia or dark; Auto is the system's) */
   :root[data-theme=sepia] {
-    --bg: #f4ecd8; --surface: #f9f3e3; --surface-2: #ebe1c8; --text: #3b2f1e; --muted: #7a6a52;
+    --bg: #f4ecd8; --surface: #f9f3e3; --surface-2: #ebe1c8; --text: #3b2f1e; --muted: #6f604a;
     --line: rgba(59,47,30,.13); --accent: #a0522d; --accent-soft: rgba(160,82,45,.12); --ring: rgba(160,82,45,.35);
     --header: rgba(244,236,216,.78); --danger: #b3261e;
   }
@@ -348,10 +348,17 @@ PAGE = r"""<!DOCTYPE html>
   #themeBtn { position: relative; z-index: 2; flex: none; display: grid; place-items: center; width: 36px; height: 36px;
               padding: 0; border: 0; border-radius: 10px; color: var(--muted); background: none; cursor: pointer; }
   #themeBtn:hover { color: var(--text); background: var(--accent-soft); }
-  /* Auto chosen: an "A" over the theme button's circle */
-  :root[data-theme-choice=auto] #themeBtn::after { content: "A"; position: absolute; right: 2px; bottom: 2px;
-    min-width: 14px; height: 14px; border-radius: 7px; font: 700 9.5px/14px system-ui, sans-serif; text-align: center;
-    color: var(--bg); background: var(--text); box-shadow: 0 0 0 1.5px var(--bg); pointer-events: none; }
+  /* The theme button's picture: an "A" in a circle (Auto), a sun (light), a warm sun (sepia), a
+     moon (dark). On a change the old one turns away and fades, the new one turns in. */
+  #themeBtn .ti { opacity: 0; transform: rotate(-120deg) scale(.3); transform-origin: 12px 12px;
+                  transition: opacity .3s ease, transform .55s cubic-bezier(.3, 1.4, .5, 1); }
+  :root[data-theme-choice=auto] #themeBtn .ti[data-t=auto], :root[data-theme-choice=light] #themeBtn .ti[data-t=light],
+  :root[data-theme-choice=sepia] #themeBtn .ti[data-t=sepia], :root[data-theme-choice=dark] #themeBtn .ti[data-t=dark] {
+    opacity: 1; transform: none; }
+  #themeBtn .ti[data-t=sepia] { stroke: #b0651f; }
+  #themeBtn .ti[data-t=sepia] circle { fill: #e6a54a; }
+  #themeBtn .ti[data-t=dark] path { fill: currentColor; fill-opacity: .18; }
+  @media (prefers-reduced-motion: reduce) { #themeBtn .ti { transition: none; } }
   .search { flex: 1 1 280px; position: relative; display: flex; align-items: center; min-width: 200px; }
   .search .ic { position: absolute; left: 12px; color: var(--muted); pointer-events: none; }
   .search input { width: 100%; height: 40px; padding: 0 40px 0 38px; font: inherit; color: var(--text);
@@ -645,7 +652,6 @@ PAGE = r"""<!DOCTYPE html>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
-  <symbol id="i-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></symbol>
   <symbol id="i-sort" viewBox="0 0 24 24"><path d="m3 16 4 4 4-4M7 20V4M21 8l-4-4-4 4M17 4v16"/></symbol>
   <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
@@ -666,7 +672,12 @@ PAGE = r"""<!DOCTYPE html>
     <span class="logoBox"><svg class="ic logo" aria-hidden="true"><use href="#i-library"/></svg><svg id="acctMark" class="ic" aria-hidden="true" hidden><use href="#i-check"/></svg></span>
     <div class="names"><h1>__TITLE__</h1></div>
     <span id="count" class="badge"></span>
-    <button id="themeBtn" type="button" title="Theme: Auto (as the system)" aria-label="Theme: Auto (as the system)"><svg class="ic" aria-hidden="true"><use href="#i-theme"/></svg></button>
+    <button id="themeBtn" type="button" title="Theme: Auto (as the system)" aria-label="Theme: Auto (as the system)"><svg class="ic ticon" viewBox="0 0 24 24" aria-hidden="true">
+      <g class="ti" data-t="auto"><circle cx="12" cy="12" r="9"/><path d="M8.6 16.3 12 7.7l3.4 8.6M9.9 13.2h4.2"/></g>
+      <g class="ti" data-t="light"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M2.5 12h2M19.5 12h2M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></g>
+      <g class="ti" data-t="sepia"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M2.5 12h2M19.5 12h2M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></g>
+      <g class="ti" data-t="dark"><path d="M20.5 14.6A8.6 8.6 0 1 1 9.4 3.5a6.9 6.9 0 0 0 11.1 11.1z"/></g>
+    </svg></button>
     <button id="acctBrand" type="button" aria-expanded="false" aria-controls="acctPop" aria-label="Account" hidden
       title="Account: your last-opened books and settings on all your devices"></button>
   </div>
