@@ -23,7 +23,7 @@ async function settle(p) {
   await p.eval("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))).then(() => 0)");
 }
 const st = async p => JSON.parse(await p.eval("JSON.stringify(__state())"));
-const bolds = p => p.eval("rendition.getContents()[0].document.querySelectorAll('b.bio').length");
+const bolds = p => p.eval("rendition.getContents()[0].document.querySelectorAll('b.epubreader-bio').length");
 async function flip(p) {   // the checkbox, as the reader taps it
   await p.eval("document.getElementById('typoBtn').click()"); await sleep(300);
   await p.eval("document.querySelector('#typo [data-tab=font]').click()"); await sleep(100);
@@ -51,7 +51,17 @@ placeOk(await st(p), "switched on");
 // a bookmark with the bold, opened without it
 await p.eval("toggleMarkHere()");
 const m1 = JSON.parse(await p.eval("JSON.stringify(marks[marks.length - 1])"));
+// a search hit shown on the page stays shown when the switch is flipped
+await p.eval(`(() => { const c = rendition.getContents()[0], w = c.document.createTreeWalker(c.document.body, NodeFilter.SHOW_TEXT);
+  let n; while ((n = w.nextNode()) && n.nodeValue.trim().length < 3); const r = c.document.createRange(); r.setStart(n, 0); r.setEnd(n, 3);
+  const a = document.createElement("a"); a.append(document.createElement("small")); hits = [{ cfi: c.cfiFromRange(r), a }]; hitIdx = 0; setHighlight(hits[0], HL_CURRENT); return 0; })()`);
+await settle(p);
+const hitRects = () => p.eval("[...document.querySelectorAll('#viewer g.search-hit rect')].filter(r => +r.getAttribute('width') > 0).length");
+ok(await hitRects() > 0, "a search hit shown before switching");
 await flip(p);
+ok(await hitRects() > 0, "the search hit still shown after switching off");
+// the bookmark's words as written, not cut at the bold
+ok(m1.text === await p.eval(`pageText(${JSON.stringify(m1.cfi)})`), `bookmark made with the bold keeps whole words: "${m1.text.slice(0, 40)}"`);
 ok(await bolds(p) === 0, "switched off: no bold");
 ok(await p.eval("localStorage.getItem('epubReader:bold')") !== "true", "off kept on this device");
 placeOk(await st(p), "switched off");
@@ -71,6 +81,13 @@ await p.eval(`goToMark(marks.find(m => m.id === ${JSON.stringify(m2.id)}))`); aw
 s = await st(p);
 ok(s.idx === ch && (await p.eval(`__pageOf(${JSON.stringify(m2.cfi)})`)) === Math.round(s.page),
    `bookmark made without the bold opens on its page with it (${s.idx}:${s.page})`);
+// scrolling: the place is still read from the text at the top after switching
+await p.eval(`(b => { b.click(); return 0; })(document.getElementById('scrollText'))`); await sleep(1500); await settle(p);
+ok(await p.eval("firstShown() !== null"), "scrolling: the text at the top found");
+await flip(p);
+ok(await p.eval("firstShown() !== null"), "scrolling: and after switching the bold");
+ok(await p.eval("rendition.getContents().every(c => textNodes(c.document).every(n => n.isConnected))"),
+   "scrolling: the text the place is read from is the text now on the page");
 p.close();
 
 // opened again on a device where it is on: bold at once, the switch shows it

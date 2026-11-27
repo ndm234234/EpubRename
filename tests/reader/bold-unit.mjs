@@ -27,19 +27,38 @@ const r = JSON.parse(await run("wrap", `(() => {
   const once = doc.body.innerHTML;
   BoldStarts.apply(doc, true);
   const again = doc.body.innerHTML === once;
-  const bolds = doc.querySelectorAll("b.bio").length;
+  const bolds = doc.querySelectorAll("b.epubreader-bio").length;
   BoldStarts.apply(doc, false);
   return JSON.stringify({ p0, pre, p2, again, bolds, after: doc.body.innerHTML === before,
     nodes: doc.body.children[0].childNodes.length });
 })()`) || "{}");
-ok(r.p0 === '<b class="bio">Съе</b>шь <b class="bio">ж</b>е <b class="bio">эт</b>их <code>longword</code> <b class="bio">мяг</b>ких',
+ok(r.p0 === '<b class="epubreader-bio">Съе</b>шь <b class="epubreader-bio">ж</b>е <b class="epubreader-bio">эт</b>их <code>longword</code> <b class="epubreader-bio">мяг</b>ких',
    `word starts in bold, code left alone (got ${r.p0})`);
 ok(r.pre === "keep me", `pre left alone (got ${r.pre})`);
-ok(r.p2 === '<b class="bio">пере</b>\u00ADход <b class="bio">и\u0306</b>',
+ok(r.p2 === '<b class="epubreader-bio">пере</b>\u00ADход <b class="epubreader-bio">и\u0306</b>',
    `a soft hyphen keeps the word whole, a combining mark stays with its letter (got ${JSON.stringify(r.p2)})`);
 ok(r.again && r.bolds === 6, `switching on twice wraps once (${r.bolds} bold starts)`);
 ok(r.after, "switching off gives the text back as it was");
 ok(r.nodes === 3, `and whole text nodes again (${r.nodes} nodes in the first paragraph: text, code, text)`);
+
+// a book's own class="bio" (an author's biography) is not the bold: addresses there as ever
+const own = await run("own class", `(() => {
+  const doc = document.implementation.createHTMLDocument("");
+  doc.body.innerHTML = '<div class="bio"><p>About the author</p></div><p>Target text here</p>';
+  const t = doc.body.children[1].firstChild, r = doc.createRange();
+  r.setStart(t, 0); r.setEnd(t, 6);
+  const cfi = new ePub.CFI(r, "/6/4").toString(), back = new ePub.CFI(cfi).toRange(doc);
+  return back ? back.toString() : "none";
+})()`);
+ok(own === "Target", `a book's own class "bio" leaves addresses alone (got ${own})`);
+// pictures' text (SVG) and formulas (MathML) are left alone: SVG doesn't show HTML elements
+const svg = await run("svg", `(() => {
+  const doc = document.implementation.createHTMLDocument("");
+  doc.body.innerHTML = '<p>Some words</p><svg><text>Label text</text></svg><math><mi>speed</mi></math>';
+  BoldStarts.apply(doc, true);
+  return doc.querySelector("svg").innerHTML + "|" + doc.querySelector("math").innerHTML;
+})()`);
+ok(svg === "<text>Label text</text>|<mi>speed</mi>", `SVG and MathML text left alone (got ${svg})`);
 
 p.close();
 
@@ -66,12 +85,12 @@ for (const ch of chapters) {
     const texts = () => { const a = [], w = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT); for (let n; (n = w.nextNode()); ) a.push(n); return a; };
     const at = g => { for (const n of texts()) { if (g < n.length) return [n, g]; g -= n.length; } return null; };
     const gof = (node, off) => { let g = 0; for (const n of texts()) { if (n === node) return g + off; g += n.length; } return -1; };
-    const els = () => [...doc.querySelectorAll("*")].filter(e => !e.matches("b.bio"));
+    const els = () => [...doc.querySelectorAll("*")].filter(e => !e.matches("b.epubreader-bio"));
     // a place as the text sees it, the same with and without the bold
     const pos = (node, off) => {
       if (node.nodeType === 3) return "t" + gof(node, off);
       const child = node.childNodes[off];
-      return "e" + els().indexOf(node) + ":" + (!child ? "end" : child.nodeType === 1 && !child.matches("b.bio") ? "e" + els().indexOf(child) : "t" + gof(child.nodeType === 3 ? child : texts().find(t => child.contains(t)), 0));
+      return "e" + els().indexOf(node) + ":" + (!child ? "end" : child.nodeType === 1 && !child.matches("b.epubreader-bio") ? "e" + els().indexOf(child) : "t" + gof(child.nodeType === 3 ? child : texts().find(t => child.contains(t)), 0));
     };
     const desc = rg => rg ? pos(rg.startContainer, rg.startOffset) + ".." + pos(rg.endContainer, rg.endOffset) + " " + rg.toString().slice(0, 40) : "none";
     const mk = (g, len) => { const rg = doc.createRange(); const [a, ao] = at(g); const [z, zo] = at(g + len - (len ? 1 : 0)); rg.setStart(a, ao); rg.setEnd(z, len ? zo + 1 : zo); return rg; };
@@ -84,7 +103,7 @@ for (const ch of chapters) {
     const all = [...plain.points, ...plain.spans, ...plain.nodes];
     const before = all.map(c => { try { return desc(rendition.getRange(c)); } catch (e) { return "error " + e.message; } });
     BoldStarts.apply(doc, true);
-    const bolds = doc.querySelectorAll("b.bio").length;
+    const bolds = doc.querySelectorAll("b.epubreader-bio").length;
     const elsBold = elsPicked;   // the same elements: the bold only wraps text
     const made = { points: pick.map(m => new ePub.CFI(mk(m.index, 0), base).toString()),
                    spans: pick.map(m => new ePub.CFI(mk(m.index, m[0].length), base).toString()),

@@ -1174,9 +1174,11 @@ function shownViews() {
   const m = rendition.manager, all = m.views && (m.views._views || (m.views.all && m.views.all())) || [];
   return all.filter(v => v.displayed && v.contents && v.iframe);
 }
-// Text nodes of a chapter, in order (kept with the document: the text itself never changes)
+// Text nodes of a chapter, in order (kept with the document; made anew when "Bold word starts"
+// has cut or joined them)
 function textNodes(doc) {
-  if (!doc.__textNodes) {
+  if (!doc.__textNodes || doc.__textNodesStamp !== BoldStarts.stamp(doc)) {
+    doc.__textNodesStamp = BoldStarts.stamp(doc);
     const list = [], w = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
     for (let n; (n = w.nextNode()); ) if (n.nodeValue.trim()) list.push(n);
     doc.__textNodes = list;
@@ -1714,7 +1716,9 @@ function pageText(cfi) {
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
     walker.currentNode = range.startContainer;
     let text = range.startContainer.nodeType === 3 ? range.startContainer.nodeValue.slice(range.startOffset) : "";
-    for (let n; text.length < 200 && (n = walker.nextNode()); ) text += " " + n.nodeValue;
+    // a word's bold start and its rest are one word (bold.js)
+    for (let n, prev = range.startContainer; text.length < 200 && (n = walker.nextNode()); prev = n)
+      text += (BoldStarts.isPiece(n) || BoldStarts.isPiece(prev) ? "" : " ") + n.nodeValue;
     text = text.replace(/\s+/g, " ").trim();
     if (text.length > 120) text = text.slice(0, text.lastIndexOf(" ", 120) > 60 ? text.lastIndexOf(" ", 120) : 120) + "…";
     return text;
@@ -2269,7 +2273,11 @@ $("scrollText").addEventListener("change", e => {
 $("boldStarts").addEventListener("change", e => {
   boldPref = e.target.checked;
   store.set("epubReader:bold", boldPref);
-  if (rendition) { for (const c of rendition.getContents()) BoldStarts.apply(c.document, boldPref); relayout(); }
+  if (!rendition) return;
+  for (const c of rendition.getContents()) BoldStarts.apply(c.document, boldPref);
+  // search hits shown hold the text nodes the bold replaced: draw them anew
+  for (const h of hits) setHighlight(h, h === hits[hitIdx] ? HL_CURRENT : HL_STYLE);
+  relayout();
 });
 function toggleTypo(open = !$("typo").classList.contains("open")) {
   if (open && !book) return;

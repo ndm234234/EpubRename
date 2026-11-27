@@ -1,11 +1,12 @@
 // Bold word starts: the first letters of every word in bold, to lead the eye along the line
-// (the idea known as "bionic reading"). Each word's start is wrapped in <b class="bio"> in the
+// (the idea known as "bionic reading"). Each word's start is wrapped in <b class="epubreader-bio"> in the
 // chapter's own document; switching off unwraps them and joins the text back into whole nodes.
 (function () {
   "use strict";
-  var CLASS = "bio";
-  // left as they are: code and the like, and the page's own scripts and styles
-  var SKIP = "pre, code, kbd, samp, tt, script, style, b." + CLASS;
+  var CLASS = "epubreader-bio";   // a name no book uses (a book's own "bio" is an author's biography)
+  // left as they are: code and the like, the page's own scripts and styles, and the text of
+  // pictures (SVG) and formulas (MathML), where an HTML <b> isn't shown at all
+  var SKIP = "pre, code, kbd, samp, tt, script, style, svg, math, b." + CLASS;
   // a word: letters, combining marks, digits; a soft hyphen (a hyphenation point) doesn't split it
   var WORD = /[\p{L}\p{M}\p{N}­]+/gu, MARK = /\p{M}/u;
 
@@ -45,8 +46,11 @@
     var has = !!doc.querySelector("b." + CLASS);
     if (on && !has) wrap(doc);
     else if (!on && has) unwrap(doc);
-    if (on !== has) caches.delete(doc);
+    if (on !== has) { caches.delete(doc); stamps.set(doc, stamp(doc) + 1); }
   }
+  // how many times the bold changed a document's text nodes (lists of them made before are stale)
+  var stamps = new WeakMap();
+  function stamp(doc) { return stamps.get(doc) || 0; }
 
   // ---------------------------------------------------------------- addresses (CFI)
   // The reading place, bookmarks, notes, search hits are kept as addresses into the chapter's
@@ -58,7 +62,9 @@
   //   starts), so the address is resolved on a plain copy of the chapter (the bold unwrapped)
   //   and carried over to the real one by character position (and element order).
   var caches = new WeakMap();
-  var api = { CLASS: CLASS, prefix: prefix, apply: apply, patchCfi: patchCfi, _cacheBuilds: 0 };
+  var api = { CLASS: CLASS, prefix: prefix, apply: apply, stamp: stamp, patchCfi: patchCfi, isPiece: isPiece, _cacheBuilds: 0 };
+  // a text node that is the bold start of a word (the rest of the word follows it)
+  function isPiece(n) { var e = n && n.parentElement; return !!e && e.localName === "b" && e.classList.contains(CLASS); }
 
   function textNodes(doc) {
     var a = [], w = doc.createTreeWalker(doc.documentElement, NodeFilter.SHOW_TEXT), n;
