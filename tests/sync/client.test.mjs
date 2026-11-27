@@ -491,6 +491,15 @@ test('applyLocal writes shelves and reports it', () => {
   assert.equal(S.applyLocal(doc).shelves, false);
 });
 
+test('applyLocal: empty shelves never create the key, but empty a present one', () => {
+  const S = env();
+  assert.equal(S.applyLocal(M.emptyDoc()).shelves, false);
+  assert.equal(ls.getItem('epubLibrary:shelves'), null);
+  put('epubLibrary:shelves', { f1: { name: 'To read', named: 1, created: 1, books: {} } });
+  assert.equal(S.applyLocal(M.emptyDoc()).shelves, true);
+  assert.deepEqual(get('epubLibrary:shelves'), {});
+});
+
 test("a sync brings another device's folder and announces shelves", async () => {
   const S = env();
   const f1 = { name: 'To read', named: 1, created: 1, books: { [BOOK]: { time: 2 } } };

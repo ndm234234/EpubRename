@@ -142,7 +142,7 @@
       return { deleted: Math.max.apply(null, gone.map(function (f) { return f.deleted; })) };
     }
     var out = {};
-    var namer = pickMax(items, function (f) { return { t: time(f.named), k: 0, s: ser(f.name) }; });
+    var namer = pickMax(items, function (f) { return { t: time(f.named), k: 0, s: ser({ name: f.name, named: f.named }) }; });
     if (has(namer, 'name')) out.name = clone(namer.name);
     if (has(namer, 'named')) out.named = clone(namer.named);
     var made = items.map(function (f) { return f.created; }).filter(isNum);

@@ -222,6 +222,7 @@
       if (changed) rep.marks.push(id);
     });
     if (isObj(doc.opened) && writeJson(K_OPENED, doc.opened)) rep.opened = true;
+    // No folders anywhere: don't create the key (keeps localStorage as it was); an existing key is emptied.
     if (isObj(doc.shelves) && (Object.keys(doc.shelves).length || lsGet(K_SHELVES) !== null) && writeJson(K_SHELVES, doc.shelves)) rep.shelves = true;
     var apply = function (keys, from) {
       var mine = isObj(doc.prefs) && isObj(doc.prefs[from]) ? doc.prefs[from] : {};

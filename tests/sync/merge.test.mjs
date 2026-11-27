@@ -256,6 +256,13 @@ test('shelves: later name wins', () => {
   assert.equal(s[F].named, 200);
 });
 
+test('shelves: junk named with the same name merges the same both ways', () => {
+  const a = doc({ shelves: { [F]: folder({ name: 'X', named: 'bad' }) } });
+  const b = doc({ shelves: { [F]: folder({ name: 'X', named: 'worse' }) } });
+  const s = both(a, b);
+  assert.equal(s[F].name, 'X');
+});
+
 test('shelves: per book the later time wins', () => {
   const a = doc({ shelves: { [F]: folder({ books: { [BOOK]: { time: 100 }, [BOOK2]: { time: 50 } } }) } });
   const b = doc({ shelves: { [F]: folder({ books: { [BOOK]: { time: 200, out: true } } }) } });
