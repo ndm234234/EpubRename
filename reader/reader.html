@@ -566,6 +566,8 @@ function applyTheme() {
 }
 
 let book = null, rendition = null, bookKey = "", tocItems = [], turnPage = null;
+// Addresses into a chapter stay the same with "Bold word starts" (bold.js)
+BoldStarts.patchCfi(ePub.CFI);
 let locationsReady = false;   // positions for the whole book are computed (see prepareLocations)
 let marksKey = "", marks = [];   // bookmarks of the open book: [{id, cfi, text, name, note, time, edited}]
 let bookId = "";   // the book's id in storage and sync: identifier, else title, else file name

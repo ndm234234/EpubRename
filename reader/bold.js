@@ -45,7 +45,90 @@
     var has = !!doc.querySelector("b." + CLASS);
     if (on && !has) wrap(doc);
     else if (!on && has) unwrap(doc);
+    if (on !== has) caches.delete(doc);
   }
 
-  window.BoldStarts = { CLASS: CLASS, prefix: prefix, apply: apply };
+  // ---------------------------------------------------------------- addresses (CFI)
+  // The reading place, bookmarks, notes, search hits are kept as addresses into the chapter's
+  // document (EpubCFI), and the bold cuts its text nodes. They must not differ with the bold:
+  // a bookmark made with it is opened on a device without it. The bold only wraps text, so a
+  // character's position in the chapter's text, and the order of its other elements, stay the same.
+  // - range → address: epub.js's own "ignore class" leaves the wrapped pieces out (exact).
+  // - address → range: epub.js's resolver with that class misses now and then (at paragraph
+  //   starts), so the address is resolved on a plain copy of the chapter (the bold unwrapped)
+  //   and carried over to the real one by character position (and element order).
+  var caches = new WeakMap();
+  var api = { CLASS: CLASS, prefix: prefix, apply: apply, patchCfi: patchCfi, _cacheBuilds: 0 };
+
+  function textNodes(doc) {
+    var a = [], w = doc.createTreeWalker(doc.documentElement, NodeFilter.SHOW_TEXT), n;
+    while ((n = w.nextNode())) a.push(n);
+    return a;
+  }
+  function plainOf(doc) {   // the plain copy of a document with the bold, and how to cross over
+    var c = caches.get(doc);
+    if (c) return c;
+    api._cacheBuilds++;
+    var plain = doc.cloneNode(true);
+    unwrap(plain);
+    var pStart = new Map(), g = 0, i, n;
+    var pt = textNodes(plain);
+    for (i = 0; i < pt.length; i++) { pStart.set(pt[i], g); g += pt[i].length; }
+    var rt = textNodes(doc), rEnds = [];
+    for (g = 0, i = 0; i < rt.length; i++) { g += rt[i].length; rEnds.push(g); }
+    var pEls = plain.getElementsByTagName("*"), pIndex = new Map();
+    for (i = 0; i < pEls.length; i++) pIndex.set(pEls[i], i);
+    var rEls = Array.prototype.filter.call(doc.getElementsByTagName("*"),
+      function (e) { return !(e.localName === "b" && e.classList.contains(CLASS)); });
+    c = { plain: plain, pStart: pStart, rt: rt, rEnds: rEnds, pIndex: pIndex, rEls: rEls };
+    caches.set(doc, c);
+    return c;
+  }
+  // the real text node and offset at character position g; an end boundary keeps to the text
+  // before it, a start to the text after it
+  function realAt(c, g, isEnd) {
+    var lo = 0, hi = c.rEnds.length;
+    while (lo < hi) { var mid = (lo + hi) >> 1; if (isEnd ? c.rEnds[mid] >= g : c.rEnds[mid] > g) hi = mid; else lo = mid + 1; }
+    if (lo >= c.rt.length) { var t = c.rt[c.rt.length - 1]; return t ? [t, t.length] : null; }
+    return [c.rt[lo], g - (c.rEnds[lo] - c.rt[lo].length)];
+  }
+  function crossOver(c, node, off, isEnd) {
+    if (node.nodeType === 3) {
+      var g = c.pStart.get(node);
+      return g === undefined ? null : realAt(c, g + off, isEnd);
+    }
+    var i = c.pIndex.get(node);
+    if (i === undefined) return null;
+    var real = c.rEls[i], kids = node.childNodes;
+    if (off === 0) return [real, 0];
+    if (off >= kids.length) return [real, real.childNodes.length];
+    var child = kids[off], rc = null;
+    if (child.nodeType === 1) rc = c.rEls[c.pIndex.get(child)];
+    else if (child.nodeType === 3) { var t = realAt(c, c.pStart.get(child), false); rc = t && t[0]; }
+    while (rc && rc.parentNode !== real) rc = rc.parentNode;
+    return [real, rc ? Array.prototype.indexOf.call(real.childNodes, rc) : Math.min(off, real.childNodes.length)];
+  }
+  // once, with epub.js's EpubCFI (ePub.CFI), before the book is shown
+  function patchCfi(CFI) {
+    var P = CFI && CFI.prototype;
+    if (!P || P.__bold) return;
+    P.__bold = true;
+    var fromRange = P.fromRange, fromNode = P.fromNode, toRange = P.toRange;
+    P.fromRange = function (range, base, ignoreClass) { return fromRange.call(this, range, base, ignoreClass || CLASS); };
+    P.fromNode = function (node, base, ignoreClass) { return fromNode.call(this, node, base, ignoreClass || CLASS); };
+    P.toRange = function (doc, ignoreClass) {
+      if (!doc || !doc.querySelector || !doc.querySelector("b." + CLASS)) return toRange.call(this, doc, ignoreClass);
+      var c = plainOf(doc), r = toRange.call(this, c.plain);
+      if (!r) return r;
+      var s = crossOver(c, r.startContainer, r.startOffset, false);
+      var e = r.collapsed ? s : crossOver(c, r.endContainer, r.endOffset, true);
+      if (!s || !e) return null;
+      var out = doc.createRange();
+      out.setStart(s[0], s[1]);
+      out.setEnd(e[0], e[1]);
+      return out;
+    };
+  }
+
+  window.BoldStarts = api;
 })();
