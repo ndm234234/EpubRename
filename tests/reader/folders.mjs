@@ -18,7 +18,15 @@
 //   9. a book renamed on disk stays in its folder; the reader keeps its place under the same id
 //  10. a name already used (ignoring case), empty, too long: a short message, nothing made
 //  11. a computer screen: a popover near the button, no backdrop; a click elsewhere or Esc closes it
-import { mkdtempSync, mkdirSync, copyFileSync, readdirSync, statSync, rmSync } from "node:fs";
+// Part 3, managing folders from the strip, and two devices on one account:
+//  12. the strip's ＋: a name field (the same messages); a new folder is made and opened, empty
+//  13. the open folder's ⋯: Rename (the same field), Delete folder (asks first; Cancel keeps it;
+//      Delete: All books, the chip gone, the books still there)
+//  14. two phones, one account: a folder made on A comes to B; B takes a book out while A, offline,
+//      puts another in; both synced: the folder holds only the one A put in, on both
+//  15. A deletes the folder B has open: after B syncs, B shows All books, no error
+//  16. the book page's bottom bar on a phone fits (Read, Folders, offline, Save), in a tab and in the app
+import { mkdtempSync, mkdirSync, copyFileSync, readdirSync, readFileSync, statSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -369,6 +377,189 @@ d.close();
   ok(await w.eval("document.getElementById('folderPick').hidden && !document.getElementById('detail').hidden"), "computer: Esc closes it, the book page stays");
   ok(await w.eval("document.activeElement === document.getElementById('folderBtn')"), "computer: the focus goes back to the button");
   w.close();
+}
+
+// ================================================================ part 3: managing folders; two devices
+const MENU = "!document.getElementById('folderMenu').hidden";
+const tapPlus = async d => { await tapAt(d, "document.querySelector('#folders button.fadd')", "the strip's ＋");
+  try { await d.waitFor(MENU, 2000); } catch {} };
+const tapMore = async d => { await tapAt(d, "document.querySelector('#folders button.fmore')", "the open folder's ⋯");
+  try { await d.waitFor(MENU, 2000); } catch {} };
+const menuShown = d => d.eval("[...document.querySelectorAll('#folderMenu button, #folderMenu p')].filter(e => e.offsetParent).map(e => e.textContent.trim())");
+const tapItem = (d, name) => tapAt(d, `[...document.querySelectorAll('#folderMenu button')].find(e => e.offsetParent && e.textContent.trim() === ${JSON.stringify(name)})`, `the menu's ${name}`);
+const typeName = async (d, name) => {
+  ok(await d.eval("document.activeElement === document.getElementById('folderMenuName')"), "the name field has the focus");
+  await d.eval(`(() => { const e = document.getElementById('folderMenuName'); e.value = ${JSON.stringify(name)};
+    e.dispatchEvent(new Event('input')); e.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+  await sleep(300);
+};
+const menuErr = d => d.eval("(e => e && e.offsetParent ? e.textContent.trim() : '')(document.getElementById('folderMenuErr'))");
+const EMPTY = "No books here yet. Open a book and choose Folders to add it.";
+const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.querySelector('#list .empty'))");
+{
+  const p = await launch({ width: 390, height: 844, touch: true });
+  // ======== 12. the strip's ＋
+  await seeded(p, { f1: folder("To read", [id(1)]) });
+  ok(await p.eval("(b => !!b && b.textContent.trim() === '＋' && b.getAttribute('aria-label') === 'New folder')(document.querySelector('#folders button.fadd'))"),
+     "the strip ends with ＋ (New folder)");
+  ok(await p.eval("document.querySelector('#folders').lastElementChild.matches('button.fadd')"), "＋ is the last on the strip");
+  ok(await p.eval("document.querySelectorAll('#folders button.fmore').length") === 0, "All books open: no ⋯");
+  await tapPlus(p);
+  ok(await p.eval(MENU), "＋: the box is open");
+  ok(await p.eval("(r => r.left >= 0 && r.right <= 390 && r.bottom <= 844)(document.getElementById('folderMenu').getBoundingClientRect())"), "＋: the box is on the screen");
+  await typeName(p, "TO READ");
+  ok(await menuErr(p) === "You already have a folder with that name.", `＋, a name used: the same message (${await menuErr(p)})`);
+  await typeName(p, "  ");
+  ok(await menuErr(p) === "Give the folder a name.", `＋, empty: the same message (${await menuErr(p)})`);
+  ok(await p.eval("document.getElementById('folderMenuName').maxLength") === 60, "＋: the field takes at most 60 characters");
+  ok(liveIds(await stored(p)).length === 1, "＋: nothing made yet");
+  await p.shot("folders-plus.png");
+  await typeName(p, "Holiday");
+  const hol = byName(await stored(p), "Holiday");
+  ok(!!hol, "＋ Holiday: the folder is made");
+  ok(await p.eval("document.getElementById('folderMenu').hidden"), "＋ Holiday: the box closes");
+  ok(await count(p) === "0 books in Holiday" && await emptyText(p) === EMPTY, `＋ Holiday: it is open, empty (${await count(p)} / ${await emptyText(p)})`);
+  ok(await p.eval(`!!(history.state && history.state.folder === ${JSON.stringify(hol)})`), "＋ Holiday: a folder history step");
+  ok(JSON.stringify(await chips(p)) === JSON.stringify(["All books", "Holiday 0", "To read 1"]),
+     `the strip: Holiday by name (${(await chips(p)).join(" | ")})`);
+
+  // ======== 13. ⋯: Rename, Delete folder
+  ok(await p.eval("document.querySelectorAll('#folders button.fmore').length") === 1, "a folder open: one ⋯");
+  ok(await p.eval(`(m => !!m && !!m.closest('.fopen') && m.closest('.fopen').querySelector('button.fchip').dataset.folder === ${JSON.stringify(hol)})(document.querySelector('#folders button.fmore'))`),
+     "the ⋯ is on the open folder's chip");
+  await tapMore(p);
+  ok(await p.eval("(m => !!m && m.offsetParent !== null)(document.querySelector('#folderMenu [role=menu]'))"), "⋯: a menu");
+  ok(JSON.stringify(await p.eval("[...document.querySelectorAll('#folderMenu [role=menuitem]')].map(e => e.textContent.trim())")) === JSON.stringify(["Rename", "Delete folder"]),
+     "⋯: Rename, Delete folder");
+  ok(await p.eval("document.querySelector('#folders button.fmore').getAttribute('aria-expanded')") === "true", "⋯: aria-expanded");
+  await p.shot("folders-menu.png");
+  await tapItem(p, "Rename");
+  ok(await p.eval("document.getElementById('folderMenuName').value") === "Holiday", "Rename: the field holds the name");
+  await typeName(p, "to read");
+  ok(await menuErr(p) === "You already have a folder with that name.", `Rename to a name used: the same message (${await menuErr(p)})`);
+  await typeName(p, "Summer");
+  ok(await p.eval("document.getElementById('folderMenu').hidden"), "Rename: the box closes");
+  ok(await p.eval(`(c => c && [...c.childNodes].map(n => n.textContent.trim()).filter(Boolean).join(' '))(document.querySelector('#folders button.fchip[data-folder="${hol}"]'))`) === "Summer 0",
+     "Rename: the chip reads Summer");
+  ok(await count(p) === "0 books in Summer", `Rename: still open (${await count(p)})`);
+  await tapMore(p);
+  await tapItem(p, "Delete folder");
+  const ask = await menuShown(p);
+  ok(ask[0] === 'Delete the folder "Summer"? The books stay in the library.', `Delete asks first (${ask[0]})`);
+  ok(JSON.stringify(ask.slice(1)) === JSON.stringify(["Delete", "Cancel"]), `Delete: buttons Delete / Cancel (${ask.slice(1).join(" | ")})`);
+  await p.shot("folders-delete.png");
+  await tapItem(p, "Cancel");
+  ok(await p.eval("document.getElementById('folderMenu').hidden") && byName(await stored(p), "Summer") === hol && await count(p) === "0 books in Summer",
+     "Cancel: the folder stays, still open");
+  await tapMore(p);
+  await tapItem(p, "Delete folder");
+  await tapItem(p, "Delete");
+  await sleep(300);
+  ok(await cards(p) === 6 && await count(p) === "6 books", `Delete: All books, the 6 books still there (${await count(p)})`);
+  ok(await p.eval(`!document.querySelector('#folders button.fchip[data-folder="${hol}"]')`), "Delete: the chip is gone");
+  ok((await stored(p))[hol].deleted > 0, "Delete: kept as deleted (it stays deleted)");
+  ok(await p.eval("document.getElementById('folderMenu').hidden"), "Delete: the menu is closed");
+  await back(p);
+  ok(await p.eval("location.href") === CAT && await count(p) === "6 books", `Delete, then Back: the catalog, All books (${await count(p)})`);
+  // Esc closes the menu, the focus goes back to ⋯
+  await tapChip(p, "f1");
+  await tapMore(p);
+  await p.eval("document.getElementById('folderMenu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+  await sleep(200);
+  ok(await p.eval("document.getElementById('folderMenu').hidden && document.activeElement === document.querySelector('#folders button.fmore')"), "Esc closes the menu, the focus back on ⋯");
+  await tapMore(p);
+  await tapAt(p, "document.getElementById('q')", "the search field");   // not a cover: nothing else opens
+  ok(await p.eval("document.getElementById('folderMenu').hidden"), "a tap elsewhere closes the menu");
+  ok(await count(p) === "1 books in To read" && await p.eval("document.getElementById('detail').hidden"), `a tap elsewhere: the folder stays open (${await count(p)})`);
+
+  // ======== 16. the book page's bottom bar on a phone fits
+  const fits = async (d, what) => {
+    await openBook(d, book(1));
+    const r = await d.eval(`(a => { const r = a.getBoundingClientRect();
+      return { sw: a.scrollWidth, cw: a.clientWidth, n: a.children.length,
+        cut: [...a.children].filter(c => { const b = c.getBoundingClientRect(); return b.width < 1 || b.left < r.left - 0.5 || b.right > r.right + 0.5 || c.scrollWidth > c.clientWidth + 1; })
+          .map(c => c.textContent.trim() || c.getAttribute('aria-label')) }; })(document.querySelector('#detail .dact'))`);
+    ok(r.sw <= r.cw && !r.cut.length, `${what}: the bottom bar fits, ${r.n} buttons (${r.sw} <= ${r.cw}; cut: ${r.cut.join(", ") || "none"})`);
+    await back(d);
+  };
+  await fits(p, "390 px, browser tab");
+  p.close();
+  const APP = `(() => { const mm = matchMedia.bind(window);
+    window.matchMedia = q => /display-mode/.test(q) ? { matches: true, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : mm(q); })()`;
+  const app = await launch({ width: 390, height: 844, touch: true });
+  await app.send("Page.addScriptToEvaluateOnNewDocument", { source: APP });
+  await catalog(app);
+  ok(await app.eval("typeof offline === 'object' && offline !== null"), "the app: books can be kept offline");
+  await openBook(app, book(1));
+  ok(await app.eval("document.querySelectorAll('#detail .dact > *').length") === 4, `the app: Read, Folders, offline, Save (${await app.eval("document.querySelectorAll('#detail .dact > *').length")})`);
+  await back(app);
+  await fits(app, "390 px, the app");
+  app.close();
+}
+
+// ======== 14. two phones, one account
+{
+  const CODE = readFileSync(join(LIB, ".sync", "code.txt"), "utf8").trim();
+  const A = await launch({ width: 390, height: 844, touch: true }), B = await launch({ width: 390, height: 844, touch: true });
+  let errorsB = 0;
+  B.on(m => { if (m.method === "Runtime.exceptionThrown") errorsB++; });
+  await A.goto(CAT);
+  const LOGIN = "folders" + Math.floor(Math.random() * 1e9) + "@example.com";
+  const reg = JSON.parse(await A.eval(`LibrarySync.register(${JSON.stringify(LOGIN)}, "secret-pw", ${JSON.stringify(CODE)}).then(JSON.stringify)`));
+  ok(reg.ok, `A: account created (${JSON.stringify(reg)})`);
+  await B.goto(CAT);
+  ok(await B.eval(`LibrarySync.login(${JSON.stringify(LOGIN)}, "secret-pw").then(r => r.ok)`), "B: signed in to the same account");
+  await catalog(A); await catalog(B);
+  const sync = d => d.eval("LibrarySync.syncNow()");
+  // A makes "To read" with book 1
+  await openBook(A, book(1));
+  await tapFolders(A);
+  await typeNew(A, "To read");
+  await back(A); await back(A);
+  ok(await sync(A) === "ok", "A: synced");
+  ok(await sync(B) === "ok", "B: synced");
+  await sleep(300);
+  ok(JSON.stringify(await chips(B)) === JSON.stringify(["All books", "To read 1"]), `B: the folder came, To read 1 (${(await chips(B)).join(" | ")})`);
+  const tr = byName(await stored(B), "To read");
+  // B takes book 1 out; A, offline, puts book 2 in
+  await A.send("Network.enable");
+  await A.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  await openBook(B, book(1));
+  await tapFolders(B);
+  await tapRow(B, "To read");
+  await back(B); await back(B);
+  ok(await sync(B) === "ok", "B: took book 1 out, synced");
+  await openBook(A, book(2));
+  await tapFolders(A);
+  await tapRow(A, "To read");
+  await back(A); await back(A);
+  ok(await sync(A) === "offline", "A, offline: put book 2 in, not sent yet");
+  await A.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  ok(await sync(A) === "ok", "A, online again: synced");
+  ok(await sync(B) === "ok", "B: synced");
+  await sleep(300);
+  for (const [d, who] of [[A, "A"], [B, "B"]]) {
+    ok(JSON.stringify(await chips(d)) === JSON.stringify(["All books", "To read 1"]), `${who}: To read 1 (${(await chips(d)).join(" | ")})`);
+    await tapChip(d, tr);
+    try { await d.waitFor("document.querySelectorAll('#list .book').length === 1", 3000); } catch {}
+    const k = await d.eval("[...document.querySelectorAll('#list .book')].map(a => decodeURIComponent(a.dataset.key).split('/').pop()).join()");
+    ok(k === book(2), `${who}: To read holds only book 2 (${k})`);
+  }
+
+  // ======== 15. A deletes the folder B has open
+  ok(await count(B) === "1 books in To read", `B: To read is open (${await count(B)})`);
+  await tapMore(A);
+  await tapItem(A, "Delete folder");
+  await tapItem(A, "Delete");
+  ok(await count(A) === "6 books", `A: deleted, All books (${await count(A)})`);
+  ok(await sync(A) === "ok", "A: synced the delete");
+  ok(await sync(B) === "ok", "B: synced");
+  try { await B.waitFor("document.querySelectorAll('#list .book').length === 6", 3000); } catch {}
+  ok(await cards(B) === 6 && await count(B) === "6 books", `B: All books (${await count(B)})`);
+  ok(await B.eval(`!document.querySelector('#folders button.fchip[data-folder="${tr}"]')`) && await B.eval("document.getElementById('folders').hidden"), "B: the chip is gone (no folders: no strip)");
+  ok(await B.eval("location.href") === CAT, "B: still the catalog");
+  ok(errorsB === 0, `B: no error on the page (${errorsB})`);
+  A.close(); B.close();
 }
 console.log(fails ? `${fails} FAILED` : "ALL OK");
 process.exit(fails ? 1 : 0);

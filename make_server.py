@@ -365,6 +365,14 @@ PAGE = r"""<!DOCTYPE html>
   .fchip { flex: none; height: 34px; padding: 0 12px; gap: 6px; }
   .fchip .count { font-weight: 600; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .fchip[aria-pressed=true] .count { color: inherit; opacity: .75; }
+  /* the open folder: its chip and its ⋯ read as one; ＋ (a new folder) ends the strip */
+  .fopen { flex: none; display: inline-flex; }
+  .fopen .fchip { border-radius: 12px 0 0 12px; padding-right: 8px; }
+  .fmore, .fadd { flex: none; height: 34px; padding: 0 12px; justify-content: center; }
+  .fmore { border-radius: 0 12px 12px 0; padding: 0 10px 0 6px; border-color: transparent; background: var(--accent-soft);
+           color: var(--accent); font-weight: 700; letter-spacing: .05em; }
+  .fmore:hover { background: var(--accent-soft); filter: brightness(.95); }
+  .fadd { min-width: 40px; color: var(--accent); }
   .select .ic { position: absolute; left: 12px; color: var(--muted); pointer-events: none; }
   .select select { -webkit-appearance: none; appearance: none; padding: 0 34px 0 36px;
           background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8a93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
@@ -560,17 +568,31 @@ PAGE = r"""<!DOCTYPE html>
   #folderNew { justify-content: flex-start; border: 0; padding: 0 8px; background: none; color: var(--accent); }
   #folderNew:hover { background: var(--surface-2); }
   .fpnew { display: grid; gap: 6px; padding: 4px 0 0; }
-  #folderNewName { height: 40px; min-width: 0; font: inherit; color: var(--text); background: var(--bg);
+  .fname { height: 40px; min-width: 0; font: inherit; color: var(--text); background: var(--bg);
                    border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; }
-  #folderNewName:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-  #folderErr { margin: 0 2px; font-size: 13px; color: var(--danger); }
-  #folderErr:empty { display: none; }
+  .fname:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .ferr { margin: 0 2px; font-size: 13px; color: var(--danger); }
+  .ferr:empty { display: none; }
+  /* The strip's ＋ and ⋯: a small box under the chip (the menu, a name field, or "Delete …?") */
+  #folderMenu { z-index: 26; width: min(300px, calc(100vw - 32px)); gap: 8px; }
+  #folderMenu [role=menu] { display: flex; flex-direction: column; gap: 2px; margin: -6px; }
+  #folderMenu [role=menuitem] { min-height: 40px; padding: 0 10px; border: 0; border-radius: 10px; font: inherit; text-align: left;
+                                color: var(--text); background: none; cursor: pointer; }
+  #folderMenu [role=menuitem]:hover, #folderMenu [role=menuitem]:focus-visible { background: var(--surface-2); outline: none; }
+  #folderMenu .danger { color: var(--danger); }
+  #folderMenuAsk p { margin: 0 2px 12px; line-height: 1.4; overflow-wrap: anywhere; }
+  #folderMenuAsk .row { display: flex; gap: 8px; }
+  #folderMenuAsk .row button { flex: 1; height: 40px; border: 0; border-radius: 10px; font: inherit; font-weight: 600;
+                               color: var(--text); background: var(--surface-2); cursor: pointer; }
+  #folderMenuAsk .row button.danger { color: #fff; background: var(--danger); }
   @media (max-width: 640px) {
     #folderPick { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 70dvh; border-radius: 16px 16px 0 0;
                   border-width: 1px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
     #folderPick label { min-height: 48px; }
     #folderNew { height: 48px; }
-    #folderNewName { font-size: 16px; }   /* iPhone zooms in on smaller text fields */
+    .fname { font-size: 16px; }   /* iPhone zooms in on smaller text fields */
+    #folderMenu [role=menuitem] { min-height: 48px; }
+    #folderMenuAsk .row button { height: 48px; }
   }
 
   @media (max-width: 640px) {
@@ -667,9 +689,25 @@ PAGE = r"""<!DOCTYPE html>
   <div id="folderRows"></div>
   <button id="folderNew" class="btn" type="button">＋ New folder</button>
   <div id="folderNewBox" class="fpnew" hidden>
-    <input id="folderNewName" type="text" maxlength="60" placeholder="Folder name" aria-label="New folder name"
+    <input id="folderNewName" class="fname" type="text" maxlength="60" placeholder="Folder name" aria-label="New folder name"
       autocomplete="off" enterkeyhint="done">
-    <div id="folderErr" role="alert"></div>
+    <div id="folderErr" class="ferr" role="alert"></div>
+  </div>
+</div>
+<div id="folderMenu" class="pop" hidden>
+  <div id="folderMenuItems" role="menu" aria-label="Folder">
+    <button type="button" role="menuitem" data-act="rename">Rename</button>
+    <button type="button" role="menuitem" data-act="delete" class="danger">Delete folder</button>
+  </div>
+  <div id="folderMenuBox" class="fpnew" hidden>
+    <div id="folderMenuHead" class="pophead"></div>
+    <input id="folderMenuName" class="fname" type="text" maxlength="60" placeholder="Folder name" aria-label="Folder name"
+      autocomplete="off" enterkeyhint="done">
+    <div id="folderMenuErr" class="ferr" role="alert"></div>
+  </div>
+  <div id="folderMenuAsk" role="group" aria-labelledby="folderMenuQ" hidden>
+    <p id="folderMenuQ"></p>
+    <div class="row"><button type="button" class="danger" data-act="yes">Delete</button><button type="button" data-act="no">Cancel</button></div>
   </div>
 </div>
 <div id="acctPop" class="pop" role="dialog" aria-label="Account" hidden>
@@ -1054,6 +1092,7 @@ const Shelves = window.LibraryShelves;
 const SHELVES = "epubLibrary:shelves", FOLDER = PREFS + ":folder";
 const bookIds = new Set(books.map(b => b.id));
 let folderId = null;
+let menuFor = null;   // the folder of the strip's box (＋ / ⋯, below), null for ＋
 function shelves() {
   try { const m = JSON.parse(localStorage.getItem(SHELVES)); return m && typeof m === "object" && !Array.isArray(m) ? m : {}; }
   catch { return {}; }
@@ -1073,17 +1112,28 @@ function renderFolders(map) {
     try { localStorage.setItem(FOLDER, ""); } catch {}
     if (onFolderStep()) history.back();   // popstate then finds All books already open
   }
+  if (!$("folderMenu").hidden && menuFor !== null && (!open || open.id !== menuFor)) closeMenu(false);   // its folder went
   const strip = $("folders");
   strip.hidden = !live.length;
   const chip = (id, ...label) => el("button", { class: "chip fchip", type: "button", "data-folder": id,
     "aria-pressed": String((folderId || "") === id), on: () => { if ((folderId || "") !== id) openFolder(id || null); } }, ...label);
-  strip.replaceChildren(chip("", "All books"), ...live.map(f =>
-    chip(f.id, icon("shelf"), f.name, el("b", { class: "count" }, books.filter(b => Shelves.has(map, f.id, b.id)).length))));
+  const menuOn = id => String(!$("folderMenu").hidden && menuFor === id);
+  // the open folder's chip carries its ⋯ (a button of its own beside it: buttons don't nest)
+  const more = f => el("span", { class: "fopen" }, chip(f.id, ...chipLabel(map, f)),
+    el("button", { class: "chip fmore", type: "button", title: "Rename or delete", "aria-label": `Rename or delete "${f.name}"`,
+      "aria-haspopup": "menu", "aria-controls": "folderMenu", "aria-expanded": menuOn(f.id),
+      on: e => { e.stopPropagation(); menuOn(f.id) === "true" ? closeMenu() : openMenu(f.id); } }, "⋯"));
+  strip.replaceChildren(chip("", "All books"), ...live.map(f => f.id === folderId ? more(f) : chip(f.id, ...chipLabel(map, f))),
+    el("button", { class: "chip fadd", type: "button", title: "New folder", "aria-label": "New folder",
+      "aria-haspopup": "dialog", "aria-controls": "folderMenu", "aria-expanded": menuOn(null),
+      on: e => { e.stopPropagation(); menuOn(null) === "true" ? closeMenu() : openMenu(null); } }, "＋"));
+  placeMenu();
   return open;
 }
+const chipLabel = (map, f) => [icon("shelf"), f.name, el("b", { class: "count" }, books.filter(b => Shelves.has(map, f.id, b.id)).length)];
 const showOpenChip = () => {
   const c = $("folders").querySelector(".fchip[aria-pressed=true]");
-  if (c && !$("folders").hidden) c.scrollIntoView({ inline: "nearest", block: "nearest" });
+  if (c && !$("folders").hidden) (c.closest(".fopen") || c).scrollIntoView({ inline: "nearest", block: "nearest" });
 };
 // At most one folder step above All books: another folder replaces it, All books leaves it (as
 // closing a book page does), so Back from any folder goes to All books
@@ -1170,13 +1220,22 @@ function closePick(back = true) {
   if (btn) { btn.setAttribute("aria-expanded", "false"); if (current) btn.focus({ preventScroll: true }); }
   if (back && history.state && history.state.pick) history.back();
 }
+// A folder name field (the book page's ＋ New folder, the strip's ＋, Rename): Enter tries the name
+// (attempt returns an error code of shelves.js, or nothing when done); the short message shows
+// under the field until the next key
+function nameField(input, err, attempt) {
+  input.addEventListener("input", () => { err.textContent = ""; });
+  input.addEventListener("keydown", e => {
+    if (e.key !== "Enter" || e.isComposing) return;
+    e.preventDefault();
+    const code = attempt(input.value);
+    if (code) err.textContent = PICK_ERR[code] || PICK_ERR.empty;
+  });
+}
 $("folderNew").onclick = e => { e.stopPropagation(); pickNew(true); };
-$("folderNewName").addEventListener("input", () => { $("folderErr").textContent = ""; });
-$("folderNewName").addEventListener("keydown", e => {
-  if (e.key !== "Enter" || e.isComposing) return;
-  e.preventDefault();
-  const r = Shelves.create(shelves(), $("folderNewName").value, Date.now(), coll.compare);
-  if (r.error) { $("folderErr").textContent = PICK_ERR[r.error] || PICK_ERR.empty; return; }
+nameField($("folderNewName"), $("folderErr"), name => {
+  const r = Shelves.create(shelves(), name, Date.now(), coll.compare);
+  if (r.error) return r.error;
   saveShelves(Shelves.setBook(r.map, r.id, pickBook.id, true, Date.now()));
   pickRows();
   pickNew(false);
@@ -1194,6 +1253,99 @@ document.addEventListener("click", e => {   // a click elsewhere closes the popo
 });
 addEventListener("resize", placePick);
 detail.addEventListener("scroll", placePick);
+
+// The strip's ＋ (a new folder: a name field; it is made and opened) and the open folder's ⋯ (a
+// menu: Rename, the same name field; Delete folder, which asks first, in the box itself). One box
+// under the button it came from; menuFor is its folder, null for ＋.
+function menuAnchor() { return $("folders").querySelector(menuFor === null ? ".fadd" : ".fmore"); }
+function menuMode(mode, focus) {
+  $("folderMenuItems").hidden = mode !== "menu";
+  $("folderMenuBox").hidden = mode !== "name";
+  $("folderMenuAsk").hidden = mode !== "ask";
+  placeMenu();
+  focus.focus({ preventScroll: true });
+}
+function menuName(head, value) {
+  $("folderMenuHead").textContent = head;
+  $("folderMenuName").value = value;
+  $("folderMenuErr").textContent = "";
+  menuMode("name", $("folderMenuName"));
+  $("folderMenuName").select();
+}
+function openMenu(id) {
+  menuFor = id;
+  $("folderMenu").hidden = false;
+  const a = menuAnchor(); if (a) a.setAttribute("aria-expanded", "true");
+  if (id === null) menuName("New folder", "");
+  else menuMode("menu", $("folderMenuItems").querySelector("[role=menuitem]"));
+}
+// focus: back to the button it came from (when it is still there)
+function closeMenu(focus = true) {
+  if ($("folderMenu").hidden) return;
+  $("folderMenu").hidden = true;
+  const a = menuAnchor();
+  menuFor = null;
+  if (a) { a.setAttribute("aria-expanded", "false"); if (focus) a.focus({ preventScroll: true }); }
+}
+function placeMenu() {
+  const m = $("folderMenu"), a = menuAnchor();
+  if (m.hidden) return;
+  if (!a || $("folders").hidden) { closeMenu(false); return; }
+  const b = a.getBoundingClientRect(), w = m.offsetWidth;
+  m.style.right = "auto";
+  m.style.left = Math.max(16, Math.min(b.left, innerWidth - w - 16)) + "px";
+  m.style.top = b.bottom + 8 + "px";
+}
+const menuFolderName = () => (liveFolders(shelves()).find(f => f.id === menuFor) || {}).name;
+nameField($("folderMenuName"), $("folderMenuErr"), name => {
+  if (menuFor === null) {
+    const r = Shelves.create(shelves(), name, Date.now(), coll.compare);
+    if (r.error) return r.error;
+    closeMenu(false);
+    saveShelves(r.map);
+    openFolder(r.id);
+    const c = $("folders").querySelector(".fmore"); if (c) c.focus({ preventScroll: true });
+    return;
+  }
+  const r = Shelves.rename(shelves(), menuFor, name, Date.now(), coll.compare);
+  if (r.error === "missing") { closeMenu(false); return; }   // deleted meanwhile (another device)
+  if (r.error) return r.error;
+  saveShelves(r.map);
+  closeMenu();
+});
+$("folderMenu").addEventListener("click", e => {
+  const act = e.target.closest("[data-act]"), id = menuFor;
+  if (!act || id === null) return;
+  if (act.dataset.act === "rename") menuName("Rename", menuFolderName() || "");
+  else if (act.dataset.act === "delete") {
+    $("folderMenuQ").textContent = `Delete the folder "${menuFolderName()}"? The books stay in the library.`;
+    menuMode("ask", $("folderMenuAsk").querySelector("[data-act=no]"));
+  } else if (act.dataset.act === "no") closeMenu();
+  else if (act.dataset.act === "yes") {   // no undo: the folder stays deleted, its books stay in the library
+    closeMenu(false);
+    const map = Shelves.remove(shelves(), id, Date.now());
+    if (onFolderStep()) history.replaceState({}, "");
+    openFolder(null, false);
+    saveShelves(map);
+    const c = $("folders").querySelector('.fchip[data-folder=""]');
+    if (c && !$("folders").hidden) c.focus({ preventScroll: true });
+  }
+});
+$("folderMenu").addEventListener("keydown", e => {
+  e.stopPropagation();   // typing here never reaches the catalog's shortcuts
+  if (e.key === "Escape") { e.preventDefault(); closeMenu(); return; }
+  if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !$("folderMenuItems").hidden) {   // a menu: the arrows move
+    e.preventDefault();
+    const items = [...$("folderMenuItems").querySelectorAll("[role=menuitem]")];
+    const i = items.indexOf(document.activeElement) + (e.key === "ArrowDown" ? 1 : -1);
+    items[(i + items.length) % items.length].focus();
+  }
+});
+document.addEventListener("click", e => {   // a click elsewhere closes it
+  if (!$("folderMenu").hidden && e.target.isConnected && !$("folderMenu").contains(e.target)) closeMenu(false);
+});
+addEventListener("resize", placeMenu);
+$("folders").addEventListener("scroll", placeMenu);
 
 // ------------------------------------------------------------ Where you were (this device only)
 // <PREFS>:place = {href, offset, q, time}: the book row at the top of the screen (its key in the
@@ -1505,6 +1657,7 @@ $("group").addEventListener("click", e => {
 });
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && !$("folderPick").hidden) { e.preventDefault(); closePick(); return; }
+  if (e.key === "Escape" && !$("folderMenu").hidden) { e.preventDefault(); closeMenu(); return; }
   if (offline && e.key === "Escape" && !$("offPanel").hidden) { offline.panel(false); return; }
   if (current) { if (e.key === "Escape") { e.preventDefault(); requestClose(); } return; }
   if (e.key === "/" && document.activeElement !== $("q")) { e.preventDefault(); $("q").focus(); }
