@@ -980,8 +980,20 @@ function keepOldPageUntilNewIsReady(r) {
       justCameBack = !!(now && now !== first);   // a new chapter was put in front
       return res;
     };
-    mgr.next = function () { justCameBack = false; return next.apply(this, arguments); };
   }
+  // Forward in the chapter: epub.js turns the page while "scrollLeft + width + page <= scrollWidth",
+  // with no room at all on the page before the last. Phones with a fractional pixel ratio snap
+  // scrolling to device pixels, scrollLeft reads a fraction past the page (9700.19 for 9700), and the
+  // chapter's last page was skipped for the next chapter. So count in whole pages here.
+  if (next) mgr.next = function () {
+    justCameBack = false;
+    const c = this.container, d = this.layout && this.layout.delta, dir = this.settings.direction;
+    if (this.isPaginated && this.settings.axis === "horizontal" && (!dir || dir === "ltr") && d && c && this.views.length) {
+      const at = Math.round(c.scrollLeft / d) * d;   // the page shown, where it really starts
+      if (at + d + c.offsetWidth <= c.scrollWidth + 1) { this.scrollLeft = at; this.scrollTo(at + d, 0, true); return; }
+    }
+    return next.apply(this, arguments);
+  };
 
   r.on("relocated", () => {
     if (!frozen.length) return;
