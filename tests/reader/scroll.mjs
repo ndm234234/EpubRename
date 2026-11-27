@@ -50,6 +50,23 @@ window.__first = function () {
   }
   return null;
 };
+// the first word fully visible in each chapter on screen: references for how far the text moved
+// (epub.js drops a chapter once it is well off the screen, so one word alone may vanish)
+window.__refs = function () {
+  const box = __box(), out = [];
+  for (const v of __views()) {
+    const fr = v.iframe.getBoundingClientRect();
+    if (fr.bottom <= box.top + 1 || fr.top >= box.bottom) continue;
+    const doc = v.contents.document, ws = __ws(doc);
+    for (let k = 0; k < ws.length; k++) {
+      const b = __wr(doc, ws[k]);
+      if (!b) continue;
+      const top = b.top + fr.top - box.top;
+      if (top >= -1) { if (top < box.height) out.push({ href: v.section.href, idx: v.index, k, t: ws[k].t, top }); break; }
+    }
+  }
+  return out;
+};
 window.__locate = function (href, k) {
   const v = __views().find(v => v.section.href === href);
   if (!v) return null;
@@ -157,9 +174,14 @@ for (const phone of [true, false]) {
   };
   // how far the text moved up since f was taken (by where f's word is now: scrollTop alone also
   // changes when epub.js adds or drops a chapter above)
-  const travel = async f => { const l = await sameWord(p, f); return l ? Math.round(f.top - l.top) : NaN; };
+  // how far the text moved, by references taken before (__refs: a word per chapter on screen, or
+  // one word): the first one whose chapter is still laid out
+  const travel = async refs => {
+    for (const f of [].concat(refs)) { const l = await sameWord(p, f); if (l) return Math.round(f.top - l.top); }
+    return NaN;
+  };
   {
-    const f0 = await J(p, "__first()");
+    const f0 = await J(p, "__refs()");
     await readerScroll(H * 0.8);
     const pl = await J(p, "__place()"), f = await J(p, "__first()"), d = await travel(f0);
     ok(d > H * 0.3, `scrolled by the reader (the text moved up ${d}px)`);
@@ -174,7 +196,7 @@ for (const phone of [true, false]) {
   {
     const key = async k => { await p.eval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true })); 0`); await sleep(700); };
     const ch = await p.eval("rendition.manager.container.clientHeight");
-    const step = async act => { const f = await J(p, "__first()"); await act(); return travel(f); };
+    const step = async act => { const refs = await J(p, "__refs()"); await act(); return travel(refs); };
     let d = await step(() => key("ArrowDown"));
     ok(d > 0 && d < ch / 3, `ArrowDown: a little (${d}px of ${ch})`);
     d = await step(() => key("PageDown"));
@@ -196,14 +218,24 @@ for (const phone of [true, false]) {
   {
     const key = async k => { await p.eval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true })); 0`); await sleep(1500); await settle(p); };
     const edge = href => J(p, `(v => v && (r => ({ top: Math.round(r.top - __box().top), bottom: Math.round(r.bottom - __box().bottom) }))(v.iframe.getBoundingClientRect()))(__views().find(v => v.section.href === ${JSON.stringify(href)}))`);
+    // From the chapter's start, so its end is below the screen and End has somewhere to go (End
+    // leaves the text where it is when the chapter's end is already on the screen; where the
+    // earlier steps stop depends on the book)
     const href = (await J(p, "__first()")).href;
     let t = (await J(p, "__place()")).time;
-    await key("End");
-    { const e = await edge(href); ok(e && Math.abs(e.bottom) <= 2, `End: the chapter's end at the bottom (${JSON.stringify(e)})`); }
-    { const t2 = (await J(p, "__place()")).time; ok(t2 > t, "End: the place saved as the reader's move (newer time)"); t = t2; }
+    const before = await edge(href);
     await key("Home");
     { const e = await edge(href); ok(e && Math.abs(e.top) <= 2, `Home: the chapter's start at the top (${JSON.stringify(e)})`); }
-    ok((await J(p, "__place()")).time > t, "Home: the place saved as the reader's move (newer time)");
+    if (before && before.top < -2) { const t2 = (await J(p, "__place()")).time; ok(t2 > t, "Home: the place saved as the reader's move (newer time)"); t = t2; }
+    const atStart = await edge(href);
+    if (atStart && atStart.bottom > 2) {
+      await key("End");
+      { const e = await edge(href); ok(e && Math.abs(e.bottom) <= 2, `End: the chapter's end at the bottom (${JSON.stringify(e)})`); }
+      { const t2 = (await J(p, "__place()")).time; ok(t2 > t, "End: the place saved as the reader's move (newer time)"); t = t2; }
+      await key("Home");
+      { const e = await edge(href); ok(e && Math.abs(e.top) <= 2, `Home again: the chapter's start at the top (${JSON.stringify(e)})`); }
+      ok((await J(p, "__place()")).time > t, "Home again: the place saved as the reader's move (newer time)");
+    } else console.log(`  (End not checked: the chapter fits on the screen, ${JSON.stringify(atStart)})`);
     { const f = await J(p, "__first()"), a = await J(p, "__wordAt(__place().cfi)");
       ok(f && a && f.href === a.href && Math.abs(f.k - a.k) <= 20, `Home: the saved place is the text at the top ("${f && f.t}", saved "${a && a.t}")`); }
   }
@@ -261,7 +293,7 @@ for (const phone of [true, false]) {
 
   // 9. a tap shows / hides the bars and never jumps (also on the side thirds)
   {
-    const f = await J(p, "__first()"), a = await p.eval("anchor");
+    const f = await J(p, "__refs()"), a = await p.eval("anchor");
     if (phone) {
       for (const x of [W / 2, W * 0.85, W * 0.15]) {
         await p.tap(x, H * 0.4);
