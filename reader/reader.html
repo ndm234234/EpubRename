@@ -324,6 +324,8 @@
      the same above and below the text */
   body.touchui #viewer { margin-top: 0; margin-bottom: 0; }
 </style>
+<!-- the app's theme (Auto, light, sepia, dark), set before the page shows -->
+<script src="theme.js"></script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -357,7 +359,7 @@
   <button id="searchBtn" class="ib" title="Search in the book (Ctrl+F)" aria-label="Search" disabled><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg></button>
   <span class="sep"></span>
   <button id="printBtn" class="ib" title="Print the open pages (Ctrl+P)" aria-label="Print" disabled><svg class="ic" aria-hidden="true"><use href="#i-print"/></svg></button>
-  <button id="themeBtn" class="ib" title="Theme: light / sepia / dark" aria-label="Theme"><svg class="ic" aria-hidden="true"><use href="#i-theme"/></svg></button>
+  <button id="themeBtn" class="ib" title="Theme: Auto (as the system)" aria-label="Theme: Auto (as the system)"><svg class="ic" aria-hidden="true"><use href="#i-theme"/></svg></button>
   <button id="acctBtn" class="ib hidden" title="Account: reading places and bookmarks on all your devices" aria-label="Account" aria-expanded="false"><svg class="ic" aria-hidden="true"><use href="#i-user"/></svg></button>
   <button id="openBtn" class="ib" title="Open another EPUB file" aria-label="Open file"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg></button>
 </header>
@@ -515,7 +517,7 @@ const Sync = window.LibrarySync || { available: () => false, signedIn: () => fal
   lastSync: () => null, changed() {}, setMarkOrder() {}, onRemoteChange() {}, sendPlaceNow() {},
   syncNow: async () => "signed-out", logout: async () => ({ ok: true }),
   login: async () => ({ ok: false, error: "offline" }), register: async () => ({ ok: false, error: "offline" }) };
-const THEMES = ["light", "sepia", "dark"];
+// The book's own pages in the shown theme (Auto is the system's light or dark, see theme.js).
 // epub.js keeps every theme's stylesheet once it was selected and only switches a class
 // on <body>, so each rule is scoped to its theme class: otherwise dark/sepia rules
 // (with !important) would still apply after switching back to light.
@@ -527,17 +529,23 @@ const THEME_CSS = {
            "body.dark *": { color: "inherit !important", "background-color": "transparent !important" },
            "body.dark a, body.dark a *": { color: "#6ea0ff !important" } },
 };
-const PREFS = { theme: "light", font: 100, face: "book", layout: "book" };
+const PREFS = { theme: "auto", font: 100, face: "book", layout: "book" };
 const prefs = Object.assign({}, PREFS, store.get("epubReader:prefs"));
 delete prefs.scroll;
 // "Scroll text" is this device's own (a phone may scroll, the computer turn pages): not in the
 // synced settings
 let scrollPref = store.get("epubReader:scroll") === true;
 const savePrefs = () => { delete prefs.scroll; store.set("epubReader:prefs", prefs); store.set("epubReader:prefsTime", Date.now()); Sync.changed(); };
-document.documentElement.dataset.theme = prefs.theme;
-// The phone's status bar (and an installed app's title bar) in the colour of the reader's bar
-const showThemeColor = () => $("themeColor").content = { light: "#fdfcf8", sepia: "#f4ecd8", dark: "#161618" }[prefs.theme] || "#fdfcf8";
-showThemeColor();
+// The theme shown: the page (and the phone's status bar, in the colour of the reader's bar), the
+// button's title, and the book's pages. One setting with the catalog (theme.js).
+const AppTheme = window.AppTheme || { stored: () => "light", shown: t => t === "auto" ? "light" : t,
+  next: t => t, label: () => "Theme", paint() {}, watch() {} };
+function applyTheme() {
+  AppTheme.paint(prefs.theme);
+  $("themeBtn").title = AppTheme.label(prefs.theme);
+  $("themeBtn").setAttribute("aria-label", AppTheme.label(prefs.theme));
+  if (rendition && printTheme === null) try { rendition.themes.select(AppTheme.shown(prefs.theme)); } catch {}
+}
 
 let book = null, rendition = null, bookKey = "", tocItems = [], turnPage = null;
 let locationsReady = false;   // positions for the whole book are computed (see prepareLocations)
@@ -673,9 +681,9 @@ function makeRendition() {
   rendition = book.renderTo("viewer", scrollMode
     ? { width: "100%", height: "100%", flow: "scrolled", manager: "continuous", spread: "none", allowScriptedContent: false }
     : { width: "100%", height: "100%", spread: "auto", allowScriptedContent: false });
-  for (const t of THEMES) rendition.themes.register(t, THEME_CSS[t]);
+  for (const t of Object.keys(THEME_CSS)) rendition.themes.register(t, THEME_CSS[t]);
   rendition.themes.register("paper", { "body.paper": { color: "#000 !important", background: "#fff !important" } });
-  rendition.themes.select(prefs.theme);
+  rendition.themes.select(AppTheme.shown(prefs.theme));
   rendition.themes.fontSize(prefs.font + "%");
   rendition.hooks.content.register(contents => {
     applyTypo(contents.document);
@@ -989,12 +997,13 @@ addEventListener("beforeprint", () => {
                 width: ${r.width}px !important; height: ${r.height}px !important;
                 transform: scale(${k.toFixed(4)}); transform-origin: 0 0; }
     }`;
-  printTheme = prefs.theme;
+  printTheme = true;
   rendition.themes.select("paper");
 });
 addEventListener("afterprint", () => {
-  if (printTheme && rendition) rendition.themes.select(printTheme);
+  const was = printTheme;
   printTheme = null;
+  if (was) applyTheme();
 });
 const printPages = () => { if (rendition) print(); };
 $("printBtn").onclick = () => printPages();
@@ -2244,11 +2253,9 @@ $("tocBtn").onclick = () => toggleToc();
 $("smaller").onclick = () => setFont(-10);
 $("bigger").onclick = () => setFont(10);
 $("themeBtn").onclick = () => {
-  prefs.theme = THEMES[(THEMES.indexOf(prefs.theme) + 1) % THEMES.length];
+  prefs.theme = AppTheme.next(prefs.theme);
   savePrefs();
-  document.documentElement.dataset.theme = prefs.theme;
-  showThemeColor();
-  if (rendition) rendition.themes.select(prefs.theme);
+  applyTheme();
 };
 $("pickBtn").onclick = $("openBtn").onclick = () => $("file").click();
 $("file").onchange = e => { openFile(e.target.files[0]); e.target.value = ""; };
@@ -2276,6 +2283,10 @@ addEventListener("beforeinstallprompt", e => e.preventDefault());
 // Another device's data was merged into localStorage: bring the open book up to date. The place is
 // only offered, never jumped to.
 Sync.setMarkOrder((a, b) => { try { return cfiCmp(a.cfi, b.cfi); } catch { return 0; } });
+// the theme: shown now (the button's title), and again when the system turns light or dark (Auto)
+// or the catalog in another tab changes it
+applyTheme();
+AppTheme.watch(() => { reloadPrefs(); applyTheme(); });
 Sync.onRemoteChange(rep => {
   if (rep.prefs) reloadPrefs();
   if (!book || !bookId) return;
@@ -2289,12 +2300,10 @@ function reloadPrefs() {
   delete prefs.scroll;   // an older reader synced it; now each device keeps its own
   if (!FACES[prefs.face]) prefs.face = "book";
   if (JSON.stringify(prefs) === before) return;
-  document.documentElement.dataset.theme = prefs.theme;
-  showThemeColor();
+  applyTheme();
   showTypo();
   if (!rendition) return;
   try {
-    rendition.themes.select(prefs.theme);
     rendition.themes.fontSize(prefs.font + "%");
     if (placeShown) { for (const c of rendition.getContents()) applyTypo(c.document); relayout(); }
   } catch {}
