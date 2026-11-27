@@ -1966,7 +1966,7 @@ def build_index(folder: Path, title: str | None = None) -> int:
         except (zipfile.BadZipFile, KeyError, ET.ParseError, ValueError, OSError) as e:
             # Still list the file, so nothing silently disappears from the catalog
             rel = path.relative_to(root).as_posix()
-            book = {"file": rel, "href": "/".join(urllib.parse.quote(p) for p in rel.split("/")),
+            book = {"id": path.name, "file": rel, "href": "/".join(urllib.parse.quote(p) for p in rel.split("/")),
                     "size": path.stat().st_size, "added": int(path.stat().st_mtime),
                     "title": path.stem, "authors": [], "series": "", "seriesIndex": "",
                     "year": "", "publisher": "", "language": "", "description": "",

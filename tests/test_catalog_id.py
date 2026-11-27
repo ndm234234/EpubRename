@@ -66,6 +66,28 @@ class CatalogIdTest(unittest.TestCase):
         md = "<dc:identifier>urn:uuid:2222</dc:identifier>"
         self.assertEqual(book_id(md, rel="a.epub"), book_id(md, rel="John Roe/b.epub"))
 
+    def test_unreadable_book_gets_file_name(self):
+        # A broken EPUB still gets an id (the reader's own fallback: the file name)
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "Jane Doe").mkdir()
+            with zipfile.ZipFile(root / "Jane Doe" / "Broken Tide.epub", "w") as zf:
+                zf.writestr("mimetype", "application/epub+zip")   # no container.xml
+            seen = {}
+            real = make_server.build_page
+
+            def spy(books, *a, **k):
+                seen["books"] = books
+                return real(books, *a, **k)
+
+            with mock.patch.object(make_server, "build_page", spy), \
+                    mock.patch("sys.stdout"):
+                make_server.build_index(root)
+            (book,) = seen["books"]
+            self.assertIn("error", book)
+            self.assertEqual(book["id"], "Broken Tide.epub")
+
 
 if __name__ == "__main__":
     unittest.main()
