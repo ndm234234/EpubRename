@@ -232,6 +232,14 @@ const scrolledDown = async (d, phone) => {
       await d.eval(`document.querySelector('#folders ${sel}').click()`);
       await sleep(200);
       ok(await d.eval(MENU_OPEN), `phone, ${what}: the box is open`);
+      if (what === "＋") {   // its name field has the focus: a scroll (the keyboard coming up) keeps it open
+        ok(await d.eval("document.activeElement && document.activeElement.id === 'folderMenuName'"), "phone, ＋: the name field has the focus");
+        await d.eval("scrollTo(0, 600)");
+        await sleep(300);
+        ok(await d.eval(MENU_OPEN), "phone, ＋: scrolled while typing, the box stays open");
+        await d.eval("document.activeElement.blur(); scrollTo(0, 0)");
+        await sleep(100);
+      }
       await d.eval("scrollTo(0, 600)");
       await sleep(300);
       ok(await d.eval("document.getElementById('folderMenu').hidden"), `phone, ${what}: scrolled under the bar, the box closes`);

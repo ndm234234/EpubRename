@@ -1383,12 +1383,13 @@ document.addEventListener("click", e => {   // a click elsewhere closes it
 });
 addEventListener("resize", placeMenu);
 // on a phone the strip scrolls with the page: the box follows its chip, and closes once the chip
-// goes under the bar or off the screen
+// goes under the bar or off the screen; never while its name field is in use (the phone's keyboard
+// coming up scrolls the page, which must not close the box being typed into)
 addEventListener("scroll", () => {
   const a = menuAnchor();
   if ($("folderMenu").hidden || !a || sticky().contains(a)) return;
-  const b = a.getBoundingClientRect();
-  if (b.top < sticky().getBoundingClientRect().bottom || b.top > innerHeight) closeMenu(false); else placeMenu();
+  const b = a.getBoundingClientRect(), typing = $("folderMenu").contains(document.activeElement) && document.activeElement.matches("input");
+  if (!typing && (b.top < sticky().getBoundingClientRect().bottom || b.top > innerHeight)) closeMenu(false); else placeMenu();
 }, { passive: true });
 
 // ------------------------------------------------------------ Where you were (this device only)
