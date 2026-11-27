@@ -212,6 +212,10 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
   chapter right after the one before (finger, wheel, scrollbar; `↓` / `↑` a little, `PageDown` /
   `Space` / the side arrows a screen, `Home` / `End` the chapter's start / end). The place is the line at the top; the status line shows the %.
   This device only: it is not synced to your other devices.
+- **Bold word starts** (*Aa* → *Font*): the first letters of every word in bold, to lead the eye
+  along the line (the idea known as "bionic reading"), with any font. Bookmarks, notes and the
+  reading place stay put: one made with it on opens on the same words with it off, on any device.
+  This device only, like *Scroll text*.
 - **Phones and tablets** read with the whole screen for the text: only a thin line at the bottom
   stays, numbers only — `4/24` (page in the chapter) on the left, `120/560 21%` (page in the
   book, % read) on the right — and the text has the same small margin
@@ -355,8 +359,8 @@ computer that runs the launcher; nothing goes to the internet.
   is open stays each device's own. The reader's settings
   (font, theme, layout) are shared only between devices of the same kind (phone, tablet,
   computer), since what suits one screen doesn't suit another.
-- **What is not synced:** the books themselves, the offline copies on a device, and *Scroll text*:
-  each device keeps its own (scroll on the phone, turn pages on the computer).
+- **What is not synced:** the books themselves, the offline copies on a device, *Scroll text* and
+  *Bold word starts*: each device keeps its own (scroll on the phone, turn pages on the computer).
 - **Offline is fine:** changes are kept on the device and sent when the library is reachable again.
   The reader syncs when a book is opened, when you come back to the page and when you leave it;
   while you read, changes go out at most once every 30 seconds. Changes made on two devices are
@@ -631,7 +635,12 @@ FULL=1 tests/reader/run.sh "Jane Doe/Jane Doe - A Quiet Harbour.epub"   # every 
 - `touch.mjs`, `status.mjs`, `typo.mjs` — taps and bars, the status line, the Aa panel;
 - `scroll.mjs` — *Scroll text*: switching keeps the first visible word, chapters follow one
   another, the place saved on the reader's own scroll and kept on reopening, font changes and
-  resizes; contents, search, bookmarks and taps in scroll mode, on a phone and a desktop.
+  resizes; contents, search, bookmarks and taps in scroll mode, on a phone and a desktop;
+- `subpixel.mjs` — a phone's scroll position a fraction of a pixel past the page still turns to
+  a chapter's last page;
+- `bold-unit.mjs`, `bold.mjs` — *Bold word starts*: which letters get bold, every address the
+  same with it as without it (made and resolved), the switch on this device only, the place and
+  bookmarks kept across switching; `nav.mjs` and `scroll.mjs` run again with it on (`BOLD=1`).
 
 Several books run side by side; the output keeps only failures and each check's verdict.
 `W`/`H` set the screen, `TOUCH=0` a desktop, `SHOTS=dir` saves screenshots.

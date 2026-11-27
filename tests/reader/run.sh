@@ -29,6 +29,9 @@ for book in "$@"; do
     node $T/touch.mjs $B "$book"; node $T/status.mjs $B "$book"; node $T/typo.mjs $B "$book"
     node $T/subpixel.mjs $B "$book"
     node $T/scroll.mjs $B "$book" "${WORD:-что}"
+    # bold word starts: addresses, the switch, and the page turns and the ribbon with it on
+    node $T/bold-unit.mjs $B "$book"; node $T/bold.mjs $B "$book"
+    BOLD=1 FACES=literata SIZES=100 node $T/nav.mjs $B "$book" 150; BOLD=1 node $T/scroll.mjs $B "$book" "${WORD:-что}"
     # one sync check at a time: each tries one wrong library code, and wrong codes from checks side
     # by side would add up to the library-wide pause (after 5 in a row)
     flock "$LOGS/sync.lock" node $T/sync.mjs $B "$book"

@@ -1,5 +1,5 @@
 // "Scroll text" (Aa → Layout): the book as one continuous ribbon, scrolled bottom to top.
-// node scroll.mjs <base> <book under Out/> [search word]
+// node scroll.mjs <base> <book under Out/> [search word]   env BOLD=1: with bold word starts
 // - the checkbox switches to scroll mode and back, keeping the first visible word (± one line)
 // - continuous: past a chapter's end the next chapter follows in the same scroll
 // - the reader's own scroll saves the place with a newer time; opening, switching, a font change
@@ -116,7 +116,7 @@ for (const phone of [true, false]) {
   const p = await launch({ width: W, height: H, touch: phone });
   p.on(m => { if (m.method === "Runtime.exceptionThrown") { fails++; console.log("  FAIL page error (above)"); } });
   await p.send("Page.addScriptToEvaluateOnNewDocument", { source:
-    `try { if (!sessionStorage.x) { sessionStorage.x = 1; localStorage.setItem("epubReader:prefs", JSON.stringify({ theme: "light", font: 100, face: "book", layout: "book" })); } } catch {}` });
+    `try { if (!sessionStorage.x) { sessionStorage.x = 1; localStorage.setItem("epubReader:prefs", JSON.stringify({ theme: "light", font: 100, face: "book", layout: "book" })); } } catch {}` + (process.env.BOLD ? `;try { localStorage.setItem("epubReader:bold", "true"); } catch {}` : "") });
   console.log(phone ? "phone" : "desktop");
   await openBook(p);
   await p.waitFor("locationsReady", 120000);
