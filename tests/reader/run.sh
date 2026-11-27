@@ -15,9 +15,11 @@ for _ in $(seq 100); do grep -q "^Library:" "$LOGS/server.out" && break; sleep 0
 PORT=$(sed -n 's|^Library: http://127.0.0.1:\([0-9]*\)/.*|\1|p' "$LOGS/server.out")
 [ -n "$PORT" ] || { echo "Error: the server did not start"; cat "$LOGS/server.out"; exit 1; }
 B=http://127.0.0.1:$PORT T=tests/reader
-# the catalog's place: once, in a library of its own (not per book)
+# the catalog's place and its folders: once each, in a library of its own (not per book)
 node $T/catalog-place.mjs $B > "$LOGS/0-catalog.txt" 2>&1 &
 i=0 PIDS=($!)
+node $T/folders.mjs $B > "$LOGS/0-folders.txt" 2>&1 &
+PIDS+=($!)
 for book in "$@"; do
   i=$((i + 1))
   (

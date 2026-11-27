@@ -358,6 +358,13 @@ PAGE = r"""<!DOCTYPE html>
   .chip:hover, .select select:hover { background: var(--surface-2); }
   .chip[aria-pressed=true] { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
   .select { position: relative; display: flex; align-items: center; }
+  /* Folders: one row of chips under the bar, scrolled sideways (never wrapped); hidden while there are none */
+  .folders { max-width: 1400px; margin: 10px auto 0; display: flex; gap: 8px; overflow-x: auto;
+             overscroll-behavior-x: contain; scrollbar-width: none; }
+  .folders::-webkit-scrollbar { display: none; }
+  .fchip { flex: none; height: 34px; padding: 0 12px; gap: 6px; }
+  .fchip .count { font-weight: 600; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .fchip[aria-pressed=true] .count { color: inherit; opacity: .75; }
   .select .ic { position: absolute; left: 12px; color: var(--muted); pointer-events: none; }
   .select select { -webkit-appearance: none; appearance: none; padding: 0 34px 0 36px;
           background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8a93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
@@ -553,6 +560,7 @@ PAGE = r"""<!DOCTYPE html>
     .chip span { display: none; }
     #offBtn { padding: 0 8px 0 10px; gap: 5px; }
     .chip { padding: 0 11px; }
+    .folders { margin: 10px -16px 0; padding: 0 16px; scroll-padding: 0 16px; }   /* scrolls to the screen's edges */
     /* sort becomes an icon button; the phone's own picker still lists the options */
     .select select { width: 40px; padding: 0; color: transparent; background-image: none; }
     .select select option { color: var(--text); }
@@ -569,6 +577,7 @@ PAGE = r"""<!DOCTYPE html>
   <symbol id="i-sort" viewBox="0 0 24 24"><path d="m3 16 4 4 4-4M7 20V4M21 8l-4-4-4 4M17 4v16"/></symbol>
   <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-shelf" viewBox="0 0 24 24"><path d="M9 3h9a1 1 0 0 1 1 1v14"/><path d="M5 8a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v13l-5-3.5L5 21Z"/></symbol>
   <symbol id="i-read" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></symbol>
@@ -610,7 +619,9 @@ PAGE = r"""<!DOCTYPE html>
     <a id="openFile" class="chip" href="__READER__" title="Open any EPUB file in the reader">
       <svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span>Open file</span></a>
   </div>
-</div></header>
+</div>
+<nav id="folders" class="folders" aria-label="Folders" hidden></nav>
+</header>
 <div id="fileNote" class="note" hidden><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>
   <div>Opened directly from disk: books ask you to choose the file. For one-click reading open
   the catalog with <b>Open Library</b> (<code>Open Library.bat</code> on Windows,
@@ -666,6 +677,7 @@ PAGE = r"""<!DOCTYPE html>
 <script id="data" type="application/json">__DATA__</script>
 <script src=".index/reader/sync-merge.js"></script>
 <script src=".index/reader/sync.js"></script>
+<script src=".index/reader/shelves.js"></script>
 <script>
 "use strict";
 const books = JSON.parse(document.getElementById("data").textContent);
@@ -911,6 +923,7 @@ function requestClose() {
 }
 addEventListener("popstate", e => {
   const key = e.state && e.state.book, b = key && books.find(x => x.href === key);
+  if (!key) { const f = (e.state && e.state.folder) || null; if (f !== folderId) openFolder(f, false); }
   if (b) { if (!current || current.href !== key) openDetail(b); }
   else closeDetail();
 });
@@ -962,10 +975,17 @@ function renderList() {
   $("searchBox").classList.toggle("filled", !!$("q").value);   // hides the "/" hint
   const words = norm($("q").value).split(/\s+/).filter(Boolean);
   openedAt = openedTimes();
-  const shown = books.filter(b => words.every(w => b._search.includes(w))).sort(sorters[$("sort").value]);
-  $("count").textContent = shown.length === books.length
-    ? `${books.length} books` : `${shown.length} of ${books.length} books`;
+  const map = shelves(), open = renderFolders(map);
+  const inside = open ? books.filter(b => Shelves.has(map, open.id, b.id)) : books;
+  const shown = inside.filter(b => words.every(w => b._search.includes(w))).sort(sorters[$("sort").value]);
+  $("count").textContent = open
+    ? (shown.length === inside.length ? `${inside.length} books in ${open.name}` : `${shown.length} of ${inside.length} in ${open.name}`)
+    : (shown.length === books.length ? `${books.length} books` : `${shown.length} of ${books.length} books`);
   const list = $("list"); list.replaceChildren();
+  if (open && !inside.length) {
+    list.append(el("div", { class: "empty" }, icon("shelf"), "No books here yet. Open a book and choose Folders to add it."));
+    return;
+  }
   if (!shown.length) { list.append(el("div", { class: "empty" }, icon("search"), "Nothing found")); return; }
 
   if ($("group").getAttribute("aria-pressed") === "true") {
@@ -984,6 +1004,63 @@ function renderList() {
     }
   } else {
     list.append(el("div", { class: "grid" }, ...shown.map(card)));
+  }
+}
+
+// ------------------------------------------------------------ Folders
+// epubLibrary:shelves (one set per device, synced with the account; edits in shelves.js): the strip
+// under the bar lists them by name, All books first; it is hidden while there are none. The open
+// folder is a history step (Back goes to All books) and is remembered by this catalog on this
+// device (<PREFS>:folder, "" for All books), never synced.
+const Shelves = window.LibraryShelves;
+const SHELVES = "epubLibrary:shelves", FOLDER = PREFS + ":folder";
+const bookIds = new Set(books.map(b => b.id));
+let folderId = null;
+function shelves() {
+  try { const m = JSON.parse(localStorage.getItem(SHELVES)); return m && typeof m === "object" && !Array.isArray(m) ? m : {}; }
+  catch { return {}; }
+}
+function saveShelves(map) {
+  try { localStorage.setItem(SHELVES, JSON.stringify(map)); } catch {}
+  Sync.changed();
+  render(true);
+}
+const liveFolders = map => Shelves ? Shelves.list(map, id => bookIds.has(id), coll.compare) : [];
+// the strip for this map; returns the open folder ({id, name}) or null (a folder gone meanwhile: All books)
+function renderFolders(map) {
+  const live = liveFolders(map);
+  let open = live.find(f => f.id === folderId) || null;
+  if (folderId !== null && !open) { folderId = null; try { localStorage.setItem(FOLDER, ""); } catch {} }
+  const strip = $("folders");
+  strip.hidden = !live.length;
+  const chip = (id, ...label) => el("button", { class: "chip fchip", type: "button", "data-folder": id,
+    "aria-pressed": String((folderId || "") === id), on: () => { if ((folderId || "") !== id) openFolder(id || null); } }, ...label);
+  strip.replaceChildren(chip("", "All books"), ...live.map(f =>
+    chip(f.id, icon("shelf"), f.name, el("b", { class: "count" }, books.filter(b => Shelves.has(map, f.id, b.id)).length))));
+  return open;
+}
+const showOpenChip = () => {
+  const c = $("folders").querySelector(".fchip[aria-pressed=true]");
+  if (c && !$("folders").hidden) c.scrollIntoView({ inline: "nearest", block: "nearest" });
+};
+function openFolder(id, push = true) {
+  folderId = id || null;
+  try { localStorage.setItem(FOLDER, folderId || ""); } catch {}
+  if (push) history.pushState({ folder: folderId }, "");
+  render();
+  scrollTo(0, 0);
+  showOpenChip();
+}
+// At start: the folder of this history step, else the one open last here (then Back leads to All books)
+{
+  const st = history.state || {};
+  if (st.folder !== undefined) folderId = st.folder || null;
+  else {
+    let saved = null; try { saved = localStorage.getItem(FOLDER) || null; } catch {}
+    if (saved && liveFolders(shelves()).some(f => f.id === saved)) {
+      folderId = saved;
+      if (!st.book) { history.replaceState({}, ""); history.pushState({ folder: saved }, ""); }
+    }
   }
 }
 
@@ -1310,6 +1387,7 @@ document.addEventListener("keydown", e => {
   try { history.scrollRestoration = "manual"; } catch {}
   render();
   placeRow(p);
+  showOpenChip();
 }
 // Can be installed as an app (browser menu → "Install app" / "Add to Home screen"), but the browser
 // is not to suggest it by itself
@@ -1449,7 +1527,7 @@ if (Sync.available()) {   // secure pages only: a password never crosses the Wi-
     showBrand();
     if (!$("acctPop").hidden) showAcct();
   };
-  Sync.onRemoteChange(r => { if (r.opened || r.prefs) refresh(); });
+  Sync.onRemoteChange(r => { if (r.opened || r.prefs || r.shelves) refresh(); });
   if (Sync.signedIn()) Sync.syncNow({ timeoutMs: 2000 }).then(r => { syncResult = r; refresh(); });
   // always attached: signed in from the panel later, coming back syncs too
   document.addEventListener("visibilitychange", () => {
