@@ -549,6 +549,30 @@ PAGE = r"""<!DOCTYPE html>
   #acctErr:empty { display: none; }
   @media (max-width: 640px) { #acctPop input { font-size: 16px; } }   /* iPhone zooms in on smaller text fields */
 
+  /* Folders of the open book: a popover by its button; on a phone a sheet from the bottom over the book page */
+  .fdim { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,.4); }
+  #folderPick { z-index: 26; gap: 2px; max-height: min(440px, calc(100dvh - 32px)); overflow-y: auto; overscroll-behavior: contain; }
+  #folderPick .pophead { margin: 0 8px 6px; }
+  #folderPick label { display: flex; gap: 10px; align-items: center; min-height: 40px; padding: 4px 8px; border-radius: 10px; cursor: pointer; }
+  #folderPick label:hover { background: var(--surface-2); }
+  #folderPick label input { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+  #folderPick label span { min-width: 0; overflow-wrap: anywhere; }
+  #folderNew { justify-content: flex-start; border: 0; padding: 0 8px; background: none; color: var(--accent); }
+  #folderNew:hover { background: var(--surface-2); }
+  .fpnew { display: grid; gap: 6px; padding: 4px 0 0; }
+  #folderNewName { height: 40px; min-width: 0; font: inherit; color: var(--text); background: var(--bg);
+                   border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; }
+  #folderNewName:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  #folderErr { margin: 0 2px; font-size: 13px; color: var(--danger); }
+  #folderErr:empty { display: none; }
+  @media (max-width: 640px) {
+    #folderPick { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 70dvh; border-radius: 16px 16px 0 0;
+                  border-width: 1px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+    #folderPick label { min-height: 48px; }
+    #folderNew { height: 48px; }
+    #folderNewName { font-size: 16px; }   /* iPhone zooms in on smaller text fields */
+  }
+
   @media (max-width: 640px) {
     header { padding: 10px 16px; }
     main { padding: 20px 16px 48px; }
@@ -636,6 +660,17 @@ PAGE = r"""<!DOCTYPE html>
   </div>
   <div id="offInfo" class="popinfo"></div>
   <button id="offClear" class="btn" type="button">Remove all books from this device</button>
+</div>
+<div id="folderDim" class="fdim" hidden></div>
+<div id="folderPick" class="pop" role="dialog" aria-label="Folders" hidden>
+  <div class="pophead">Folders</div>
+  <div id="folderRows"></div>
+  <button id="folderNew" class="btn" type="button">＋ New folder</button>
+  <div id="folderNewBox" class="fpnew" hidden>
+    <input id="folderNewName" type="text" maxlength="60" placeholder="Folder name" aria-label="New folder name"
+      autocomplete="off" enterkeyhint="done">
+    <div id="folderErr" role="alert"></div>
+  </div>
 </div>
 <div id="acctPop" class="pop" role="dialog" aria-label="Account" hidden>
   <div id="acctIn">
@@ -875,7 +910,7 @@ function openDetail(b, animate = true) {
     el("h3", {}, el("button", { class: "dtitle", type: "button", title: "Copy the title", on: () => copyTitle(b.title) }, b.title)),
     authorLinks(b),
     el("div", { class: "meta" }, metaLine(b)),
-    el("div", { class: "dact" }, read, ...(offline ? [offline.bookButton(b), saveLink(b, { class: "btn", "aria-label": "Save the file" }, icon("download"))]
+    el("div", { class: "dact" }, read, folderButton(b), ...(offline ? [offline.bookButton(b), saveLink(b, { class: "btn", "aria-label": "Save the file" }, icon("download"))]
                                            : [saveLink(b, { class: "btn" }, icon("download"), "Save")])),
     b.description ? el("div", { class: "dtext" }, b.description)
                   : el("div", { class: "dtext none" }, "This book has no description."));
@@ -899,6 +934,7 @@ function openDetail(b, animate = true) {
 }
 
 function closeDetail() {
+  closePick(false);
   if (!current) return;
   const b = current;
   current = null;
@@ -917,11 +953,13 @@ function showDetail(b) {
   openDetail(b);
 }
 function requestClose() {
-  const pop = history.state && history.state.book;
-  closeDetail();                // right away, not after the browser gets to popstate
-  if (pop) history.back();      // drop the book page from history (popstate then has nothing to do)
+  const st = history.state || {}, steps = (st.book ? 1 : 0) + (st.pick ? 1 : 0);
+  closePick(false);
+  closeDetail();                     // right away, not after the browser gets to popstate
+  if (steps) history.go(-steps);     // drop the book page (and its folder sheet) from history
 }
 addEventListener("popstate", e => {
+  if (!(e.state && e.state.pick)) closePick(false);   // Back with the phone's folder sheet open: only the sheet closes
   const key = e.state && e.state.book, b = key && books.find(x => x.href === key);
   if (!key) { const f = (e.state && e.state.folder) || null; if (f !== folderId) openFolder(f, false); }
   if (b) { if (!current || current.href !== key) openDetail(b); }
@@ -1075,6 +1113,87 @@ function openFolder(id, push = true) {
     }
   }
 }
+
+// The book page's Folders button: a list of the folders, ticked = the book is in it, a tick or an
+// untick saves at once; at the end ＋ New folder (a name field; the new folder holds the book). On a
+// phone a sheet from the bottom with a history step of its own (Back closes the sheet, not the page).
+const PICK_ERR = { empty: "Give the folder a name.", long: "At most 60 characters.", taken: "You already have a folder with that name." };
+const phone = matchMedia("(max-width: 640px)");
+let pickBook = null;
+function folderButton(b) {
+  if (!Shelves) return null;   // shelves.js didn't load: no folders, the page works as before
+  return el("button", { id: "folderBtn", class: "btn", type: "button", title: "Folders", "aria-label": "Folders",
+    "aria-haspopup": "dialog", "aria-controls": "folderPick", "aria-expanded": "false",
+    on: e => { e.stopPropagation(); $("folderPick").hidden ? openPick(b) : closePick(); } }, icon("shelf"), el("span", { class: "long" }, "Folders"));
+}
+function pickRows() {
+  const map = shelves();
+  $("folderRows").replaceChildren(...liveFolders(map).map(f => {
+    const box = el("input", { type: "checkbox", "data-folder": f.id });
+    box.checked = Shelves.has(map, f.id, pickBook.id);
+    box.addEventListener("change", () => saveShelves(Shelves.setBook(shelves(), f.id, pickBook.id, box.checked, Date.now())));
+    return el("label", {}, box, el("span", {}, f.name));
+  }));
+}
+function pickNew(on) {
+  $("folderNew").hidden = on;
+  $("folderNewBox").hidden = !on;
+  $("folderErr").textContent = "";
+  if (on) { $("folderNewName").value = ""; $("folderNewName").focus(); }
+}
+// on a computer by the button (below it, or above if there is no room); on a phone the CSS makes it a sheet
+function placePick() {
+  const p = $("folderPick"), btn = $("folderBtn");
+  if (p.hidden) return;
+  $("folderDim").hidden = !phone.matches;
+  if (phone.matches || !btn) { p.style.top = p.style.left = p.style.right = ""; return; }
+  const b = btn.getBoundingClientRect(), h = p.offsetHeight, w = p.offsetWidth;
+  p.style.right = "auto";
+  p.style.left = Math.max(16, Math.min(b.left, innerWidth - w - 16)) + "px";
+  p.style.top = (b.bottom + 8 + h <= innerHeight - 16 || b.top - 8 - h < 16 ? b.bottom + 8 : b.top - 8 - h) + "px";
+}
+function openPick(b) {
+  pickBook = b;
+  pickRows();
+  pickNew(false);
+  $("folderPick").hidden = false;
+  if ($("folderBtn")) $("folderBtn").setAttribute("aria-expanded", "true");
+  placePick();
+  if (phone.matches) history.pushState({ ...(history.state || {}), pick: 1 }, "");
+  ($("folderRows").querySelector("input") || $("folderNew")).focus({ preventScroll: true });
+}
+// back: drop the sheet's history step too (false when the browser already went Back)
+function closePick(back = true) {
+  if ($("folderPick").hidden) return;
+  $("folderPick").hidden = $("folderDim").hidden = true;
+  const btn = $("folderBtn");
+  if (btn) { btn.setAttribute("aria-expanded", "false"); if (current) btn.focus({ preventScroll: true }); }
+  if (back && history.state && history.state.pick) history.back();
+}
+$("folderNew").onclick = e => { e.stopPropagation(); pickNew(true); };
+$("folderNewName").addEventListener("input", () => { $("folderErr").textContent = ""; });
+$("folderNewName").addEventListener("keydown", e => {
+  if (e.key !== "Enter" || e.isComposing) return;
+  e.preventDefault();
+  const r = Shelves.create(shelves(), $("folderNewName").value, Date.now(), coll.compare);
+  if (r.error) { $("folderErr").textContent = PICK_ERR[r.error] || PICK_ERR.empty; return; }
+  saveShelves(Shelves.setBook(r.map, r.id, pickBook.id, true, Date.now()));
+  pickRows();
+  pickNew(false);
+  placePick();
+  const box = $("folderRows").querySelector(`input[data-folder="${CSS.escape(r.id)}"]`);
+  (box || $("folderNew")).focus({ preventScroll: true });
+});
+$("folderPick").addEventListener("keydown", e => {
+  e.stopPropagation();   // typing here never reaches the catalog's shortcuts
+  if (e.key === "Escape") { e.preventDefault(); closePick(); }
+});
+$("folderDim").onclick = () => closePick();
+document.addEventListener("click", e => {   // a click elsewhere closes the popover
+  if (!$("folderPick").hidden && e.target.isConnected && !$("folderPick").contains(e.target)) closePick();
+});
+addEventListener("resize", placePick);
+detail.addEventListener("scroll", placePick);
 
 // ------------------------------------------------------------ Where you were (this device only)
 // <PREFS>:place = {href, offset, q, time}: the book row at the top of the screen (its key in the
@@ -1385,6 +1504,7 @@ $("group").addEventListener("click", e => {
   save(); render();
 });
 document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !$("folderPick").hidden) { e.preventDefault(); closePick(); return; }
   if (offline && e.key === "Escape" && !$("offPanel").hidden) { offline.panel(false); return; }
   if (current) { if (e.key === "Escape") { e.preventDefault(); requestClose(); } return; }
   if (e.key === "/" && document.activeElement !== $("q")) { e.preventDefault(); $("q").focus(); }
@@ -1538,6 +1658,7 @@ if (Sync.available()) {   // secure pages only: a password never crosses the Wi-
     render(true);
     showBrand();
     if (!$("acctPop").hidden) showAcct();
+    if (!$("folderPick").hidden) pickRows();
   };
   Sync.onRemoteChange(r => { if (r.opened || r.prefs || r.shelves) refresh(); });
   if (Sync.signedIn()) Sync.syncNow({ timeoutMs: 2000 }).then(r => { syncResult = r; refresh(); });
@@ -1549,7 +1670,8 @@ if (Sync.available()) {   // secure pages only: a password never crosses the Wi-
 
 // Came back to a book page (reload, or the reader's Back): show it without the flight
 { const key = history.state && history.state.book, b = key && books.find(x => x.href === key);
-  if (b) openDetail(b, false); }
+  if (b) openDetail(b, false);
+  if (history.state && history.state.pick) history.back(); }   // the folder sheet was open: its step goes
 </script>
 </body>
 </html>
