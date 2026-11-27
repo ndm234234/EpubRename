@@ -128,7 +128,10 @@ The "Open file" chip already uses a folder icon; folders get a different one, e.
 books or a tag (builder's call), so the two aren't confused.
 
 **Folder strip.** A row of chips under the header: `All books` · `To read 12` · `Holiday 5` … ·
-`＋`. On a phone it scrolls sideways with a finger and doesn't wrap; the chosen chip stays in view.
+`＋`. *(Owner's follow-up, replacing "on a phone it scrolls sideways and doesn't wrap; the chosen
+chip stays in view":)* the chips wrap onto as many rows as they need on every screen, nothing
+scrolls sideways, and an open chip stays on one row with its `⋯`; the strip is not part of the
+sticky header (it scrolls away with the list, the bar with the name and search stays on top).
 Folders are listed by name (the catalog's collator), the same order on every device. The strip is
 **hidden while the person has no folders**, so the catalog looks as it does today for people who
 don't use them; the first folder is made from a book's page (below).
@@ -138,6 +141,15 @@ To read` (`3 of 12 in To read` while searching). Search, sort and grouping apply
 phone's Back button goes back to All books (the folder is a history step, like a book's page).
 An empty folder says: "No books here yet. Open a book and choose Folders to add it." Which folder
 is open is remembered by that catalog on that device, like its scroll place, and not synced.
+
+**Not in folders** *(owner's follow-up)*. A chip next to All books (strip order: the folders by
+name · `＋` · `Not in folders 4` · `All books`) shows the library's books that are in no live
+folder (a book taken out of every folder counts; deleted folders don't). It is viewed like a
+folder: search, sort and grouping inside; the count reads `4 books not in folders` (`2 of 4 not in
+folders` while searching); with every book in a folder it says "Every book is in a folder." It is
+the one folder step above All books and is remembered in the same per-device setting, under a
+reserved id that is never a folder's (`~unfiled`); it is a catalog view only, not a folder: no
+`⋯`, nothing stored with the folders or synced. Shown only while the strip is.
 
 **Putting a book in / taking it out.** On the book's page (which a tap on a cover already opens),
 next to Read and Save, a **Folders** button. It opens a list of the person's folders with a
