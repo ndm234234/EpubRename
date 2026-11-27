@@ -232,7 +232,7 @@ def read_book(path: Path, root: Path, covers_dir: Path, used: set[str]) -> dict:
     st = path.stat()
     rel = path.relative_to(root).as_posix()
     book = {
-        "file": rel,
+        "file": rel, "id": "",
         "href": "/".join(urllib.parse.quote(part) for part in rel.split("/")),
         "size": st.st_size,
         "added": int(st.st_mtime),
@@ -253,6 +253,10 @@ def read_book(path: Path, root: Path, covers_dir: Path, used: set[str]) -> dict:
     if md is None:
         md = opf
     book["title"] = text_of(md.find(".//dc:title", NS)) or path.stem
+    # the reader's book id (reader.html openBook): first identifier, else first title, raw, else file name
+    def raw(el):
+        return (el.text or "") if el is not None else ""
+    book["id"] = raw(md.find(".//dc:identifier", NS)) or raw(md.find(".//dc:title", NS)) or path.name
     book["authors"] = [a for a in (text_of(c) for c in md.findall(".//dc:creator", NS)) if a]
     book["publisher"] = text_of(md.find(".//dc:publisher", NS))
     book["language"] = text_of(md.find(".//dc:language", NS))
