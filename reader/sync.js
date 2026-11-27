@@ -7,6 +7,7 @@
 
   var P_BOOK = 'epubReader:book:', P_MARKS = 'epubReader:marks:', P_GONE = 'epubReader:marksGone:';
   var K_OPENED = 'epubLibrary:opened';
+  var K_SHELVES = 'epubLibrary:shelves';
   var PREF_KEYS = [
     { group: 'reader', key: 'epubReader:prefs', time: 'epubReader:prefsTime' },
     { group: 'catalogTab', key: 'epubIndex', time: 'epubIndex:time' },
@@ -162,6 +163,8 @@
     Object.keys(bookMarks).forEach(function (id) { if (Object.keys(bookMarks[id]).length) doc.marks[id] = bookMarks[id]; });
     var op = lsJson(K_OPENED);
     if (isObj(op)) doc.opened = op;
+    var sh = lsJson(K_SHELVES);
+    if (isObj(sh)) doc.shelves = sh;
     var collect = function (keys, to) {
       var prefs = {};
       keys.forEach(function (d) {
@@ -191,7 +194,7 @@
   }
 
   function applyLocal(doc) {
-    var rep = { places: [], marks: [], prefs: false, opened: false };
+    var rep = { places: [], marks: [], prefs: false, opened: false, shelves: false };
     if (!isObj(doc)) return rep;
     var places = isObj(doc.places) ? doc.places : {};
     Object.keys(places).forEach(function (id) {
@@ -219,6 +222,7 @@
       if (changed) rep.marks.push(id);
     });
     if (isObj(doc.opened) && writeJson(K_OPENED, doc.opened)) rep.opened = true;
+    if (isObj(doc.shelves) && (Object.keys(doc.shelves).length || lsGet(K_SHELVES) !== null) && writeJson(K_SHELVES, doc.shelves)) rep.shelves = true;
     var apply = function (keys, from) {
       var mine = isObj(doc.prefs) && isObj(doc.prefs[from]) ? doc.prefs[from] : {};
       keys.forEach(function (d) {
@@ -242,17 +246,18 @@
   function attempt(signal, isDead) {
     var a = readAccount();
     if (!a || !a.token) return Promise.resolve('signed-out');
-    var seq = changeSeq, report = { places: [], marks: [], prefs: false, opened: false };
+    var seq = changeSeq, report = { places: [], marks: [], prefs: false, opened: false, shelves: false };
     function absorb(r) {
       r.places.forEach(function (id) { if (report.places.indexOf(id) < 0) report.places.push(id); });
       r.marks.forEach(function (id) { if (report.marks.indexOf(id) < 0) report.marks.push(id); });
       report.prefs = report.prefs || r.prefs;
       report.opened = report.opened || r.opened;
+      report.shelves = report.shelves || r.shelves;
     }
     // What applyLocal changed is announced however the attempt ends (ok, offline, a failed PUT, the
     // deadline): localStorage already holds it, and the next sync would find nothing new to report.
     function announce() {
-      if (report.places.length || report.marks.length || report.prefs || report.opened) {
+      if (report.places.length || report.marks.length || report.prefs || report.opened || report.shelves) {
         listeners.slice().forEach(function (fn) { try { fn(report); } catch (e) { /* ignore */ } });
       }
     }
