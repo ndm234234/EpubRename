@@ -184,8 +184,8 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
   they are names in the catalog only, nothing on disk moves or changes). The first one is made from
   a book's page: **Folders** next to Read lists your folders with a tick box each (tick to put the
   book in, untick to take it out, it takes effect at once) and **＋ New folder**. A book can be in
-  several folders. Then a strip of chips appears under the search: *All books*, your folders by
-  name with their counts, and **＋** for a new folder. A tap on a folder shows only its books
+  several folders. Then a strip of chips appears under the search: your folders by name with
+  their counts, **＋** for a new folder, and *All books* at the right end. A tap on a folder shows only its books
   (search, sort and grouping work inside it; Back returns to All books). The open folder's **⋯**
   renames it or deletes it (it asks first; the books stay in the library, and a deleted folder
   stays deleted). Names are up to 60 characters and two folders can't share a name (whatever the

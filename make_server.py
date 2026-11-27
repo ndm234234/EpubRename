@@ -1092,7 +1092,7 @@ function renderList() {
 
 // ------------------------------------------------------------ Folders
 // epubLibrary:shelves (one set per device, synced with the account; edits in shelves.js): the strip
-// under the bar lists them by name, All books first; it is hidden while there are none. The open
+// under the bar lists them by name, then ＋ and All books at the right end; it is hidden while there are none. The open
 // folder is a history step (Back goes to All books) and is remembered by this catalog on this
 // device (<PREFS>:folder, "" for All books), never synced.
 const Shelves = window.LibraryShelves;
@@ -1130,10 +1130,12 @@ function renderFolders(map) {
     el("button", { class: "chip fmore", type: "button", title: "Rename or delete", "aria-label": `Rename or delete "${f.name}"`,
       "aria-haspopup": "menu", "aria-controls": "folderMenu", "aria-expanded": menuOn(f.id),
       on: e => { e.stopPropagation(); menuOn(f.id) === "true" ? closeMenu() : openMenu(f.id); } }, "⋯"));
-  strip.replaceChildren(chip("", "All books"), ...live.map(f => f.id === folderId ? more(f) : chip(f.id, ...chipLabel(map, f))),
+  // the folders, then ＋, then All books at the right end (the owner's choice)
+  strip.replaceChildren(...live.map(f => f.id === folderId ? more(f) : chip(f.id, ...chipLabel(map, f))),
     el("button", { class: "chip fadd", type: "button", title: "New folder", "aria-label": "New folder",
       "aria-haspopup": "dialog", "aria-controls": "folderMenu", "aria-expanded": menuOn(null),
-      on: e => { e.stopPropagation(); menuOn(null) === "true" ? closeMenu() : openMenu(null); } }, "＋"));
+      on: e => { e.stopPropagation(); menuOn(null) === "true" ? closeMenu() : openMenu(null); } }, "＋"),
+    chip("", "All books"));
   placeMenu();
   return open;
 }
