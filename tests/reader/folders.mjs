@@ -105,7 +105,7 @@ ok([1, 2, 3, 4, 5, 6].every(n => id(n)) && new Set(Object.values(ids)).size === 
 await seeded(d, { f1: folder("To read", [id(1), id(2)]), f2: folder("Holiday", [id(3)]), gone: { deleted: 5 } });
 ok(await d.eval("!document.getElementById('folders').hidden"), "folders: the strip is shown");
 const shown = await chips(d);
-ok(JSON.stringify(shown) === JSON.stringify(["Holiday 1", "To read 2", "Not in folders 3", "All books"]), `strip: the folders by name with counts, then Not in folders, then All books (${shown.join(" | ")})`);
+ok(JSON.stringify(shown) === JSON.stringify(["Holiday 1", "To read 2", "Unfiled 3", "All"]), `strip: the folders by name with counts, then Unfiled, then All (${shown.join(" | ")})`);
 ok(await d.eval("document.querySelector('#folders .fchip[data-folder=\"\"]').getAttribute('aria-pressed')") === "true", "All books is the open one");
 ok(await cards(d) === 6, "All books: 6 books");
 await tapChip(d, "f1");
@@ -329,7 +329,7 @@ ok(await d.eval("!document.getElementById('detail').hidden"), "the book page sta
 ok(await d.eval("!(history.state && history.state.pick) && !!(history.state && history.state.book)"), "the sheet's history step is gone");
 await back(d);
 ok(await d.eval("document.getElementById('detail').hidden"), "Back: the book page is closed");
-ok(JSON.stringify(await chips(d)) === JSON.stringify(["To read 1", "Not in folders 5", "All books"]), `the strip appears: To read 1 (${(await chips(d)).join(" | ")})`);
+ok(JSON.stringify(await chips(d)) === JSON.stringify(["To read 1", "Unfiled 5", "All"]), `the strip appears: To read 1 (${(await chips(d)).join(" | ")})`);
 
 // ======== 6. tick, untick, tick; a second folder
 await openBook(d, book(2));
@@ -343,7 +343,7 @@ await tapRow(d, "To read");
 ok((await chips(d)).includes("To read 2") && JSON.stringify(await rows(d)) === JSON.stringify([["To read", true]]), `ticked again: To read 2 (${(await chips(d)).join(" | ")})`);
 await typeNew(d, "Holiday", true);   // by the Create button
 ok(JSON.stringify(await rows(d)) === JSON.stringify([["Holiday", true], ["To read", true]]), `a second folder, by name, both ticked (${JSON.stringify(await rows(d))})`);
-ok(JSON.stringify(await chips(d)) === JSON.stringify(["Holiday 1", "To read 2", "Not in folders 4", "All books"]), `book 2 in both (${(await chips(d)).join(" | ")})`);
+ok(JSON.stringify(await chips(d)) === JSON.stringify(["Holiday 1", "To read 2", "Unfiled 4", "All"]), `book 2 in both (${(await chips(d)).join(" | ")})`);
 await d.eval("document.getElementById('folderPick').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
 await sleep(400);
 ok(await d.eval("document.getElementById('folderPick').hidden && !document.getElementById('detail').hidden"), "Esc closes the sheet, not the book page");
@@ -380,9 +380,13 @@ ok(await d.eval("document.getElementById('detail').hidden") && await d.eval("loc
     try { await d.waitFor(`document.querySelectorAll('#list .book').length === ${n}`, 3000); } catch {} };
   const took = folder("Old", []); took.books[id(4)] = { time: 2, out: true };   // book 4 was taken out of its only folder
   await seeded(d, { f1: folder("To read", [id(1), id(2)]), f2: folder("Holiday", [id(3)]), f3: took, gone: { deleted: 5 } });
-  ok(JSON.stringify(await chips(d)) === JSON.stringify(["Holiday 1", "Old 0", "To read 2", "Not in folders 3", "All books"]),
-     `Not in folders 3, after ＋, before All books (${(await chips(d)).join(" | ")})`);
-  ok(await d.eval(`!document.querySelector('#folders .fchip[data-folder="${UNF}"] use[href="#i-shelf"]')`), "Not in folders: not the folder icon");
+  ok(JSON.stringify(await chips(d)) === JSON.stringify(["Holiday 1", "Old 0", "To read 2", "Unfiled 3", "All"]),
+     `Unfiled 3, after ＋, before All (${(await chips(d)).join(" | ")})`);
+  // the two special chips: an icon and a short label; the full meaning in their title and name
+  const special = await d.eval(`[["${UNF}", "i-unfiled"], ["", "i-library"]].map(([f, ic]) => (c => !!c && !!c.querySelector('use[href="#' + ic + '"]')
+    && c.getAttribute('aria-label').startsWith(c.title) && c.title + ' / ' + c.getAttribute('aria-label'))(document.querySelector('#folders .fchip[data-folder="' + f + '"]')))`);
+  ok(JSON.stringify(special) === JSON.stringify(["Books not in any folder / Books not in any folder, 3", "All books / All books"]),
+     `Unfiled and All: their icons, titled "Books not in any folder" (named with the count) and "All books" (${JSON.stringify(special)})`);
   await show(UNF, 3);
   ok(await cards(d) === 3 && await count(d) === "3 books not in folders", `Not in folders: 3 books (${await cards(d)}, ${await count(d)})`);
   ok(await listed() === [4, 5, 6].map(book).join(), `Not in folders: books 4 (taken out of its folder), 5, 6 (${await listed()})`);
@@ -415,19 +419,19 @@ ok(await d.eval("document.getElementById('detail').hidden") && await d.eval("loc
   await back(d); await back(d);
   ok(await cards(d) === 2 && await count(d) === "2 books not in folders", `book 5 put in Holiday: 2 books not in folders (${await count(d)})`);
   ok(await listed() === [4, 6].map(book).join(), `book 5 is no longer listed (${await listed()})`);
-  ok((await chips(d)).includes("Not in folders 2"), `the chip: Not in folders 2 (${(await chips(d)).join(" | ")})`);
+  ok((await chips(d)).includes("Unfiled 2"), `the chip: Unfiled 2 (${(await chips(d)).join(" | ")})`);
   // one book left; then every book in a folder
   await seeded(d, { f1: folder("To read", [1, 2, 3, 4, 5].map(id)) });
   ok(await count(d) === "1 book not in folders", `one book not in folders (${await count(d)})`);
   await seeded(d, { f1: folder("To read", [1, 2, 3, 4, 5, 6].map(id)) });
   ok(await cards(d) === 0 && await emptyList() === "Every book is in a folder.", `every book in a folder: says so (${await emptyList()})`);
-  ok(await count(d) === "0 books not in folders" && (await chips(d)).includes("Not in folders 0"), `every book in a folder: the count (${await count(d)})`);
+  ok(await count(d) === "0 books not in folders" && (await chips(d)).includes("Unfiled 0"), `every book in a folder: the count (${await count(d)})`);
   await d.eval("openFolder(null)");
 }
 
 // ======== 8. a folder naming a book not in the library
 await seeded(d, { m1: folder("Mixed", [id(1), "urn:not-here"]) });
-ok(JSON.stringify(await chips(d)) === JSON.stringify(["Mixed 1", "Not in folders 5", "All books"]), `a book not here is not counted (${(await chips(d)).join(" | ")})`);
+ok(JSON.stringify(await chips(d)) === JSON.stringify(["Mixed 1", "Unfiled 5", "All"]), `a book not here is not counted (${(await chips(d)).join(" | ")})`);
 await openBook(d, book(4));
 await tapFolders(d);
 await tapRow(d, "Mixed");
@@ -448,7 +452,7 @@ await back(d); await back(d);
   await catalog(d);
   const b3 = await d.eval(`(b => b && { id: b.id, href: readerUrl(b) })(books.find(b => b.file.endsWith(${JSON.stringify(to.split("/").pop())})))`);
   ok(b3 && b3.id === id(3), `renamed: the same id (${b3 && b3.id})`);
-  ok(await cards(d) === 6 && JSON.stringify(await chips(d)) === JSON.stringify(["Renamed 1", "Not in folders 5", "All books"]), `renamed: still in its folder (${(await chips(d)).join(" | ")})`);
+  ok(await cards(d) === 6 && JSON.stringify(await chips(d)) === JSON.stringify(["Renamed 1", "Unfiled 5", "All"]), `renamed: still in its folder (${(await chips(d)).join(" | ")})`);
   await tapChip(d, "r1");
   try { await d.waitFor("document.querySelectorAll('#list .book').length === 1", 3000); } catch {}
   ok(await d.eval(`!!${fileSel(to.split("/").pop())}`), "renamed: the folder shows it under the new name");
@@ -579,7 +583,7 @@ const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.q
   ok(await p.eval("document.getElementById('folderMenu').hidden"), "＋ Holiday: the box closes");
   ok(await count(p) === "0 books in Holiday" && await emptyText(p) === EMPTY, `＋ Holiday: it is open, empty (${await count(p)} / ${await emptyText(p)})`);
   ok(await p.eval(`!!(history.state && history.state.folder === ${JSON.stringify(hol)})`), "＋ Holiday: a folder history step");
-  ok(JSON.stringify(await chips(p)) === JSON.stringify(["Holiday 0", "To read 1", "Not in folders 5", "All books"]),
+  ok(JSON.stringify(await chips(p)) === JSON.stringify(["Holiday 0", "To read 1", "Unfiled 5", "All"]),
      `the strip: Holiday by name (${(await chips(p)).join(" | ")})`);
 
   // ======== 13. ⋯: Rename, Delete folder
@@ -692,7 +696,7 @@ const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.q
   ok(await sync(A) === "ok", "A: synced");
   ok(await sync(B) === "ok", "B: synced");
   await sleep(300);
-  ok(JSON.stringify(await chips(B)) === JSON.stringify(["To read 1", "Not in folders 5", "All books"]), `B: the folder came, To read 1 (${(await chips(B)).join(" | ")})`);
+  ok(JSON.stringify(await chips(B)) === JSON.stringify(["To read 1", "Unfiled 5", "All"]), `B: the folder came, To read 1 (${(await chips(B)).join(" | ")})`);
   const tr = byName(await stored(B), "To read");
   // B takes book 1 out; A, offline, puts book 2 in
   await A.send("Network.enable");
@@ -712,7 +716,7 @@ const emptyText = d => d.eval("(e => e ? e.textContent.trim() : null)(document.q
   ok(await sync(B) === "ok", "B: synced");
   await sleep(300);
   for (const [d, who] of [[A, "A"], [B, "B"]]) {
-    ok(JSON.stringify(await chips(d)) === JSON.stringify(["To read 1", "Not in folders 5", "All books"]), `${who}: To read 1 (${(await chips(d)).join(" | ")})`);
+    ok(JSON.stringify(await chips(d)) === JSON.stringify(["To read 1", "Unfiled 5", "All"]), `${who}: To read 1 (${(await chips(d)).join(" | ")})`);
     await tapChip(d, tr);
     try { await d.waitFor("document.querySelectorAll('#list .book').length === 1", 3000); } catch {}
     const k = await d.eval("[...document.querySelectorAll('#list .book')].map(a => decodeURIComponent(a.dataset.key).split('/').pop()).join()");

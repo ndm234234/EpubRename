@@ -641,6 +641,7 @@ PAGE = r"""<!DOCTYPE html>
   <symbol id="i-offline" viewBox="0 0 24 24"><path d="M2 8.8a15 15 0 0 1 4.2-2.6M10.7 5.1A15 15 0 0 1 22 8.8M5 12.9a10 10 0 0 1 5.2-2.7M16.8 11.2a10 10 0 0 1 2.2 1.7M8.5 16.4a5 5 0 0 1 7 0M12 20h.01M2 2l20 20"/></symbol>
   <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M12 13v8M8 17l4 4 4-4M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.24"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-unfiled" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1Z"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
 </svg>
@@ -1143,13 +1144,16 @@ function renderFolders(map) {
     el("button", { class: "chip fmore", type: "button", title: "Rename or delete", "aria-label": `Rename or delete "${f.name}"`,
       "aria-haspopup": "menu", "aria-controls": "folderMenu", "aria-expanded": menuOn(f.id),
       on: e => { e.stopPropagation(); menuOn(f.id) === "true" ? closeMenu() : openMenu(f.id); } }, "⋯"));
-  // the folders, then ＋, Not in folders, then All books at the right end (the owner's choice)
+  // the folders, then ＋, Not in folders, then All books at the right end (the owner's choice); those
+  // two: an icon and a short label (Unfiled, All), the full meaning in their title and name
+  const named = (c, name, n = "") => { c.title = name; c.setAttribute("aria-label", name + n); return c; };
+  const unfiled = folderBooks(map, { id: UNFILED }).length;
   strip.replaceChildren(...live.map(f => f.id === folderId ? more(f) : chip(f.id, ...chipLabel(map, f))),
     el("button", { class: "chip fadd", type: "button", title: "New folder", "aria-label": "New folder",
       "aria-haspopup": "dialog", "aria-controls": "folderMenu", "aria-expanded": menuOn(null),
       on: e => { e.stopPropagation(); menuOn(null) === "true" ? closeMenu() : openMenu(null); } }, "＋"),
-    chip(UNFILED, "Not in folders", el("b", { class: "count" }, folderBooks(map, { id: UNFILED }).length)),
-    chip("", "All books"));
+    named(chip(UNFILED, icon("unfiled"), "Unfiled", el("b", { class: "count" }, unfiled)), "Books not in any folder", `, ${unfiled}`),
+    named(chip("", icon("library"), "All"), "All books"));
   placeMenu();
   return open;
 }

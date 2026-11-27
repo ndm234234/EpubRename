@@ -128,7 +128,9 @@ The "Open file" chip already uses a folder icon; folders get a different one, e.
 books or a tag (builder's call), so the two aren't confused.
 
 **Folder strip.** A row of chips under the header's bar: `To read 12` · `Holiday 5` … · `＋` ·
-`Not in folders 4` · `All books` (the owner's order). *(Owner's follow-up, replacing "on a phone it
+`Unfiled 4` · `All` (the owner's order; the last two are the Not in folders and All books chips,
+each with an icon and a short label, the full meaning in its title and accessible name: "Books
+not in any folder", "All books"). *(Owner's follow-up, replacing "on a phone it
 scrolls sideways and doesn't wrap; the chosen chip stays in view":)* the chips wrap onto as many
 rows as they need on every screen, nothing scrolls sideways, and an open chip stays on one row
 with its `⋯`. On a computer (wider than 640px) the strip stays with the sticky header; on a phone
@@ -144,8 +146,8 @@ phone's Back button goes back to All books (the folder is a history step, like a
 An empty folder says: "No books here yet. Open a book and choose Folders to add it." Which folder
 is open is remembered by that catalog on that device, like its scroll place, and not synced.
 
-**Not in folders** *(owner's follow-up)*. A chip next to All books (strip order: the folders by
-name · `＋` · `Not in folders 4` · `All books`) shows the library's books that are in no live
+**Not in folders** *(owner's follow-up)*. A chip next to All books, shown as a tray icon and
+`Unfiled 4` (strip order: the folders by name · `＋` · `Unfiled 4` · `All`), shows the library's books that are in no live
 folder (a book taken out of every folder counts; deleted folders don't). It is viewed like a
 folder: search, sort and grouping inside; the count reads `4 books not in folders` (`2 of 4 not in
 folders` while searching); with every book in a folder it says "Every book is in a folder." It is
