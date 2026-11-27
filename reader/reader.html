@@ -422,7 +422,9 @@
     <div data-pane="font" role="tabpanel">
       <div class="seg faces" id="faceSeg">
         <button data-v="book" class="wide2"><b>As in book</b><small id="bookFont"></small></button>
-      </div></div>
+      </div>
+      <label class="check"><input type="checkbox" id="boldStarts">Bold word starts</label>
+      <p>The first letters of every word in bold, to lead the eye along the line. On this device only.</p></div>
     <div data-pane="layout" role="tabpanel">
       <div class="seg" id="layoutSeg">
         <button data-v="book">As in book</button>
@@ -553,6 +555,8 @@ delete prefs.scroll;
 // "Scroll text" is this device's own (a phone may scroll, the computer turn pages): not in the
 // synced settings
 let scrollPref = store.get("epubReader:scroll") === true;
+// "Bold word starts" (bold.js) likewise: this device's own
+let boldPref = store.get("epubReader:bold") === true;
 const savePrefs = () => { delete prefs.scroll; store.set("epubReader:prefs", prefs); store.set("epubReader:prefsTime", Date.now()); Sync.changed(); };
 // The theme shown: the page (and the phone's status bar, in the colour of the reader's bar), the
 // button's title, and the book's pages. One setting with the catalog (theme.js).
@@ -2167,6 +2171,7 @@ function applyTypo(doc) {
   if (!st) { st = doc.createElement("style"); st.id = "readerTypo"; }
   st.textContent = typoCss();
   doc.head.appendChild(st);   // (re)append: must stay after the book's own styles
+  BoldStarts.apply(doc, boldPref);
 }
 // The font the book itself sets for its text, for the "As in book" button: the family most of the
 // text of the open chapter gets from the book's own styles (the reader's font is switched off
@@ -2240,6 +2245,7 @@ function showTypo() {
   }
   $("fontPct").textContent = prefs.font + "%";
   $("scrollText").checked = scrollPref;
+  $("boldStarts").checked = boldPref;
   $("smaller").disabled = !rendition || prefs.font <= 60;
   $("bigger").disabled = !rendition || prefs.font >= 200;
   for (const [seg, key] of [["faceSeg", "face"], ["layoutSeg", "layout"]])
@@ -2259,6 +2265,11 @@ $("scrollText").addEventListener("change", e => {
   scrollPref = e.target.checked;
   store.set("epubReader:scroll", scrollPref);
   if (placeShown) remakeRendition();
+});
+$("boldStarts").addEventListener("change", e => {
+  boldPref = e.target.checked;
+  store.set("epubReader:bold", boldPref);
+  if (rendition) { for (const c of rendition.getContents()) BoldStarts.apply(c.document, boldPref); relayout(); }
 });
 function toggleTypo(open = !$("typo").classList.contains("open")) {
   if (open && !book) return;
