@@ -1164,11 +1164,32 @@ def estimate(pages: int) -> str:
     return f"~{minutes} min" if minutes < 60 else f"~{minutes / 60:.1f} h"
 
 
+def tab_completer(suggestion: str):
+    """Tab puts the suggestion into the line, to be changed before Enter."""
+    def complete(text: str, state: int) -> str | None:
+        return suggestion if state == 0 and suggestion and suggestion.startswith(text) else None
+    return complete
+
+
 def ask(prompt: str, default: str) -> str:
+    try:
+        import readline             # not on Windows: there Tab does nothing, Enter still keeps the suggestion
+    except ImportError:
+        readline = None
+    if readline is not None:
+        old = readline.get_completer(), readline.get_completer_delims()
+        readline.set_completer(tab_completer(default))
+        readline.set_completer_delims("")           # the whole line is completed, spaces and all
+        readline.parse_and_bind("bind ^I rl_complete" if "libedit" in (readline.__doc__ or "")
+                                else "tab: complete")
     try:
         answer = input(f"   {prompt} [{default or '—'}]: ").strip()
     except EOFError:
         return default
+    finally:
+        if readline is not None:
+            readline.set_completer(old[0])
+            readline.set_completer_delims(old[1])
     return answer or default
 
 
@@ -1177,7 +1198,8 @@ def book_meta(pdf: Path, args) -> tuple[str, str, int]:
     info = read_info(pdf)
     title, author = guess_meta(pdf, info, args)
     if not author and not args.yes and sys.stdin.isatty():
-        print(f"\n📄 {pdf.name}: the author is not in the file; press Enter to keep a suggestion")
+        print(f"\n📄 {pdf.name}: the author is not in the file; Enter keeps a suggestion, "
+              "Tab puts it in to change it")
         title = ask("Title ", title)
         author = ask("Author", author)
     try:

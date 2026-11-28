@@ -140,6 +140,21 @@ class LayerContentsTest(unittest.TestCase):
         self.assertEqual(pdf2epub.find_tocs([page], 11.0), [])
 
 
+class AskTest(unittest.TestCase):
+    def test_tab_puts_the_suggestion_in_to_edit(self):
+        complete = pdf2epub.tab_completer("Воспитание ребенка с СДВГ")
+        self.assertEqual(complete("", 0), "Воспитание ребенка с СДВГ")
+        self.assertEqual(complete("Воспит", 0), "Воспитание ребенка с СДВГ")
+        self.assertIsNone(complete("", 1), "one suggestion only")
+        self.assertIsNone(complete("Другое", 0))
+
+    def test_enter_keeps_the_suggestion(self):
+        with mock.patch("builtins.input", return_value=""):
+            self.assertEqual(pdf2epub.ask("Title ", "Тихие реки"), "Тихие реки")
+        with mock.patch("builtins.input", return_value=" Тихие реки, том 2 "):
+            self.assertEqual(pdf2epub.ask("Title ", "Тихие реки"), "Тихие реки, том 2")
+
+
 class MainTest(unittest.TestCase):
     def test_main_falls_back_to_quick(self):
         from test_hybrid import make_pdf
