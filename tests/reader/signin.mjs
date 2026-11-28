@@ -53,9 +53,7 @@ await p.send("Page.addScriptToEvaluateOnNewDocument", { source: `if (location.ho
 await p.goto(AT);
 await p.waitFor(isReader, 20000).then(() => ok(true, "signed in before: let in without the form"), () => ok(false, "signed in before: let in without the form"));
 // signing out closes the library again
-await p.eval("LibrarySync.logout().then(() => 0)");
-await p.eval("(location.reload(), 0)");   // as "Sign out" does (a reload asks the server again)
-await sleep(500);
+await p.eval("document.getElementById('acctSignOut').click()");   // the reader's "Sign out"
 await p.waitFor(isSignin, 15000).then(() => ok(true, "signed out: the sign-in page again"), () => ok(false, "signed out: the sign-in page again"));
 ok(await p.eval(shown("input[type=password]")) && !(await p.eval(isReader)), "signed out: the form, not the reader");
 p.close();
