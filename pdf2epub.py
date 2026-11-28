@@ -19,7 +19,8 @@ What ends up in the book:
   - the text of every page (also the hidden text layer of scanned and recognised
     books), joined into paragraphs: line breaks and word hyphenation of the printed
     page are removed, running headers, footers and page numbers are dropped;
-  - bold and italic;
+  - bold and italic, lines set at the right;
+  - formulas, as MathML (recognition mode);
   - the table of contents as printed in the book (entries, nesting, page numbers), linked
     to the places in the text; the printed contents pages become clickable lists;
   - headings, found by their larger font or as bold lines standing apart; without printed
@@ -408,6 +409,7 @@ class TocEntry:
     page: int           # the PDF page the entry is printed on
     level: int = 1
     anchor: str = ""    # id of the place in the text it leads to
+    html: str = ""      # the title with markup (formulas), when the plain one is not enough
 
 
 @dataclass
@@ -847,6 +849,8 @@ body { margin: 0 4%; line-height: 1.45; }
 p { margin: 0; text-indent: 1.3em; text-align: justify;
     -webkit-hyphens: auto; hyphens: auto; adobe-hyphenate: auto; }
 p.right { text-align: right; text-indent: 0; }
+math[display="block"] { display: block; margin: 0.6em auto; }
+span.tex { font-family: monospace; font-size: 0.9em; }
 h1, h2, h3 { text-align: center; line-height: 1.25; margin: 1.6em 0 0.9em; page-break-after: avoid; }
 h1 { font-size: 1.5em; page-break-before: always; }
 h2 { font-size: 1.2em; }
@@ -966,7 +970,8 @@ def write_epub(out: Path, title: str, author: str, lang: str, chapters: list[Cha
         rows = []
         for e in toc.entries:
             link = href(e.anchor)
-            name = f'<a href="{link}">{esc(e.title)}</a>' if link else esc(e.title)
+            title = e.html or esc(e.title)
+            name = f'<a href="{link}">{title}</a>' if link else title
             rows.append(f'<p class="toc{e.level}"><span class="pg">{e.number}</span>{name}</p>')
         return f'<div class="toc"{id_attr}>\n' + "\n".join(rows) + "\n</div>"
 
@@ -1005,7 +1010,8 @@ def write_epub(out: Path, title: str, author: str, lang: str, chapters: list[Cha
         body = re.sub(r'href="#([\w-]+)"', lambda m: f'href="{href(m.group(1))}"' if where.get(m.group(1), ch.file)
                       != ch.file else m.group(0), "\n".join(parts))      # a note in another file
         files[ch.file] = xhtml(ch.title, body, lang).encode()
-        manifest.append(f'<item id="c{n}" href="{ch.file}" media-type="application/xhtml+xml"/>')
+        mathml = ' properties="mathml"' if b"<math" in files[ch.file] else ""
+        manifest.append(f'<item id="c{n}" href="{ch.file}" media-type="application/xhtml+xml"{mathml}/>')
         spine.append(f'<itemref idref="c{n}"/>')
     for n, (src, name) in enumerate(images.items(), 1):
         ext = Path(name).suffix.lower()

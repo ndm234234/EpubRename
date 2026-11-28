@@ -5,6 +5,7 @@ is stopped (Ctrl+C, power off) goes on from the first unfinished page next time.
 """
 
 import hashlib
+import html
 import json
 import os
 import re
@@ -18,7 +19,7 @@ from typing import Callable
 
 import pdf2epub as base
 from pdf2epub import Block
-from pdf2epub_parts.engine import Engine, MarkerError, run_marker, stop_llama_server
+from pdf2epub_parts.engine import Engine, MarkerError, latex_to_mathml, run_marker, stop_llama_server
 from pdf2epub_parts.markup import (fix_drop_cap, join_pages, link_endnotes, merge_heading_runs, page_blocks,
                                    place_footnotes, text_of,
                                    running_head_offset, strip_running_heads, take_footnotes, tocs_from_blocks)
@@ -58,11 +59,46 @@ def first_page_is_cover(page_html: str, big_picture: bool) -> bool:
     return big_picture and len(re.sub(r"<[^>]+>", " ", page_html).split()) <= COVER_WORDS
 
 
+def _words(text: str) -> list[str]:
+    return [w.lower() for w in re.findall(r"\w+", text)]
+
+
+def _formula_titles(blocks: list[Block], pages: set[int]) -> dict[int, list[str]]:
+    """Contents lines with formulas as Marker read them: {page number: [title html]}."""
+    found: dict[int, list[str]] = {}
+    for b in blocks:
+        if b.page not in pages:
+            continue
+        lines = [" ".join(r) for r in b.rows] if b.kind == "table" else [b.html] if b.kind in ("h", "p") else []
+        for line in lines:
+            if "<math" not in line:
+                continue
+            m = re.fullmatch(r"(.*?)[\s.…·_]*(?:<b>)?\s*(\d{1,4})\s*(?:</b>)?\s*", line)
+            if m:
+                title = re.sub(r"</?b>", "", m.group(1)).strip()
+                title = re.sub(r"\s*[.…·_]{3,}\s*$", "", title)
+                found.setdefault(int(m.group(2)), []).append(title)
+    return found
+
+
+def _use_formula_titles(toc, found: dict[int, list[str]]) -> None:
+    """The PDF text layer has old OCR in place of formulas: such titles are taken from Marker."""
+    for e in toc.entries:
+        mine = set(_words(e.title))
+        for title in found.get(e.number, []):
+            words = _words(re.sub(r"<math[^>]*>.*?</math>", " ", title))
+            if words and sum(1 for w in words if w in mine) >= 0.7 * len(words):
+                e.html = title
+                break
+
+
 def place_tocs(blocks: list[Block], layer_tocs: list) -> list:
     """The printed contents: from the PDF text layer when it has one (it sees every page of the
     contents, with nesting from the indent), else from the tables Marker made of it."""
     if not layer_tocs:
         return tocs_from_blocks(blocks)
+    for toc in layer_tocs:
+        _use_formula_titles(toc, _formula_titles(blocks, set(toc.pages)))
     for i, toc in enumerate(layer_tocs):
         on = set(toc.pages)
         kept = [b for b in blocks if not (b.page in on and b.kind != "page")]
@@ -108,6 +144,58 @@ def align_right(blocks: list[Block], pages: list, body: float) -> None:
                 continue                        # most of the paragraph is not found: don't guess
             if all(abs(l.right - right) <= body and l.left - left >= RIGHT_INDENT * width for l in own):
                 paras[i].align = "right"
+
+
+MATH = re.compile(r'<math( display="block")?>(.*?)</math>', re.S)
+
+
+def apply_math(blocks: list[Block], tocs: list, convert: Callable[[list], list]) -> None:
+    """Formulas (LaTeX from Marker) become MathML; one that can't be converted stays as LaTeX."""
+    def fragments():
+        for b in blocks:
+            yield b, "html", None
+            for k in range(len(b.items)):
+                yield b, "items", k
+            for r, row in enumerate(b.rows):
+                for c in range(len(row)):
+                    yield b, "rows", (r, c)
+        for toc in tocs:
+            for e in toc.entries:
+                yield e, "html", None
+
+    def get(obj, field, at):
+        if field == "html":
+            return obj.html
+        return obj.items[at] if field == "items" else obj.rows[at[0]][at[1]]
+
+    def put(obj, field, at, value):
+        if field == "html":
+            obj.html = value
+        elif field == "items":
+            obj.items[at] = value
+        else:
+            obj.rows[at[0]][at[1]] = value
+
+    places = [p for p in fragments() if "<math" in get(*p)]
+    formulas = sorted({(html.unescape(m.group(2)), bool(m.group(1))) for p in places for m in MATH.finditer(get(*p))})
+    if not formulas:
+        return
+    made = dict(zip(formulas, convert(formulas)))
+
+    def swap(m):
+        latex = html.unescape(m.group(2))
+        mathml = made.get((latex, bool(m.group(1))))
+        return mathml or f'<span class="tex">{html.escape(latex, quote=False)}</span>'
+
+    for obj, field, at in places:
+        put(obj, field, at, MATH.sub(swap, get(obj, field, at)))
+        if field == "html" and not (isinstance(obj, Block) and obj.kind != "h"):
+            # the plain title of a heading or a contents line (the reader's navigation): the formula's characters
+            plain = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", obj.html))).strip()
+            if isinstance(obj, Block):
+                obj.text = plain
+            else:
+                obj.title = plain
 
 
 def _short(seconds: float) -> str:
@@ -186,8 +274,10 @@ def _escape(text: str) -> str:
 def convert_hybrid(pdf: Path, out: Path, title: str, author: str, lang: str | None, engine: Engine,
                    keep_work: bool, progress: Callable[[str], None],
                    run=run_marker, stop=stop_llama_server, status: Callable[[str], None] | None = None,
-                   only: set[int] | None = None, work_root: Path | None = None) -> str:
+                   only: set[int] | None = None, work_root: Path | None = None,
+                   mathml: Callable[[list], list] | None = None) -> str:
     """progress: lines that stay; status: the live line under them (None: no live line).
+    mathml: [(LaTeX, block?)] -> [MathML or None] (default: the engine's converter).
 
     only: a trial of only these pages (1-based); the pages it reads stay in the work folder
     (under work_root, default: next to out), so the whole book goes on from them.
@@ -203,7 +293,7 @@ def convert_hybrid(pdf: Path, out: Path, title: str, author: str, lang: str | No
 
     try:
         return _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, stop, work, log, status,
-                        only)
+                        only, mathml or (lambda formulas: latex_to_mathml(engine, formulas)))
     finally:
         log_file.close()
         if not keep_work and not only and out.exists() and (work / "done").exists():
@@ -214,7 +304,7 @@ def convert_hybrid(pdf: Path, out: Path, title: str, author: str, lang: str | No
 
 
 def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, stop, work, log, status,
-             only=None) -> str:
+             only=None, mathml=None) -> str:
     log(f"start {pdf}" + (f" (pages {', '.join(map(str, sorted(only)))})" if only else ""))
     # the PDF's own text layer: a witness, printed page numbers, and "is this page a scan?"
     with tempfile.TemporaryDirectory(prefix="pdf2epub-") as tmp_name:
@@ -420,6 +510,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                 img_names[b.src] = f"images/img{len(img_names) + 1:04d}{Path(b.src).suffix.lower() or '.jpg'}"
         blocks = [b for b in blocks if b.kind != "img" or b.src in img_names]
         lang = lang or base.detect_lang(" ".join(b.text for b in blocks[:400]))
+        apply_math(blocks, tocs, mathml)
         chapters = base.split_chapters(blocks, title, main)
         if not chapters:
             raise RuntimeError("no text or pictures found")

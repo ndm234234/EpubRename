@@ -622,7 +622,12 @@ rm -rf ~/.local/share/pdf2epub ~/.cache/huggingface/hub/models--datalab-to--*
 - **Text** of every page, including the hidden text layer of scanned books that were
   recognised (OCR). Printed lines are joined into paragraphs, words hyphenated at the end
   of a line are glued back, running headers, footers and page numbers are removed.
-  Bold and italic are kept.
+  Bold and italic are kept, and so are lines the book sets at the right (a signature under
+  a quote).
+- **Formulas** (recognition mode): Marker reads them as LaTeX, the book gets them as MathML,
+  which EPUB readers and browsers draw as formulas. The converter (`latex2mathml`) is
+  installed with the engine, also into an engine installed earlier; a formula it can't
+  convert stays as LaTeX. Labels of a diagram kept as a picture don't come back as text.
 - **Table of contents** is taken from the book's own printed contents, when it has one:
   the entries, their nesting (from the indent) and page numbers. Each entry is found in the
   text (printed page numbers are matched to PDF pages by the numbers in headers/footers),

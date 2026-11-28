@@ -138,7 +138,7 @@ def tokens_of(units: list[Unit]) -> list[Tok]:
         if isinstance(node, Text):
             for m in WORD.finditer(node.s):
                 toks.append(Tok(m.group(), node, m.span(), unit))
-        else:
+        elif node.tag != "math":            # a formula's LaTeX is not words to vote on
             for c in node.children:
                 walk(c, unit)
 
@@ -257,14 +257,14 @@ def _runs(n: int, covered: set[int]) -> list[tuple[int, int]]:
 
 
 def _pictures_at(root: Node) -> list[int]:
-    """Where the pictures are among the page's words: the number of words before each one."""
+    """Where the pictures and formulas are among the page's words: the number of words before each."""
     at, words = [], 0
 
     def walk(node):
         nonlocal words
         if isinstance(node, Text):
             words += len(WORD.findall(node.s))
-        elif node.tag == "img":
+        elif node.tag in ("img", "math"):
             at.append(words)
         else:
             for c in node.children:
@@ -274,8 +274,8 @@ def _pictures_at(root: Node) -> list[int]:
 
 
 def _on_pictures(witness: list[Tok], acc: list[Tok], pictures: list[int], covered: set[int]) -> set[int]:
-    """Witness words the accurate page lacks that stand where it has a picture: the labels of a
-    diagram or a chart, which fast and the text layer read as text and accurate keeps as a picture."""
+    """Witness words the accurate page lacks that stand where it has a picture or a formula: the
+    labels of a diagram, or a formula, which fast and the text layer read as (junk) words."""
     if not pictures or not witness:
         return set()
     to_w = align(acc, witness)

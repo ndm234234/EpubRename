@@ -7,6 +7,7 @@ module installs them on first use and runs them; it uses only the standard libra
 
 import hashlib
 import html
+import json
 import os
 import platform
 import re
@@ -30,6 +31,7 @@ PYTHON_VERSION = "3.12"
 TORCH = "torch==2.15.0"
 TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
 MARKER = ("marker-pdf==2.2.0", "surya-ocr==0.23.0")
+MATHML = "latex2mathml==3.77.0"      # Marker writes formulas in LaTeX; EPUB shows MathML
 LLAMA_RELEASE = "b12681"
 LLAMA_URL = (f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_RELEASE}/"
              f"llama-{LLAMA_RELEASE}-bin-ubuntu-x64.tar.gz")
@@ -75,10 +77,6 @@ def ensure_engine(log: Callable[[str], None], root: Path = ENGINE_DIR,
         log(f"   The recognition engine works on Linux (x86-64) only for now, not on "
             f"{platform.system()} {platform.machine()}")
         return None
-    engine = find_engine(root)
-    if engine is not None:
-        return engine
-    root.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, UV_PYTHON_INSTALL_DIR=str(root / "python"), UV_CACHE_DIR=str(root / "uv-cache"))
     uv = root / "bootstrap" / "bin" / "uv"
     python = root / "venv" / "bin" / "python"
@@ -116,6 +114,28 @@ def ensure_engine(log: Callable[[str], None], root: Path = ENGINE_DIR,
             [uv, "pip", "install", "-q", "--python", python, *MARKER])),
         ("llama", f"llama.cpp {LLAMA_RELEASE}", get_llama),
     ]
+    # steps a book can do without: one that fails is tried again next time, the books are read anyway
+    extras = [
+        ("mathml", "formula converter", lambda: run([uv, "pip", "install", "-q", "--python", python, MATHML])),
+    ]
+
+    def add_extras() -> None:
+        for name, what, action in extras:
+            if (root / f".step-{name}").exists():
+                continue
+            log(f"   • {what} …")
+            try:
+                action()
+            except (_StepFailed, OSError) as e:
+                log(f"⚠️  Could not install the {what} ({e}): formulas stay as LaTeX this time")
+                continue
+            (root / f".step-{name}").write_text("")
+
+    engine = find_engine(root)
+    if engine is not None:
+        add_extras()
+        return engine
+    root.mkdir(parents=True, exist_ok=True)
     todo = [s for s in steps if not (root / f".step-{s[0]}").exists()]
     if todo:
         log("⬇️  Installing the recognition engine (one time, ~3 GB; models are downloaded on first use)")
@@ -135,7 +155,35 @@ def ensure_engine(log: Callable[[str], None], root: Path = ENGINE_DIR,
         log("❌ The engine is incomplete after installing")
         return None
     (root / ".complete").write_text("")
+    add_extras()
     return find_engine(root)
+
+
+_TO_MATHML = """\
+import json, sys
+from latex2mathml.converter import convert
+out = []
+for latex, block in json.load(sys.stdin):
+    try:
+        out.append(convert(latex, display="block" if block else "inline"))
+    except Exception:
+        out.append(None)
+json.dump(out, sys.stdout)
+"""
+
+
+def latex_to_mathml(engine: Engine, formulas: list[tuple[str, bool]], runner=subprocess.run) -> list[str | None]:
+    """MathML of each (LaTeX, is a block formula); None for one that can't be converted
+    (or for all, when the converter is not installed)."""
+    if not formulas:
+        return []
+    try:
+        res = runner([str(engine.python), "-c", _TO_MATHML], input=json.dumps(formulas).encode(),
+                     capture_output=True, check=False, timeout=600)
+        out = json.loads(res.stdout) if res.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        out = None
+    return out if isinstance(out, list) and len(out) == len(formulas) else [None] * len(formulas)
 
 
 # ---------------------------------------------------------------- running Marker

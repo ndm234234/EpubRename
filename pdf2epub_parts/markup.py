@@ -29,11 +29,18 @@ def inline(node) -> str:
         return "<br/>"
     if node.tag == "input" and "checkbox" in node.start:
         return CHECKBOX
+    if node.tag == "math":              # a formula in LaTeX: made MathML when the book is written
+        block = ' display="block"' if re.search(r"""display=["']?block""", node.start) else ""
+        return f"<math{block}>" + html.escape(CONTROL.sub("", _plain(node)), quote=False) + "</math>"
     inner = "".join(inline(c) for c in node.children)
     if node.tag in SPACED:
         inner = f" {inner} "
     tag = KEEP.get(node.tag)
     return f"<{tag}>{inner}</{tag}>" if tag and inner.strip() else inner
+
+
+def _plain(node) -> str:
+    return node.s if isinstance(node, Text) else "".join(_plain(c) for c in node.children)
 
 
 def tidy(fragment: str) -> str:

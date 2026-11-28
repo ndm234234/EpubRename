@@ -34,6 +34,12 @@ class PageBlocksTest(unittest.TestCase):
         table = next(b for b in self.blocks if b.kind == "table")
         self.assertEqual(table.rows, [["Утро", "<b>Да</b>"], ["Вечер", "Нет"]])
 
+    def test_formulas_kept_as_latex(self):
+        blocks = page_blocks('<p>Роль параметра <math>\\alpha &lt; 1</math> и</p><p><math display="block">'
+                             '\\frac{a}{b}</math></p>', page=3)
+        self.assertEqual(blocks[0].html, "Роль параметра <math>\\alpha &lt; 1</math> и")
+        self.assertEqual(blocks[1].html, '<math display="block">\\frac{a}{b}</math>')
+
     def test_unknown_tags_unwrapped(self):
         last = self.blocks[-1]
         self.assertEqual(last.html, "Обычный текст со <i>словом</i> и ссылкой тут.")

@@ -85,7 +85,7 @@ class EngineInstallTest(unittest.TestCase):
         engine, runner, fetch = self.install()
         commands = " ".join(" ".join(args) for args, _ in runner.calls)
         for pinned in ("marker-pdf==2.2.0", "surya-ocr==0.23.0", "torch==2.15.0",
-                       "https://download.pytorch.org/whl/cpu", "--python 3.12", "uv==0.13.9"):
+                       "https://download.pytorch.org/whl/cpu", "--python 3.12", "uv==0.13.9", "latex2mathml==3.77.0"):
             self.assertIn(pinned, commands)
         self.assertTrue(fetch.urls[0].endswith("llama-b12681-bin-ubuntu-x64.tar.gz"))
         self.assertIsInstance(engine, eng.Engine)
@@ -106,6 +106,38 @@ class EngineInstallTest(unittest.TestCase):
         self.assertIsNotNone(engine)
         self.assertEqual(runner.calls, [])
         self.assertEqual(fetch.urls, [])
+
+    def test_installed_engine_gets_formulas(self):
+        """An engine installed before formulas were converted gets the converter on its next run."""
+        self.install()
+        (self.root / ".step-mathml").unlink()
+        runner = FakeRunner(self.root)
+        engine, _, _ = self.install(runner)
+        self.assertIsNotNone(engine)
+        self.assertEqual([" ".join(a) for a, _ in runner.calls if "latex2mathml" in " ".join(a)].__len__(), 1)
+        self.assertFalse(any("marker-pdf" in " ".join(a) for a, _ in runner.calls))
+        self.assertTrue((self.root / ".step-mathml").exists())
+
+    def test_formulas_failing_to_install_do_not_stop_the_engine(self):
+        engine, _, _ = self.install(runner=FakeRunner(self.root, fail_on="latex2mathml"))
+        self.assertIsNotNone(engine, "the books are still read; formulas stay as LaTeX")
+        self.assertIn("LaTeX", "\n".join(self.log))
+        self.assertFalse((self.root / ".step-mathml").exists(), "tried again next time")
+
+    def test_latex_to_mathml(self):
+        import json as _json
+        seen = {}
+
+        def runner(args, **kw):
+            seen["formulas"] = _json.loads(kw["input"])
+            return subprocess.CompletedProcess(args, 0, _json.dumps(["<math>a</math>", None]).encode(), b"")
+        engine = eng.Engine(Path("/e/python"), Path("/e/marker"), Path("/e/llama"))
+        out = eng.latex_to_mathml(engine, [("a", False), ("\\frac{", True)], runner=runner)
+        self.assertEqual(out, ["<math>a</math>", None])
+        self.assertEqual(seen["formulas"], [["a", False], ["\\frac{", True]])
+        broken = lambda args, **kw: subprocess.CompletedProcess(args, 1, b"", b"No module named latex2mathml")
+        self.assertEqual(eng.latex_to_mathml(engine, [("a", False)], runner=broken), [None])
+        self.assertEqual(eng.latex_to_mathml(engine, [], runner=broken), [])
 
     def test_failed_venv_suggests_package(self):
         engine, _, _ = self.install(runner=FakeRunner(self.root, fail_on="-m venv"))

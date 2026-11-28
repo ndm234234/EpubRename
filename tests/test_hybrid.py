@@ -51,7 +51,8 @@ class FakeEngine:
     """Stands in for run_marker: records calls, can fail or be interrupted."""
 
     def __init__(self, fail_accurate=(), interrupt_on=None, fail_fast=(), loop_accurate=(), fast_heads=False,
-                 notes=False, endnotes=False, empty_accurate=(), empty_once=()):
+                 notes=False, endnotes=False, empty_accurate=(), empty_once=(), formula=False):
+        self.formula = formula
         self.fast_heads, self.notes, self.endnotes = fast_heads, notes, endnotes
         self.empty_accurate, self.empty_once = set(empty_accurate), set(empty_once)
         self.calls, self.fail_accurate, self.interrupt_on = [], set(fail_accurate), interrupt_on
@@ -86,7 +87,8 @@ class FakeEngine:
             end = {0: "<p>Ссылка на примечание<sup>[1]</sup> в тексте.</p>",
                    2: "<h2>Примечания</h2><p>Текст примечания.</p>"}
             note = lambda i: end.get(i, "")
-        return {i: f"{head(i)}<h1>Глава {i + 1}</h1><p>{tag}{SENTENCES[i]}</p>{note(i)}" for i in pages}
+        math = (lambda i: "<p>Пусть <math>x</math> растет.</p>" if mode == "accurate" and self.formula else "")
+        return {i: f"{head(i)}<h1>Глава {i + 1}</h1><p>{tag}{SENTENCES[i]}</p>{note(i)}{math(i)}" for i in pages}
 
     def accurate_pages(self):
         return sorted(p for mode, pages in self.calls if mode == "accurate" for p in pages)
@@ -306,6 +308,18 @@ class HybridTest(unittest.TestCase):
         summary = self.convert(FakeEngine(fail_accurate={0}), out=trial, only={1}, work_root=self.out.parent)
         self.assertIn("pages: fast 1;", summary)
 
+    def test_book_with_formulas(self):
+        fake = FakeEngine(formula=True)
+        convert = lambda formulas: [f'<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>{f}</mi></math>'
+                                    for f, _ in formulas]
+        self.convert(fake, mathml=convert)
+        with zipfile.ZipFile(self.out) as zf:
+            text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+            opf = zf.read("OEBPS/content.opf").decode()
+        self.assertIn('<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>x</mi></math>', text)
+        self.assertRegex(opf, r'<item id="c\d+" href="[^"]+" media-type="application/xhtml\+xml" properties="mathml"/>')
+        check_epub(self.out)
+
     def test_keep_work(self):
         self.convert(FakeEngine(), keep_work=True)
         self.assertTrue((self.work() / "report.json").exists())
@@ -342,6 +356,41 @@ class BookPartsTest(unittest.TestCase):
         tocs = hy.place_tocs(blocks, [toc])
         self.assertEqual(tocs, [toc])
         self.assertEqual([b.kind for b in blocks], ["page", "h", "toc", "page", "page", "p"])
+
+    def test_formulas_in_contents_from_marker(self):
+        """The PDF text layer has old OCR in place of formulas; Marker's reading has them."""
+        from pdf2epub import Block, Toc, TocEntry
+        blocks = [Block("page", level=1, page=1), Block("h", "Содержание", "Содержание", 1, page=1),
+                  Block("table", rows=[["Оптимизация .....", "160"],
+                                       ["Градиентный спуск <math>\\bar{\\omega}^{i+1}</math> .....", "164"],
+                                       ["<b>Регуляризация</b>", "<b>179</b>"]], page=1),
+                  Block("page", level=2, page=2), Block("p", "Текст.", "Текст.", page=2)]
+        toc = Toc("Содержание", [TocEntry("Оптимизация", 160, 0, 1), TocEntry("Градиентный спуск ro;+i = fЬ;", 164, 0, 1),
+                                 TocEntry("Регуляризация", 179, 0, 1)], [1])
+        hy.place_tocs(blocks, [toc])
+        self.assertEqual([e.html for e in toc.entries],
+                         ["", "Градиентный спуск <math>\\bar{\\omega}^{i+1}</math>", ""])
+
+    def test_formulas_become_mathml(self):
+        from pdf2epub import Block, Toc, TocEntry
+        p = Block("p", "Пусть <math>x^2</math> растет.", "Пусть x^2 растет.", page=1)
+        h = Block("h", "Градиент <math>\\nabla L</math>", "Градиент \\nabla L", 2, page=1)
+        bad = Block("list", items=["<math display=\"block\">\\frac{a}{</math>"], page=1)
+        toc = Toc("Содержание", [TocEntry("Градиент", 5, 0, 1)], [1])
+        toc.entries[0].html = "Градиент <math>\\nabla L</math>"
+        asked = []
+
+        def convert(formulas):
+            asked.extend(formulas)
+            return [None if f.startswith("\\frac") else f'<math xmlns="m" display="{"block" if d else "inline"}">'
+                    f"<mi>{f[-1]}</mi></math>" for f, d in formulas]
+        hy.apply_math([p, h, bad], [toc], convert)
+        self.assertEqual(sorted(set(asked)), [("\\frac{a}{", True), ("\\nabla L", False), ("x^2", False)])
+        self.assertEqual(p.html, 'Пусть <math xmlns="m" display="inline"><mi>2</mi></math> растет.')
+        self.assertIn('<mi>L</mi>', h.html)
+        self.assertEqual(h.text, "Градиент L", "the plain title (book navigation) has the formula's letters")
+        self.assertIn('<mi>L</mi>', toc.entries[0].html)
+        self.assertEqual(bad.items[0], '<span class="tex">\\frac{a}{</span>', "a formula that fails stays readable")
 
     def test_marker_contents_without_layer(self):
         from pdf2epub import Block

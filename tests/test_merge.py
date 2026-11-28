@@ -209,6 +209,18 @@ class SpliceTest(unittest.TestCase):
         self.assertNotIn("<table>", r.html)
         self.assertFalse(needs_retry(r))
 
+    def test_formula_is_not_voted_on(self):
+        """Fast and the text layer read a formula as junk words; the accurate LaTeX must stay whole."""
+        acc = ("<p>Градиентный спуск <math>\\bar{\\omega}^{i+1} = \\bar{\\omega}^i - \\eta \\nabla L</math> "
+               "делает шаг против градиента функции потерь.</p>")
+        fast = "<p>Градиентный спуск omega ro i fb TJ V L делает шаг против градиента функции потерь.</p>"
+        layer = "Градиентный спуск ro;+i = fЬ; - TJ V L ( ro;) делает шаг против градиента функции потерь."
+        r = merge_page(acc, fast, layer, digital=True)
+        self.assertIn("<math>\\bar{\\omega}^{i+1} = \\bar{\\omega}^i - \\eta \\nabla L</math>", r.html)
+        self.assertNotIn("fЬ", r.html)
+        self.assertEqual(r.inserted_blocks, 0)
+        self.assertFalse(needs_retry(r))
+
     def test_text_away_from_a_picture_is_still_put_back(self):
         p1 = "Первый абзац рассказывает о том, как яблони растут и цветут."
         p2 = "Второй абзац пропал у точного режима целиком, хотя он важен."
