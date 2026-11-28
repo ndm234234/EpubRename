@@ -1,1 +1,162 @@
-<!doctype html><title>Library</title><main id="signin">Sign in</main>
+<!doctype html>
+<!-- The network library's sign-in page. The server (library_sync.gate / the PowerShell twin)
+     answers any page asked for without a sign-in with this one (status 401), at that page's
+     address, so a sign-in reloads straight into it. Self-contained: nothing else of the library
+     is given before a sign-in. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Library · Sign in</title>
+<style>
+  :root { color-scheme: light dark;
+    --bg: #f7f7f5; --surface: #ffffff; --surface-2: #efeeeb; --text: #18181b; --muted: #6b6b74;
+    --line: rgba(0,0,0,.09); --accent: #3563e9; --ring: rgba(53,99,233,.35); --err: #c62828; --on-accent: #fff; }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg: #111113; --surface: #1b1b1e; --surface-2: #26262a; --text: #f2f2f4; --muted: #a0a0a8;
+    --line: rgba(255,255,255,.09); --accent: #7ea2ff; --ring: rgba(126,162,255,.4); --err: #ff8a80; --on-accent: #111113; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
+  main { width: min(360px, 100%); background: var(--surface); border: 1px solid var(--line);
+         border-radius: 16px; padding: 22px 20px 20px; box-shadow: 0 8px 30px rgba(0,0,0,.08); }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+  .tabs { display: flex; gap: 2px; padding: 2px; margin-bottom: 14px; border-radius: 10px; background: var(--surface-2); }
+  .tabs button { flex: 1; height: 34px; border: 0; border-radius: 8px; background: none; color: var(--muted);
+                 font: inherit; font-size: 14px; cursor: pointer; }
+  .tabs button.on { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+  form { display: grid; gap: 10px; }
+  input { width: 100%; height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px;
+          background: var(--bg); color: var(--text); font: inherit; }
+  input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+  .go { height: 44px; border: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent);
+        font: inherit; font-weight: 600; cursor: pointer; }
+  .go:disabled { opacity: .6; cursor: default; }
+  .err { min-height: 1.4em; margin: 2px 0 0; color: var(--err); font-size: 14px; }
+  .note { margin: 12px 0 0; color: var(--muted); font-size: 13px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main id="signin">
+  <h1>Library</h1>
+  <p class="sub" id="sub">Sign in to open the library.</p>
+  <div id="https" hidden>
+    <p>Open the library by its https:// address to sign in.</p>
+    <p class="note">Over plain http:// a password would cross the network unprotected.</p>
+  </div>
+  <div id="forms" hidden>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="signin" class="on">Sign in</button>
+      <button type="button" role="tab" data-tab="create">Create account</button>
+    </div>
+    <form novalidate>
+      <input name="login" type="email" inputmode="email" placeholder="Email" autocomplete="email" autocapitalize="none" spellcheck="false" aria-label="Email">
+      <input name="password" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password">
+      <input name="password2" type="password" placeholder="Password again" autocomplete="new-password" aria-label="Password again" data-create hidden>
+      <input name="code" placeholder="Library code" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Library code" data-create hidden>
+      <button class="go" type="submit" id="go">Sign in</button>
+      <p class="err" id="err" role="alert"></p>
+    </form>
+    <p class="note" id="codeNote" hidden>The library code comes from the library's owner.</p>
+  </div>
+</main>
+<script>
+"use strict";
+(function () {
+  var K = "librarySync:account";   // the same account the catalog and reader sync with (sync.js)
+  var ERR = {
+    "wrong-code": "Wrong library code. Ask the library's owner for it.",
+    taken: "There is already an account with this email. Sign in instead.",
+    "bad-login": "Enter a valid email address.",
+    "wrong-password": "Wrong email or password.",
+    wait: "Too many tries. Try again later.",
+    offline: "Can't reach the library computer.",
+    "server-error": "The library computer had a problem."
+  };
+  var CODES = {
+    register: { 400: "bad-login", 403: "wrong-code", 409: "taken", 429: "wait" },
+    login: { 400: "bad-login", 401: "wrong-password", 429: "wait" }
+  };
+  var $ = function (id) { return document.getElementById(id); };
+  var form = document.querySelector("#signin form"), tab = "signin", busy = false;
+
+  function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* the cookie still lets this device in */ } }
+  function del(k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } }
+  function err(text) { $("err").textContent = text || ""; }
+
+  function post(path, body, token) {
+    var h = { "Content-Type": "application/json" };
+    if (token) h.Authorization = "Bearer " + token;
+    return fetch(path, { method: "POST", headers: h, body: JSON.stringify(body || {}), credentials: "same-origin", cache: "no-store" })
+      .then(function (r) {
+        return r.json().catch(function () { return null; }).then(function (j) { return { status: r.status, body: j }; });
+      });
+  }
+
+  function showTab(t) {
+    tab = t;
+    var create = t === "create";
+    document.querySelectorAll("#signin [data-tab]").forEach(function (b) { b.classList.toggle("on", b.dataset.tab === t); });
+    document.querySelectorAll("#signin [data-create]").forEach(function (e) { e.hidden = !create; });
+    form.elements.password.autocomplete = create ? "new-password" : "current-password";
+    $("go").textContent = create ? "Create account" : "Sign in";
+    $("codeNote").hidden = !create;
+    err("");
+  }
+
+  function showForm() { $("forms").hidden = false; }
+
+  // A password goes only over https (the router's address), never in the clear over the network
+  var secure = !!window.isSecureContext && /^https?:$/.test(location.protocol);
+  if (!secure) { $("https").hidden = false; $("sub").hidden = true; return; }
+
+  document.querySelectorAll("#signin [data-tab]").forEach(function (b) { b.onclick = function () { showTab(b.dataset.tab); }; });
+  form.onsubmit = function (e) {
+    e.preventDefault();
+    if (busy) return;
+    var f = form.elements, login = f.login.value.trim(), pw = f.password.value;
+    if (!login || !pw) return err(ERR["bad-login"]);
+    var kind = tab === "create" ? "register" : "login", body = { login: login, password: pw };
+    if (kind === "register") {
+      if (pw !== f.password2.value) return err("The passwords don't match.");
+      body.code = f.code.value.trim();
+    }
+    busy = true; $("go").disabled = true; err("");
+    post("/__sync/" + kind, body).then(function (r) {
+      if (r.status === 200 && r.body && typeof r.body.token === "string") {
+        set(K, JSON.stringify({ login: login.toLowerCase(), token: r.body.token }));
+        location.reload();   // the server set the cookie: the page asked for opens
+        return;
+      }
+      err(ERR[CODES[kind][r.status] || (r.status >= 500 ? "server-error" : "offline")]);
+    }, function () { err(ERR.offline); }).then(function () { busy = false; $("go").disabled = false; });
+  };
+
+  // Signed in before (for sync): that device key opens the library without the password
+  var acc = null;
+  try { acc = JSON.parse(get(K) || "null"); } catch (e) { acc = null; }
+  // (once per few seconds: should the browser not keep the cookie, the form, not a reload loop)
+  var last = 0;
+  try { last = +sessionStorage.getItem("librarySignin:session") || 0; } catch (e) { last = Date.now(); }
+  if (acc && typeof acc.token === "string" && Date.now() - last > 10000) {
+    if (acc.login) form.elements.login.value = acc.login;
+    post("/__sync/session", {}, acc.token).then(function (r) {
+      if (r.status === 204) {
+        try { sessionStorage.setItem("librarySignin:session", String(Date.now())); } catch (e) { /* ignore */ }
+        location.reload();
+        return;
+      }
+      if (r.status === 401) del(K);   // signed out elsewhere: sign in again
+      else err(ERR.offline);
+      showForm();
+    }, function () { err(ERR.offline); showForm(); });
+  } else showForm();
+})();
+</script>
+</body>
+</html>

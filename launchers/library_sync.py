@@ -648,7 +648,7 @@ def serve(root, port, gated=False):
     import functools
     root = str(Path(root).resolve())
     store = SyncStore(root)
-    page = Path(root) / "signin.html"
+    page = Path(__file__).resolve().parent / "signin.html"   # next to this file, as in a library
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def parse_request(self):   # every method behind the sign-in gate (--gate)
