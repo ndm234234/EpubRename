@@ -328,14 +328,20 @@ address to type on the phone, e.g. `http://192.168.1.64:48865/`.
 - It uses its own ports (48865–48884), so both launchers can run at the same time. Reading places
   and bookmarks are kept separately on each device, unless you use an account (below).
 - The window logs who uses the library: each device (address, computer name when the router
-  knows it, system and browser), the book it opens, and when it leaves, with the number of
-  connected devices:
+  knows it, system and browser), the account it is signed in to, the book it opens, and when it
+  leaves, with the number of connected devices:
 
   ```
   2026-11-24 15:57:09  + 192.168.1.64 (laptop) · Linux · Chrome — connected    [devices: 1]
-  2026-11-24 15:57:11  📖 192.168.1.64 (laptop) · Linux · Chrome — «Book title»
-  2026-11-24 15:57:17  − 192.168.1.64 (laptop) · Linux · Chrome — closed the page; was here 2 s, …    [devices: 0]
+  2026-11-24 15:57:10  👤 192.168.1.64 (laptop) · Linux · Chrome — jane.doe@example.com
+  2026-11-24 15:57:11  📖 192.168.1.64 (laptop) · Linux · Chrome · jane.doe@example.com — «Book title»
+  2026-11-24 15:57:17  − 192.168.1.64 (laptop) · Linux · Chrome · jane.doe@example.com — closed the page; was here 2 s, …    [devices: 0]
   ```
+
+  The account shows with the sign-in (`🔑 … — sign-in ok (200): jane.doe@example.com`, also the
+  login of a refused one), or, for a device signed in earlier, with its first sync; a sign-out is
+  logged as `👤 … — signed out`. Never a password or a device key. (The Windows window writes
+  `@` for `🔑` and `*` for `👤`.)
 
   Open pages report in once a minute; a device that goes quiet for 3 minutes (screen off,
   browser in the background, out of Wi-Fi) is shown as gone, and comes back as connected

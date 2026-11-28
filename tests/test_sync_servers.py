@@ -1,11 +1,13 @@
 """Starts each Python server (the two .sh launchers, library_sync --serve) and runs the HTTP contract."""
 
+import json
 import os
 import shutil
 import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -97,3 +99,65 @@ def test_timing_script_against_the_python_server(tmp_path):
     finally:
         proc.terminate()
         proc.wait(timeout=10)
+
+
+ANDROID = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"
+WINDOWS = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+
+
+def _ask(base, method, path, ua, body=None, token=None):
+    req = urllib.request.Request(base + path, method=method, headers={"User-Agent": ua},
+                                 data=None if body is None else json.dumps(body).encode())
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            out = r.read()
+            return r.status, (json.loads(out) if out and r.headers.get_content_type() == "application/json" else None)
+    except urllib.error.HTTPError as e:
+        return e.code, None
+
+
+def test_network_window_names_who_is_signed_in(tmp_path):
+    """The window shows each device's account: on sign-in, on its first sync, gone on sign-out."""
+    lib = _library(tmp_path)
+    (lib / "Jane Doe - A Quiet Harbour.epub").write_bytes(b"PK")
+    env = dict(os.environ, LIBRARY_NO_BROWSER="1")
+    proc = subprocess.Popen(["sh", str(lib / "Open Library (network).sh")], cwd=lib, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    jane, pw = "jane.doe@example.com", "pw-" + "q" * 10
+    try:
+        base = f"http://127.0.0.1:{_find(lib, range(48865, 48885), proc)}"
+        code = (lib / ".sync" / "code.txt").read_text(encoding="utf-8").strip()
+        s, out = _ask(base, "POST", "/__sync/register", ANDROID, {"login": jane, "password": pw, "code": code})
+        assert s == 200
+        token = out["token"]
+        assert _ask(base, "GET", "/Jane%20Doe%20-%20A%20Quiet%20Harbour.epub", ANDROID)[0] == 200
+        # another device already signed in (before the window was started): known by its first sync
+        assert _ask(base, "GET", "/__sync/data", WINDOWS, token=token)[0] == 200
+        assert _ask(base, "GET", "/__sync/data", WINDOWS, token=token)[0] == 200
+        assert _ask(base, "POST", "/__sync/login", WINDOWS, {"login": jane, "password": "pw-wrong"})[0] != 200
+        assert _ask(base, "POST", "/__sync/logout", ANDROID, {}, token=token)[0] == 204
+        assert _ask(base, "GET", "/Jane%20Doe%20-%20A%20Quiet%20Harbour.epub", ANDROID)[0] == 200
+        time.sleep(0.5)
+    finally:
+        proc.terminate()
+        try:
+            log, _ = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            log, _ = proc.communicate()
+    lines = log.splitlines()
+    def one(*parts):
+        found = [ln for ln in lines if all(p in ln for p in parts)]
+        assert found, f"no line with {parts} in:\n{log}"
+        return found
+    one("Android · Chrome", "registration ok (200)", jane)
+    one("Android · Chrome", jane, "«Jane Doe - A Quiet Harbour»")
+    assert len(one("👤", "Windows · Chrome", jane)) == 1   # once, not on every sync
+    one("Windows · Chrome", "sign-in refused", jane)
+    one("👤", "Android · Chrome", "signed out")
+    assert any("«Jane Doe - A Quiet Harbour»" in ln and "Android" in ln and jane not in ln for ln in lines), log
+    assert "pw-" not in log and token not in log   # never a password or a device key
