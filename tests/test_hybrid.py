@@ -631,3 +631,108 @@ class TimeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DrawnTableTest(unittest.TestCase):
+    """A drawing Marker reads as a table (a chart with labels outside its grid, a form, the labels of
+    a diagram) is cut out of the page as a picture; real tables stay tables."""
+    ABOVE = "This paragraph above the drawing is long enough to be ordinary running text of the book page"
+    BELOW = "This paragraph below the drawing is long enough to be ordinary running text of the book too"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+
+    def pdf(self, drawing: bytes, texts) -> Path:
+        """One page: the two paragraphs, a drawing (PDF operators) and texts [(x, y, text)]."""
+        ops = [b"BT /F1 11 Tf 72 700 Td (%s) Tj ET" % self.ABOVE.encode(),
+               b"BT /F1 11 Tf 72 380 Td (%s) Tj ET" % self.BELOW.encode(), drawing]
+        ops += [b"BT /F1 11 Tf %d %d Td (%s) Tj ET" % (x, y, t.encode()) for x, y, t in texts]
+        data = b"\n".join(ops)
+        objs = [b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+                b"<< /Length %d >>\nstream\n" % len(data) + data + b"\nendstream",
+                b"<< /Type /Page /Parent 4 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >>"
+                b" /Contents 2 0 R >>",
+                b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>", b"<< /Type /Catalog /Pages 4 0 R >>"]
+        out, offs = b"%PDF-1.4\n", []
+        for i, o in enumerate(objs, 1):
+            offs.append(len(out))
+            out += b"%d 0 obj\n" % i + o + b"\nendobj\n"
+        x = len(out)
+        out += b"xref\n0 6\n0000000000 65535 f \n" + b"".join(b"%010d 00000 n \n" % o for o in offs)
+        out += b"trailer\n<< /Size 6 /Root 5 0 R >>\nstartxref\n%d\n%%%%EOF\n" % x
+        path = self.tmp / "book.pdf"
+        path.write_bytes(out)
+        return path
+
+    def run_it(self, pdf, blocks, fast=()):
+        from pdf2epub import read_text
+        page = read_text(pdf, self.tmp)[0]
+        return hy.drawn_tables(blocks, list(fast), page, pdf, self.tmp / "images")
+
+    @staticmethod
+    def size(png: str) -> tuple[int, int]:
+        data = Path(png).read_bytes()
+        return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+    def para(self, text):
+        from pdf2epub import Block
+        return Block("p", text, text, page=1)
+
+    def table(self, rows):
+        from pdf2epub import Block
+        return Block("table", rows=rows, text=" ".join(c for r in rows for c in r), page=1)
+
+    # a box 300 x 120 pt with four labels in it
+    BOX = b"0 0 0 RG 1 w 100 520 300 120 re S 250 520 m 250 640 l S 100 580 m 400 580 l S"
+    LABELS = [(120, 610, "Urgent important"), (270, 610, "Urgent minor"),
+              (120, 550, "Later important"), (270, 550, "Later minor")]
+
+    def test_table_read_two_ways_is_cut_out_with_its_frame(self):
+        pdf = self.pdf(self.BOX, self.LABELS)
+        acc = self.table([["Urgent important", "Urgent minor"], ["Later important", "Later minor"]])
+        fast = self.table([["", "Urgent important", "Urgent minor"], ["Later", "", ""], ["", "important", "Later minor"]])
+        above, below = self.para(self.ABOVE), self.para(self.BELOW)
+        out = self.run_it(pdf, [above, acc, below], [above, fast, below])
+        self.assertEqual([b.kind for b in out], ["p", "img", "p"])
+        w, h = self.size(out[1].src)
+        # the frame (300 x 120 pt) and a little air, at 200 dpi: not the paragraphs around it
+        self.assertTrue(300 * 200 / 72 <= w <= 320 * 200 / 72, w)
+        self.assertTrue(120 * 200 / 72 <= h <= 140 * 200 / 72, h)
+
+    def test_table_read_the_same_both_ways_stays(self):
+        pdf = self.pdf(self.BOX, self.LABELS)
+        rows = [["Urgent important", "Urgent minor"], ["Later important", "Later minor"]]
+        above, below = self.para(self.ABOVE), self.para(self.BELOW)
+        out = self.run_it(pdf, [above, self.table(rows), below], [above, self.table(rows), below])
+        self.assertEqual([b.kind for b in out], ["p", "table", "p"])
+
+    def test_form_to_fill_in_is_cut_out_with_its_title(self):
+        from pdf2epub import Block
+        pdf = self.pdf(self.BOX, [(150, 625, "Report sheet"), (120, 590, "Name"), (120, 530, "Behaviour")])
+        title = Block("h", "Report sheet", "Report sheet", 2, page=1)
+        form = self.table([["Name", "", "", ""], ["Behaviour", "", "", ""], ["", "", "", ""]])
+        out = self.run_it(pdf, [self.para(self.ABOVE), title, form, self.para(self.BELOW)])
+        self.assertEqual([b.kind for b in out], ["p", "img", "p"])
+
+    def test_labels_of_a_diagram_and_marker_picture_become_one_picture(self):
+        from pdf2epub import Block
+        # boxes with labels at the top, arrows down to an oval with a word no block has, a caption
+        drawing = self.BOX + b" 250 520 m 250 470 l S 150 430 200 40 re S"
+        pdf = self.pdf(drawing, self.LABELS[:2] + [(220, 445, "Outcome"), (100, 405, "Figure 1 The steps")])
+        labels = self.table([["Urgent", "Urgent"], ["important", "minor"]])
+        marker = Block("img", src="/marker/cut.jpg", page=1)
+        caption = self.para("Figure 1 The steps")
+        out = self.run_it(pdf, [self.para(self.ABOVE), labels, marker, caption, self.para(self.BELOW)])
+        self.assertEqual([b.kind for b in out], ["p", "img", "p", "p"])
+        self.assertNotEqual(out[1].src, "/marker/cut.jpg")
+        self.assertEqual(out[2].text, "Figure 1 The steps")              # the caption stays text
+        w, h = self.size(out[1].src)
+        self.assertTrue(h >= (640 - 430) * 200 / 72, h)                  # down to the oval
+
+    def test_contents_table_stays(self):
+        pdf = self.pdf(self.BOX, [(120, 610, "Chapter one 5"), (120, 550, "Chapter two 9")])
+        rows = [["Chapter one", "5"], ["Chapter two", "9"]]
+        out = self.run_it(pdf, [self.para(self.ABOVE), self.table(rows), self.para(self.BELOW)],
+                          [self.table([["Chapter one 5"], ["Chapter two 9"]])])
+        self.assertEqual([b.kind for b in out], ["p", "table", "p"])

@@ -21,7 +21,7 @@ import pdf2epub as base
 from pdf2epub import Block
 from pdf2epub_parts.engine import Engine, MarkerError, latex_to_mathml, run_marker, stop_llama_server
 from pdf2epub_parts.markup import (fix_drop_cap, join_pages, link_endnotes, merge_heading_runs, page_blocks,
-                                   place_footnotes, text_of,
+                                   place_footnotes, text_of, _toc_rows,
                                    running_head_offset, strip_running_heads, take_footnotes, tocs_from_blocks)
 from pdf2epub_parts.merge import merge_page, needs_retry
 
@@ -133,12 +133,169 @@ RIGHT_INDENT = 0.2     # a paragraph or heading whose lines end at the column's 
                        # starting this far in, is set right
 
 
+def _words(text: str) -> list[str]:
+    return [w.lower() for w in re.findall(r"\w+", text)]
+
+
+def _owners(lines: list, blocks: list[Block]) -> dict[int, list]:
+    """{index of a block: the text-layer lines that are its text}."""
+    sets = [set(_words(b.text)) for b in blocks]
+    letters = [base._compact(b.text) for b in blocks]
+    mine: dict[int, list] = {}
+    for line in lines:
+        lw, lc = _words(line.text), base._compact(line.text)
+        if not lw or not blocks:
+            continue
+        # its words in the block, or its letters (the text layer may glue words: "HalaNelson")
+        share = [1.0 if len(lc) >= 4 and lc in letters[i] else sum(1 for w in lw if w in s) / len(lw)
+                 for i, s in enumerate(sets)]
+        best = max(range(len(blocks)), key=lambda i: share[i])
+        if share[best] >= 0.6:
+            mine.setdefault(best, []).append(line)
+    return mine
+
+
+DRAWN_EMPTY = 0.5      # a table with more empty cells than this is a form to fill in, drawn
+DRAWN_REACH = 40       # pt: how far above and below its text a drawn table's frame is looked for
+SHORT_TEXT = 15        # words: a paragraph this short next to a drawn table may be part of the drawing
+CROP_DPI = 200
+CAPTION = re.compile(r"(рис\.?|рисунок|схема|fig\.?|figure)\s*\d", re.I)   # a figure's caption, not a table's
+
+
+def _shape(t: Block) -> tuple[int, int]:
+    return len(t.rows), max(len(r) for r in t.rows)
+
+
+def _dark_rows(pdf: Path, number: int, page, tmp: Path) -> tuple[float, list[tuple[int, int] | None]] | None:
+    """(pixels per pt, for each pixel row of the page: (first, last) dark column or None)."""
+    out = tmp / f"gray{number}"
+    res = base.run(["pdftoppm", "-gray", "-r", "144", "-f", str(number), "-l", str(number), "-singlefile",
+                    str(pdf), str(out)])
+    path = out.with_suffix(".pgm")
+    if res.returncode != 0 or not path.is_file():
+        return None
+    data = path.read_bytes()
+    m = re.match(rb"P5\s+(\d+)\s+(\d+)\s+(\d+)\s", data)
+    if not m:
+        return None
+    w, h = int(m.group(1)), int(m.group(2))
+    pixels = data[m.end():]
+    rows = []
+    for y in range(h):
+        row = pixels[y * w:(y + 1) * w]
+        dark = [x for x in range(0, w) if row[x] < 160]
+        rows.append((dark[0], dark[-1]) if dark else None)
+    return w / page.width, rows
+
+
+def drawn_tables(blocks: list[Block], fast_blocks: list[Block], page, pdf: Path, out_dir: Path,
+                 log: Callable[[str], None] = lambda s: None) -> list[Block]:
+    """Tables that are drawings (a chart with labels outside its grid, a form to fill in) as pictures.
+
+    Marker makes a table of them, and makes it differently each time: fast and accurate disagree on
+    its rows and columns. Such a table, or one mostly made of empty cells, is cut out of the page
+    with its frame; the short pieces of text inside the frame (its title) go with it."""
+    tables = [b for b in blocks if b.kind == "table"]
+    lines = [l for l in page.lines if l.kind in ("text", "heading") and _words(l.text)]
+    if not tables or not lines:
+        return blocks
+    fast_tables = [b for b in fast_blocks if b.kind == "table"]
+
+    def near(t: Block, step: int) -> tuple[list[Block], Block | None]:
+        """The pictures next to the table on that side, and the first text block after them."""
+        at, pics = next(i for i, b in enumerate(blocks) if b is t) + step, []
+        while 0 <= at < len(blocks) and blocks[at].kind == "img":
+            pics.append(blocks[at])
+            at += step
+        return pics, blocks[at] if 0 <= at < len(blocks) else None
+
+    drawn, figure = [], {}
+    for i, t in enumerate(tables):
+        if _toc_rows(t) is not None:
+            continue                            # printed contents: read as contents
+        cells = [c for r in t.rows for c in r]
+        empty = sum(1 for c in cells if not text_of(c).strip()) / len(cells)
+        disputed = len(fast_tables) == len(tables) and _shape(fast_tables[i]) != _shape(t)
+        # the labels of a drawing Marker read as a table, the rest of it as a picture beside it,
+        # or with a figure's caption under it
+        before, _ = near(t, -1)
+        after, caption = near(t, 1)
+        captioned = caption is not None and caption.kind == "p" and CAPTION.match(caption.text.strip())
+        if before or after or captioned:
+            figure[id(t)] = (before, after)
+        if disputed or id(t) in figure or (len(cells) >= 6 and empty > DRAWN_EMPTY):
+            drawn.append(t)
+    if not drawn:
+        return blocks
+    texts = [b for b in blocks if b.kind in ("p", "h", "list", "table")]
+    owners = _owners(lines, texts)
+    owner_of = {id(l): texts[i] for i, own in owners.items() for l in own}
+    body_top = min(l.top for own in owners.values() for l in own)
+    body_bottom = max(l.bottom for own in owners.values() for l in own)
+
+    def swallowable(b: Block | None) -> bool:
+        return b is not None and (b.kind == "h" or b.kind in ("p", "list") and len(_words(b.text)) < SHORT_TEXT
+                                  and not CAPTION.match(b.text.strip()))
+
+    out = list(blocks)
+    with tempfile.TemporaryDirectory(prefix="pdf2epub-") as tmp_name:
+        dark = None
+        for k, t in enumerate(drawn):
+            core = owners.get(next(i for i, b in enumerate(texts) if b is t), [])
+            if not core:
+                continue                        # not found in the text layer (a scan)
+            top, bottom = min(l.top for l in core), max(l.bottom for l in core)
+            # the drawing reaches to the nearest text that is not part of it
+            before, after = figure.get(id(t), ([], []))
+
+            def stops(l) -> bool:
+                if any(l is c for c in core):
+                    return False
+                o = owner_of.get(id(l))
+                if o is t or swallowable(o):
+                    return False
+                # the words in a drawing's picture are read by no block (running heads and page
+                # numbers neither, but they are outside the text)
+                return not (o is None and id(t) in figure and body_top <= l.top and l.bottom <= body_bottom)
+
+            others = [l for l in lines if stops(l)]
+            reach_up = top if before else DRAWN_REACH
+            reach_down = page.height if id(t) in figure and not before else DRAWN_REACH
+            upper = max([l.bottom for l in others if l.bottom <= top + 2] + [top - reach_up, 0])
+            lower = min([l.top for l in others if l.top >= bottom - 2] + [bottom + reach_down, page.height])
+            dark = dark or _dark_rows(pdf, page.number, page, Path(tmp_name))
+            if dark is None:
+                return blocks
+            scale, rows = dark
+            band = [(y, r) for y, r in enumerate(rows) if r and upper * scale + 1 < y < lower * scale - 1]
+            if not band:
+                continue
+            y0, y1 = band[0][0] / scale - 3, band[-1][0] / scale + 3
+            x0, x1 = min(r[0] for _, r in band) / scale - 3, max(r[1] for _, r in band) / scale + 3
+            y0, y1, x0, x1 = max(y0, upper), min(y1, lower), max(x0, 0), min(x1, page.width)
+            # cut out at CROP_DPI (the text layer is in pt: 72 to the inch)
+            z = CROP_DPI / 72
+            target = out_dir / f"page-{page.number:04d}-table{k + 1}"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            res = base.run(["pdftoppm", "-png", "-r", str(CROP_DPI), "-f", str(page.number), "-l", str(page.number),
+                            "-x", str(int(x0 * z)), "-y", str(int(y0 * z)), "-W", str(int((x1 - x0) * z)),
+                            "-H", str(int((y1 - y0) * z)), "-singlefile", str(pdf), str(target)])
+            picture = target.with_suffix(".png")
+            if res.returncode != 0 or not picture.is_file():
+                continue
+            inside = {id(b) for i, b in enumerate(texts) if b is not t and swallowable(b) and owners.get(i)
+                      and all(l.top >= y0 - 1 and l.bottom <= y1 + 1 for l in owners[i])}
+            inside |= {id(b) for b in before + after}       # Marker's own cut of the drawing
+            out = [Block("img", src=str(picture), page=t.page) if b is t else b
+                   for b in out if id(b) not in inside]
+            log(f"page {page.number}: a drawn table kept as a picture")
+    return out
+
+
 def align_right(blocks: list[Block], pages: list, body: float) -> None:
     """Paragraphs the book prints at the right (a signature under a quote, a date under a letter):
     Marker gives them as ordinary paragraphs, the PDF text layer still knows where their lines are."""
-    def words(text: str) -> list[str]:
-        return [w.lower() for w in re.findall(r"\w+", text)]
-
+    words = _words
     by_page = {p.number: p for p in pages}
     for number, page in by_page.items():
         lines = [l for l in page.lines if l.kind == "text" and words(l.text)]
@@ -149,18 +306,8 @@ def align_right(blocks: list[Block], pages: list, body: float) -> None:
         width = right - left
         if width <= 0:
             continue
-        sets = [set(words(b.text)) for b in paras]
         letters = [base._compact(b.text) for b in paras]
-        mine: dict[int, list] = {}
-        for line in lines:
-            lw, lc = words(line.text), base._compact(line.text)
-            # its words in the paragraph, or its letters (the text layer may glue words: "HalaNelson")
-            share = [1.0 if len(lc) >= 4 and lc in letters[i] else sum(1 for w in lw if w in s) / len(lw)
-                     for i, s in enumerate(sets)]
-            best = max(range(len(paras)), key=lambda i: share[i])
-            if share[best] >= 0.6:
-                mine.setdefault(best, []).append(line)
-        for i, own in mine.items():
+        for i, own in _owners(lines, paras).items():
             if sum(len(base._compact(l.text)) for l in own) < 0.6 * len(letters[i]):
                 continue                        # most of the paragraph is not found: don't guess
             # every line ends at the right edge and one starts well in (a justified paragraph's lines
@@ -583,6 +730,7 @@ def _assemble(pdf, out, title, author, lang, numbers, pages, pictures, body, off
         big = any(w * h >= 0.5 * pages[0].width * pages[0].height for w, h in pictures.get(1, []))
         skip_first = cover is not None and first_page_is_cover(html_of(1), big)
         blocks: list[Block] = []
+        by_number = {p.number: p for p in pages}
         for n in numbers:
             if skip_first and n == 1:
                 if "1" in report["pages"] and report["pages"]["1"].get("reason") != "cover":
@@ -610,7 +758,13 @@ def _assemble(pdf, out, title, author, lang, numbers, pages, pictures, body, off
                     _write(merged_file(n), page_html)
                     _write(report_path, json.dumps(report, ensure_ascii=False, indent=1))
                     log(f"page {n}: title page kept as a picture")
-            blocks += page_blocks(strip_running_heads(page_html, n, offset), n)
+            here = page_blocks(strip_running_heads(page_html, n, offset), n)
+            if any(b.kind == "table" for b in here) and n in by_number:
+                fast = work / "fast" / f"page-{n:04d}.html"
+                fast_here = page_blocks(strip_running_heads(fast.read_text(encoding="utf-8"), n, offset), n) \
+                    if fast.is_file() else []
+                here = drawn_tables(here, fast_here, by_number[n], pdf, work / "images", log)
+            blocks += here
         align_right(blocks, pages, body)
         blocks, notes = take_footnotes(blocks)
         blocks = join_pages(blocks)

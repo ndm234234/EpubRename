@@ -650,6 +650,13 @@ rm -rf ~/.local/share/pdf2epub ~/.cache/huggingface/hub/models--datalab-to--*
   which EPUB readers and browsers draw as formulas. The converter (`latex2mathml`) is
   installed with the engine, also into an engine installed earlier; a formula it can't
   convert stays as LaTeX. Labels of a diagram kept as a picture don't come back as text.
+- **Drawings that look like tables** (recognition mode): a chart with its labels outside the
+  grid, a form to fill in, the boxes of a diagram. Marker makes a table of them, and a
+  different one in each pass. Such a table is cut out of the page as a picture, with its
+  frame, its title and the rest of the drawing, so it looks as it does in the book. A table
+  counts as a drawing when the two passes read it differently, when most of its cells are
+  empty, or when a picture or a figure caption ("Fig. 3", "Рис. 3") is next to it. Figure
+  captions stay text, and printed contents stay contents.
 - **Table of contents** is taken from the book's own printed contents, when it has one:
   the entries, their nesting (from the indent) and page numbers. Each entry is found in the
   text (printed page numbers are matched to PDF pages by the numbers in headers/footers),
