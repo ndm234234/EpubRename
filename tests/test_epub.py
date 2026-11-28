@@ -110,6 +110,29 @@ class MainTest(unittest.TestCase):
             with zipfile.ZipFile(out_dir / "book.epub") as zf:
                 self.assertIn('content="pdf2epub quick"', zf.read("OEBPS/content.opf").decode())
 
+    def test_first_pages_go_to_preview(self):
+        from test_hybrid import make_pdf
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf = make_pdf(Path(tmp) / "book.pdf", y=400)
+            out_dir = Path(tmp) / "In"
+            out_dir.mkdir()
+            (out_dir / "book.epub").write_bytes(b"the whole book, done before")
+            stdout = io.StringIO()
+            for _ in range(2):          # a trial is always made again
+                with mock.patch("pdf2epub_parts.engine.ensure_engine", return_value=None), \
+                        mock.patch.object(sys, "argv", ["pdf2epub.py", str(pdf), "--out", str(out_dir), "--yes",
+                                                        "--pages", "2"]), \
+                        contextlib.redirect_stdout(stdout):
+                    code = pdf2epub.main()
+                self.assertEqual(code, 0, stdout.getvalue())
+            self.assertEqual((out_dir / "book.epub").read_bytes(), b"the whole book, done before")
+            trial = out_dir / "Preview" / "book.epub"
+            check_epub(trial)
+            with zipfile.ZipFile(trial) as zf:
+                text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+            self.assertIn("Page 2 text", text)
+            self.assertNotIn("Page 3 text", text)
+
     def test_ctrl_c_explains_resume(self):
         from test_hybrid import make_pdf
         with tempfile.TemporaryDirectory() as tmp:

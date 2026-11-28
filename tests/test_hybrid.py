@@ -104,9 +104,9 @@ class HybridTest(unittest.TestCase):
         self.stops = []
         self.lines = []
 
-    def convert(self, fake, keep_work=False, pdf=None, out=None, status=None):
+    def convert(self, fake, keep_work=False, pdf=None, out=None, status=None, **kw):
         return hy.convert_hybrid(pdf or self.pdf, out or self.out, "Book", "Author", "ru", self.engine, keep_work,
-                                 self.lines.append, run=fake, stop=self.stops.append, status=status)
+                                 self.lines.append, run=fake, stop=self.stops.append, status=status, **kw)
 
     def work(self, pdf=None):
         return self.out.parent / ".pdf2epub-work" / (pdf or self.pdf).stem
@@ -263,6 +263,29 @@ class HybridTest(unittest.TestCase):
 
     def test_work_folder_removed(self):
         self.convert(FakeEngine())
+        self.assertFalse(self.work().exists())
+
+    def test_trial_of_the_first_pages(self):
+        trial = self.out.parent / "Preview" / "book.epub"
+        trial.parent.mkdir()
+        first = FakeEngine()
+        self.convert(first, out=trial, first_pages=2, work_root=self.out.parent)
+        self.assertEqual(first.accurate_pages(), [0, 1])
+        self.assertEqual(sorted(p for m, ps in first.calls if m == "fast" for p in ps), [0, 1])
+        check_epub(trial)
+        with zipfile.ZipFile(trial) as zf:
+            text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+        self.assertIn(SENTENCES[1], text)
+        self.assertNotIn(SENTENCES[2], text)
+        self.assertTrue(self.work().exists(), "the trial's pages are kept for the whole book")
+        self.assertFalse((self.work() / "done").exists())
+        # the whole book then reads only the pages the trial did not
+        whole = FakeEngine()
+        self.convert(whole)
+        self.assertEqual(whole.accurate_pages(), [2])
+        with zipfile.ZipFile(self.out) as zf:
+            text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+        self.assertIn(SENTENCES[2], text)
         self.assertFalse(self.work().exists())
 
     def test_keep_work(self):

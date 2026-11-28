@@ -549,8 +549,23 @@ python3 pdf2epub.py --force         # convert again books that are already in In
 python3 pdf2epub.py --yes           # never ask questions
 python3 pdf2epub.py --lang uk       # language of the book (normally guessed from the text)
 python3 pdf2epub.py --quick         # only the PDF text layer: seconds instead of hours
+python3 pdf2epub.py --pages 10      # a trial: only the first 10 pages, into In/Preview/
 python3 pdf2epub.py --keep-work     # keep In/.pdf2epub-work (recognised pages, report.json)
 ```
+
+**A trial before the long run.** A big book takes hours, so first look at how it comes out:
+
+```bash
+python3 pdf2epub.py "Pdf/Mila Fenwick - Quiet Rivers.pdf" --pages 10   # ~10 min
+# open In/Preview/Mila Fenwick - Quiet Rivers.epub; if it looks right:
+python3 pdf2epub.py "Pdf/Mila Fenwick - Quiet Rivers.pdf"              # the whole book
+```
+
+The trial goes to `In/Preview/` and is made again every time, so it never blocks the
+whole book and `epub_rename.py` does not sort it into the library (it reads only `In/`
+itself). The pages the trial recognised stay in `In/.pdf2epub-work/`: the whole book starts
+from page 11. A printed table of contents that points past the trial pages is not linked
+in the trial; its headings are used instead.
 
 ### Recognition (the default)
 

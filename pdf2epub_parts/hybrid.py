@@ -150,9 +150,14 @@ def _escape(text: str) -> str:
 
 def convert_hybrid(pdf: Path, out: Path, title: str, author: str, lang: str | None, engine: Engine,
                    keep_work: bool, progress: Callable[[str], None],
-                   run=run_marker, stop=stop_llama_server, status: Callable[[str], None] | None = None) -> str:
-    """progress: lines that stay; status: the live line under them (None: no live line)."""
-    work = out.parent / ".pdf2epub-work" / base.safe_name(pdf.stem)
+                   run=run_marker, stop=stop_llama_server, status: Callable[[str], None] | None = None,
+                   first_pages: int | None = None, work_root: Path | None = None) -> str:
+    """progress: lines that stay; status: the live line under them (None: no live line).
+
+    first_pages: a trial of only the first pages of the book; the pages it reads stay in the
+    work folder (under work_root, default: next to out), so the whole book goes on from them.
+    """
+    work = (work_root or out.parent) / ".pdf2epub-work" / base.safe_name(pdf.stem)
     for sub in ("fast", "acc", "merged", "images"):
         (work / sub).mkdir(parents=True, exist_ok=True)
     log_file = (work / "log.txt").open("a", encoding="utf-8")
@@ -162,18 +167,20 @@ def convert_hybrid(pdf: Path, out: Path, title: str, author: str, lang: str | No
         log_file.flush()
 
     try:
-        return _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, stop, work, log, status)
+        return _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, stop, work, log, status,
+                        first_pages)
     finally:
         log_file.close()
-        if not keep_work and out.exists() and (work / "done").exists():
+        if not keep_work and not first_pages and out.exists() and (work / "done").exists():
             shutil.rmtree(work, ignore_errors=True)
             parent = work.parent
             if parent.exists() and not any(parent.iterdir()):
                 parent.rmdir()
 
 
-def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, stop, work, log, status) -> str:
-    log(f"start {pdf}")
+def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, stop, work, log, status,
+             first_pages=None) -> str:
+    log(f"start {pdf}" + (f" (first {first_pages} pages)" if first_pages else ""))
     # the PDF's own text layer: a witness, printed page numbers, and "is this page a scan?"
     with tempfile.TemporaryDirectory(prefix="pdf2epub-") as tmp_name:
         tmp = Path(tmp_name)
@@ -187,6 +194,9 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
     base.drop_headers_footers(pages, body)
     layer = {p.number: " ".join(l.text for l in p.lines) for p in pages}
     pictures = base.read_images(pdf)
+    total = len(pages)
+    if first_pages:
+        del pages[first_pages:]          # headers and footers were found on the whole book
 
     def scanned(p) -> bool:
         return any(w >= base.FULL_PAGE * p.width and h >= base.FULL_PAGE * p.height for w, h in pictures.get(p.number, []))
@@ -198,7 +208,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
     report_path = work / "report.json"
 
     # the cache belongs to one PDF: another file under the same name starts over
-    stamp = {"sha256": _sha256(pdf), "pages": len(numbers)}
+    stamp = {"sha256": _sha256(pdf), "pages": total}
     stamp_path = work / "source.json"
     if stamp_path.exists() and json.loads(stamp_path.read_text()) != stamp:
         log("another PDF under the same name: starting over")
@@ -377,7 +387,8 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
             raise RuntimeError("no text or pictures found")
         base.write_epub(out, title, author, lang, chapters, cover, img_names, tocs, main,
                         generator="pdf2epub hybrid")
-    (work / "done").write_text("")
+    if not first_pages:
+        (work / "done").write_text("")
     log(f"done {out}")
 
     sources = base.Counter(p["source"] for p in report["pages"].values())
