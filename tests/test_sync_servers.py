@@ -161,3 +161,58 @@ def test_network_window_names_who_is_signed_in(tmp_path):
     one("👤", "Android · Chrome", "signed out")
     assert any("«Jane Doe - A Quiet Harbour»" in ln and "Android" in ln and jane not in ln for ln in lines), log
     assert "pw-" not in log and token not in log   # never a password or a device key
+
+
+def _ask_as(base, method, path, ua, host, body=None, cookie=None, accept=None):
+    req = urllib.request.Request(base + path, method=method, headers={"User-Agent": ua, "Host": host},
+                                 data=None if body is None else json.dumps(body).encode())
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    if cookie:
+        req.add_header("Cookie", f"libsess={cookie}")
+    if accept:
+        req.add_header("Accept", accept)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def test_network_window_lets_in_only_the_signed_in(tmp_path):
+    """From the router (a foreign host name): only the sign-in page until a sign-in; logged once."""
+    lib = _library(tmp_path)
+    (lib / "Jane Doe - A Quiet Harbour.epub").write_bytes(b"PK-book")
+    env = dict(os.environ, LIBRARY_NO_BROWSER="1")
+    proc = subprocess.Popen(["sh", str(lib / "Open Library (network).sh")], cwd=lib, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    host, book = "library.example.com", "/Jane%20Doe%20-%20A%20Quiet%20Harbour.epub"
+    try:
+        base = f"http://127.0.0.1:{_find(lib, range(48865, 48885), proc)}"
+        code = (lib / ".sync" / "code.txt").read_text(encoding="utf-8").strip()
+        s, out = _ask_as(base, "GET", "/", ANDROID, host, accept="text/html")
+        assert s == 401 and b'id="signin"' in out and b"<html>hi</html>" not in out
+        for path in ("/index.html", book, "/.index/library.json", "/__alive", "/__library_root"):
+            assert _ask_as(base, "GET", path, ANDROID, host)[0] in (401, 404), path
+        s, out = _ask_as(base, "POST", "/__sync/register", ANDROID, host,
+                         {"login": "jane.doe@example.com", "password": "pw-quiet-1", "code": code})
+        assert s == 200
+        token = json.loads(out)["token"]
+        s, out = _ask_as(base, "GET", book, ANDROID, host, cookie=token)
+        assert s == 200 and out == b"PK-book"
+        # this computer itself: open, as before
+        assert _ask_as(base, "GET", "/index.html", WINDOWS, f"127.0.0.1:{base.rsplit(':', 1)[1]}")[0] == 200
+        time.sleep(0.3)
+    finally:
+        proc.terminate()
+        try:
+            log, _ = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            log, _ = proc.communicate()
+    closed = [ln for ln in log.splitlines() if "not signed in" in ln]
+    assert len(closed) == 1 and "⛔" in closed[0] and "Android · Chrome" in closed[0], log
+    before = log.split("not signed in")[0]
+    assert "connected" not in before and "📖" not in before, log   # a closed request is no visit
+    assert any("📖" in ln and "jane.doe@example.com" in ln for ln in log.splitlines()), log
+    assert token not in log and "pw-" not in log

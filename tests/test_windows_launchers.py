@@ -176,3 +176,30 @@ def test_ps1_reads_the_stored_version_without_parsing_the_document(tmp_path):
     for other in ['{"doc": {}, "version": 3}', '{"version":3,"doc":{}}', '{"version": 03, "doc": {}}',
                   '{"version": 3, "doc": null}', stored[:len(stored) // 2], " " + stored]:
         assert not (head.match(other) and tail.search(other)), other
+
+
+def test_ps1_has_the_sign_in_cookie_as_python():
+    text = PS1.read_text(encoding="utf-8")
+    sys.path.insert(0, str(LAUNCHERS))
+    import library_sync
+    assert f"$global:SyncCookie = '{library_sync.COOKIE}'" in text
+    assert f"$global:SyncCookieAttrs = '{library_sync.COOKIE_ATTRS}'" in text
+    assert f"$global:SyncCookieAge = {library_sync.COOKIE_AGE}" in text
+    assert "'/__sync/session'" in text and "Max-Age=0" in text
+    for name in ("Test-SyncSignedIn", "Get-SyncCookieToken", "Invoke-SyncSession"):
+        assert re.search(rf"(?m)^function {name}\b", text), name
+    # sign-out forgets the remembered sign-ins at once
+    logout = text[text.index("function Invoke-SyncLogout"):]
+    assert "$store.Signed.Clear()" in logout[:logout.index("\n}\n")]
+
+
+def test_network_bat_shuts_everything_before_a_sign_in():
+    code = _powershell(LAUNCHERS / "Open Library (network).bat")
+    serve = code[code.index("function Serve("):]
+    gate = serve.index("(Gate $rq ")
+    for later in ("$isSync = ", "Seen $ip $ua $rel", "'__library_root'", "'/__bye'"):
+        assert gate < serve.index(later), later
+    assert "signin.html" in code and "not signed in" in code
+    assert "Set-Cookie: $($answer.Cookie)" in code
+    local = code[code.index("function IsLocal("):]
+    assert "'localhost', '127.0.0.1', '[::1]'" in local[:local.index("\n}\n")]

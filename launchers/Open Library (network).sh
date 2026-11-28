@@ -23,7 +23,8 @@ last_use = time.time()
 # The catalog and the reader send a small "still here" every minute and "bye" when the page
 # closes; a device that sends nothing for SILENT seconds is shown as gone.
 SILENT, BYE_GRACE = 180, 10   # going from the catalog to a book closes one page and opens another
-devices, refused, lock = {}, set(), threading.Lock()
+devices, refused, shut, lock = {}, set(), set(), threading.Lock()
+SIGNIN_PAGE = os.path.join(ROOT, "signin.html")
 
 def say(line):
     print(f"  {time.strftime('%Y-%m-%d %H:%M:%S')}  {line}", flush=True)
@@ -134,6 +135,28 @@ def is_home(addr):
     return ip.is_loopback or ip.is_link_local or ip in ipaddress.ip_network("fc00::/7")
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    def parse_request(self):
+        """The sign-in gate before any method: from anywhere but this computer, nothing without a
+        sign-in but the sign-in page (library_sync.gate). Logged once per device until let in."""
+        if not super().parse_request():
+            return False
+        ip, ua = plain_ip(self.client_address[0]), self.headers.get("User-Agent")
+        key = (ip, device_kind(ua))
+        if library_sync.gate(self, store, SIGNIN_PAGE):
+            with lock:
+                shut.discard(key)
+            return True
+        with lock:
+            first = key not in shut
+            shut.add(key)
+        if first:
+            say(f"⛔ {ip} · {key[1]} — not signed in")
+        self.command = "_CLOSED"   # answered already: no do_ method runs
+        return True
+
+    def do__CLOSED(self):
+        pass
+
     def do_GET(self):
         path = urllib.parse.unquote(self.path.split("?")[0])
         if path != "/__library_root":
