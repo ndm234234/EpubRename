@@ -505,6 +505,32 @@ class RightAlignedTest(unittest.TestCase):
         hy.align_right([Block("page", level=16, page=16), quote, sign, after], [page], 11.0)
         self.assertEqual([quote.align, sign.align, after.align], ["", "right", ""])
 
+    def test_title_page_set_at_the_right(self):
+        """A title page: the heading, a subtitle whose first line is the widest, the author, all
+        ending at the right edge."""
+        from pdf2epub import Block
+        page = self.page([(181, 398, "Тихие реки"),
+                          (96, 397, "Как вода находит дорогу через камни и"),
+                          (237, 396, "почему она всегда права"),
+                          (311, 394, "МилаФенвик")])          # the text layer glued the words
+        page.number = 16
+        head = Block("h", "<b>Тихие реки</b>", "Тихие реки", 1, page=16)
+        sub = Block("p", "<i>...</i>", "Как вода находит дорогу через камни и почему она всегда права", page=16)
+        author = Block("p", "<i>Мила Фенвик</i>", "Мила Фенвик", page=16)
+        hy.align_right([head, sub, author], [page], 11.0)
+        self.assertEqual([head.align, sub.align, author.align], ["right", "right", "right"])
+
+    def test_justified_paragraph_is_not_right(self):
+        from pdf2epub import Block
+        page = self.page([(55, 440, "Рынки технологий подобны реке, где отдельные участки движутся"),
+                          (40, 440, "быстрее других. Хала сделала математику увлекательной для всех,"),
+                          (40, 440, "и это видно на каждой странице этой большой и полезной книги.")])
+        b = Block("p", "...", "Рынки технологий подобны реке, где отдельные участки движутся быстрее других. "
+                  "Хала сделала математику увлекательной для всех, и это видно на каждой странице этой "
+                  "большой и полезной книги.", page=16)
+        hy.align_right([b], [page], 11.0)
+        self.assertEqual(b.align, "")
+
     def test_no_text_layer_changes_nothing(self):
         from pdf2epub import Block, Page
         b = Block("p", "Текст", "Текст", page=1)

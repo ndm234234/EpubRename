@@ -116,7 +116,8 @@ def place_tocs(blocks: list[Block], layer_tocs: list) -> list:
     return layer_tocs
 
 
-RIGHT_INDENT = 0.2     # a line that starts this far into the column and ends at its right edge is set right
+RIGHT_INDENT = 0.2     # a paragraph or heading whose lines end at the column's right edge, one of them
+                       # starting this far in, is set right
 
 
 def align_right(blocks: list[Block], pages: list, body: float) -> None:
@@ -128,7 +129,7 @@ def align_right(blocks: list[Block], pages: list, body: float) -> None:
     by_page = {p.number: p for p in pages}
     for number, page in by_page.items():
         lines = [l for l in page.lines if l.kind == "text" and words(l.text)]
-        paras = [b for b in blocks if b.kind == "p" and b.page == number]
+        paras = [b for b in blocks if b.kind in ("p", "h") and b.page == number]
         if not lines or not paras:
             continue
         left, right = base.column_edges(page, (min(l.left for l in lines), max(l.right for l in lines)))
@@ -136,18 +137,22 @@ def align_right(blocks: list[Block], pages: list, body: float) -> None:
         if width <= 0:
             continue
         sets = [set(words(b.text)) for b in paras]
+        letters = [base._compact(b.text) for b in paras]
         mine: dict[int, list] = {}
         for line in lines:
-            lw = words(line.text)
-            share = [sum(1 for w in lw if w in s) / len(lw) for s in sets]
+            lw, lc = words(line.text), base._compact(line.text)
+            # its words in the paragraph, or its letters (the text layer may glue words: "HalaNelson")
+            share = [1.0 if len(lc) >= 4 and lc in letters[i] else sum(1 for w in lw if w in s) / len(lw)
+                     for i, s in enumerate(sets)]
             best = max(range(len(paras)), key=lambda i: share[i])
             if share[best] >= 0.6:
                 mine.setdefault(best, []).append(line)
         for i, own in mine.items():
-            covered = sum(len(words(l.text)) for l in own)
-            if covered < 0.6 * len(words(paras[i].text)):
+            if sum(len(base._compact(l.text)) for l in own) < 0.6 * len(letters[i]):
                 continue                        # most of the paragraph is not found: don't guess
-            if all(abs(l.right - right) <= body and l.left - left >= RIGHT_INDENT * width for l in own):
+            # every line ends at the right edge and one starts well in (a justified paragraph's lines
+            # start at the left edge; a centred one's short lines don't reach the right edge)
+            if all(abs(l.right - right) <= body for l in own) and any(l.left - left >= RIGHT_INDENT * width for l in own):
                 paras[i].align = "right"
 
 

@@ -645,7 +645,7 @@ class Block:
     anchor: str = ""    # id, when the contents link here
     items: list = field(default_factory=list)   # list: html of each item
     rows: list = field(default_factory=list)    # table: html of each cell, row by row
-    align: str = ""     # p: "right" when the book prints it at the right (a signature under a quote)
+    align: str = ""     # p, h: "right" when the book prints it at the right (a signature, a title page)
 
 
 def runs_html(runs: list) -> str:
@@ -867,6 +867,7 @@ body { margin: 0 4%; line-height: 1.45; }
 p { margin: 0; text-indent: 1.3em; text-align: justify;
     -webkit-hyphens: auto; hyphens: auto; adobe-hyphenate: auto; }
 p.right { text-align: right; text-indent: 0; }
+h1.right, h2.right, h3.right { text-align: right; }
 math[display="block"] { display: block; margin: 0.6em auto; }
 span.tex { font-family: monospace; font-size: 0.9em; }
 h1, h2, h3 { text-align: center; line-height: 1.25; margin: 1.6em 0 0.9em; page-break-after: avoid; }
@@ -1011,7 +1012,8 @@ def write_epub(out: Path, title: str, author: str, lang: str, chapters: list[Cha
                 parts.append(f'<aside epub:type="footnote" class="note"{id_attr}><p>{b.html}</p></aside>')
             elif b.kind == "h":
                 tag = "h1" if b.level == 1 else "h2" if b.level == 2 else "h3"
-                parts.append(f"<{tag}{id_attr}>{b.html}</{tag}>")
+                cls = f' class="{b.align}"' if b.align else ""
+                parts.append(f"<{tag}{id_attr}{cls}>{b.html}</{tag}>")
                 toc.append((b.level, b.text, f"{ch.file}#{b.anchor}"))
             elif b.kind == "img":
                 cls = "page" if b.level == 1 else "figure"

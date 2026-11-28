@@ -54,6 +54,8 @@ class EpubTest(unittest.TestCase):
                           Block("p", "— <i>Мила Фенвик</i>", "— Мила Фенвик", align="right")])
         self.assertIn('<p class="right">— <i>Мила Фенвик</i></p>', pages)
         self.assertIn("<p>Текст отзыва.</p>", pages)
+        pages, _ = write([Block("h", "Тихие реки", "Тихие реки", 1, align="right"), Block("p", "Текст.", "Текст.")])
+        self.assertRegex(pages, r'<h1 id="[^"]+" class="right">Тихие реки</h1>')
 
     def test_generator_meta(self):
         _, opf = write([Block("p", "Текст", "Текст", page=1)])
