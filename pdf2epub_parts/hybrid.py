@@ -63,16 +63,14 @@ def _words(text: str) -> list[str]:
     return [w.lower() for w in re.findall(r"\w+", text)]
 
 
-def _formula_titles(blocks: list[Block], pages: set[int]) -> dict[int, list[str]]:
-    """Contents lines with formulas as Marker read them: {page number: [title html]}."""
+def _marker_titles(blocks: list[Block], pages: set[int]) -> dict[int, list[str]]:
+    """Contents lines as Marker read them: {page number: [title html]}."""
     found: dict[int, list[str]] = {}
     for b in blocks:
         if b.page not in pages:
             continue
         lines = [" ".join(r) for r in b.rows] if b.kind == "table" else [b.html] if b.kind in ("h", "p") else []
         for line in lines:
-            if "<math" not in line:
-                continue
             m = re.fullmatch(r"(.*?)[\s.…·_]*(?:<b>)?\s*(\d{1,4})\s*(?:</b>)?\s*", line)
             if m:
                 title = re.sub(r"</?b>", "", m.group(1)).strip()
@@ -81,14 +79,20 @@ def _formula_titles(blocks: list[Block], pages: set[int]) -> dict[int, list[str]
     return found
 
 
-def _use_formula_titles(toc, found: dict[int, list[str]]) -> None:
-    """The PDF text layer has old OCR in place of formulas: such titles are taken from Marker."""
+def _use_marker_titles(toc, found: dict[int, list[str]]) -> None:
+    """Where the PDF text layer fails: a formula (old OCR in its place) or a letter it lost ("\ufffd"),
+    the title is taken from Marker's reading."""
     for e in toc.entries:
         mine = set(_words(e.title))
         for title in found.get(e.number, []):
+            if "<math" not in title and "\ufffd" not in e.title:
+                continue
             words = _words(re.sub(r"<math[^>]*>.*?</math>", " ", title))
             if words and sum(1 for w in words if w in mine) >= 0.7 * len(words):
-                e.html = title
+                if "<math" in title:
+                    e.html = title
+                else:
+                    e.title = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", title))).strip()
                 break
 
 
@@ -98,7 +102,7 @@ def place_tocs(blocks: list[Block], layer_tocs: list) -> list:
     if not layer_tocs:
         return tocs_from_blocks(blocks)
     for toc in layer_tocs:
-        _use_formula_titles(toc, _formula_titles(blocks, set(toc.pages)))
+        _use_marker_titles(toc, _marker_titles(blocks, set(toc.pages)))
     for i, toc in enumerate(layer_tocs):
         on = set(toc.pages)
         kept = [b for b in blocks if not (b.page in on and b.kind != "page")]

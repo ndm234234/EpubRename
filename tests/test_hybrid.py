@@ -363,13 +363,18 @@ class BookPartsTest(unittest.TestCase):
         blocks = [Block("page", level=1, page=1), Block("h", "Содержание", "Содержание", 1, page=1),
                   Block("table", rows=[["Оптимизация .....", "160"],
                                        ["Градиентный спуск <math>\\bar{\\omega}^{i+1}</math> .....", "164"],
-                                       ["<b>Регуляризация</b>", "<b>179</b>"]], page=1),
+                                       ["<b>Регуляризация</b>", "<b>179</b>"],
+                                       ["<b>ГЛАВА 5. Компьютерное зрение .....</b>", "<b>189</b>"]], page=1),
                   Block("page", level=2, page=2), Block("p", "Текст.", "Текст.", page=2)]
         toc = Toc("Содержание", [TocEntry("Оптимизация", 160, 0, 1), TocEntry("Градиентный спуск ro;+i = fЬ;", 164, 0, 1),
-                                 TocEntry("Регуляризация", 179, 0, 1)], [1])
+                                 TocEntry("Регуляризация", 179, 0, 1),
+                                 TocEntry("ГЛАВА 5. Компьютерн\ufffdе зрение", 189, 0, 1)], [1])
         hy.place_tocs(blocks, [toc])
         self.assertEqual([e.html for e in toc.entries],
-                         ["", "Градиентный спуск <math>\\bar{\\omega}^{i+1}</math>", ""])
+                         ["", "Градиентный спуск <math>\\bar{\\omega}^{i+1}</math>", "", ""])
+        self.assertEqual(toc.entries[3].title, "ГЛАВА 5. Компьютерное зрение",
+                         "a letter the text layer lost (\ufffd) comes from Marker's reading")
+        self.assertEqual(toc.entries[0].title, "Оптимизация")
 
     def test_formulas_become_mathml(self):
         from pdf2epub import Block, Toc, TocEntry
