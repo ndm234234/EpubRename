@@ -701,7 +701,7 @@ PAGE = r"""<!DOCTYPE html>
       <svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><span>Group by author</span></button>
     <button id="offBtn" class="chip" type="button" aria-expanded="false" aria-controls="offPanel" hidden
       title="Books kept on this device"><svg class="ic" aria-hidden="true"><use href="#i-cloud"/></svg><span>Offline</span><b id="offLabel" class="count"></b></button>
-    <a id="openFile" class="chip" href="__READER__" title="Open any EPUB file in the reader">
+    <a id="openFile" class="chip" href="__READER__#from=catalog" title="Open any EPUB file in the reader">
       <svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span>Open file</span></a>
   </div>
 </div>
