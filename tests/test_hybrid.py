@@ -146,6 +146,71 @@ class HybridTest(unittest.TestCase):
         self.assertNotIn("fast", [m for m, _ in second.calls], "fast pages are cached")
         check_epub(self.out)
 
+    def draft(self):
+        return self.out.parent / "Drafts" / "book (draft).epub"
+
+    def book_text(self, path):
+        with zipfile.ZipFile(path) as zf:
+            opf = zf.read("OEBPS/content.opf").decode()
+            return opf, "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+
+    def test_stop_makes_a_draft_of_the_whole_book(self):
+        with mock.patch.object(hy, "ACC_BATCH", 1):
+            with self.assertRaises(KeyboardInterrupt) as stopped:
+                self.convert(FakeEngine(interrupt_on=1))
+        self.assertEqual(stopped.exception.draft, self.draft())
+        self.assertFalse(self.out.exists(), "the book itself is not finished")
+        check_epub(self.draft())
+        opf, text = self.book_text(self.draft())
+        self.assertIn("<dc:title>Book (draft: 1 of 3 pages checked)</dc:title>", opf)
+        for s in SENTENCES:
+            self.assertIn(s, text, "pages not checked yet come from the fast reading")
+        self.assertEqual(text.count("<b>Внимание.</b>"), 1, "the page checked: the accurate reading")
+        self.assertFalse(list(self.draft().parent.glob("*.part")))
+
+    def test_draft_kept_out_of_the_sorting(self):
+        with mock.patch.object(hy, "ACC_BATCH", 1), self.assertRaises(KeyboardInterrupt):
+            self.convert(FakeEngine(interrupt_on=1))
+        # epub_rename.py takes only the files right in In/
+        self.assertEqual([p.name for p in self.out.parent.iterdir() if p.is_file()], [])
+
+    def test_stop_again_while_the_draft_is_made(self):
+        with mock.patch.object(hy, "ACC_BATCH", 1), \
+                mock.patch.object(hy.base, "write_epub", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt) as stopped:
+            self.convert(FakeEngine(interrupt_on=1))
+        self.assertIsNone(getattr(stopped.exception, "draft", None))
+        self.assertFalse(self.draft().exists())
+        self.assertFalse((self.out.parent / "Drafts").exists())
+        self.assertFalse(list(self.work().rglob("*.part")), "the work so far is kept as it was")
+
+    def test_draft_replaced_and_then_removed(self):
+        with mock.patch.object(hy, "ACC_BATCH", 1):
+            with self.assertRaises(KeyboardInterrupt):
+                self.convert(FakeEngine(interrupt_on=1))
+            with self.assertRaises(KeyboardInterrupt):
+                self.convert(FakeEngine(interrupt_on=2))
+            opf, _ = self.book_text(self.draft())
+            self.assertIn("(draft: 2 of 3 pages checked)", opf)
+            self.convert(FakeEngine())
+        check_epub(self.out)
+        self.assertFalse((self.out.parent / "Drafts").exists(), "the finished book replaces its draft")
+
+    def test_other_drafts_stay(self):
+        other = self.out.parent / "Drafts" / "other (draft).epub"
+        other.parent.mkdir()
+        other.write_bytes(b"x")
+        self.convert(FakeEngine())
+        self.assertTrue(other.exists())
+
+    def test_trial_makes_no_draft(self):
+        trial = self.out.parent / "Preview" / "book.epub"
+        trial.parent.mkdir()
+        with self.assertRaises(KeyboardInterrupt) as stopped:
+            self.convert(FakeEngine(interrupt_on=0), out=trial, only={1, 2}, work_root=self.out.parent)
+        self.assertIsNone(getattr(stopped.exception, "draft", None))
+        self.assertFalse(list(self.out.parent.rglob("*draft*")))
+
     def test_marker_error_falls_back(self):
         self.convert(FakeEngine(fail_accurate={0}), keep_work=True)
         report = json.loads((self.work() / "report.json").read_text())

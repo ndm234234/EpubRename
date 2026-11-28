@@ -31,6 +31,19 @@ BLANK_SUSPECT = 8          # accurate empty while fast has this many words: the 
 CHECK_COVERAGE = 0.9   # pages checked less well than this are named in the summary
 
 
+class Stopped(KeyboardInterrupt):
+    """Ctrl+C while the pages were checked; draft: the book made of what is there (None: none made)."""
+
+    def __init__(self, draft: Path | None = None):
+        super().__init__()
+        self.draft = draft
+
+
+def draft_path(out: Path) -> Path:
+    """A stopped book's draft: in a folder of its own, so epub_rename.py (the files right in In/) leaves it."""
+    return out.parent / "Drafts" / f"{out.stem} (draft).epub"
+
+
 def _write(path: Path, text: str) -> None:
     """Write so that a file is either complete or absent (never half-written)."""
     part = path.with_name(path.name + ".part")
@@ -393,6 +406,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
     def done(n: int) -> bool:
         return merged_file(n).exists() and str(n) in report["pages"]
 
+    checking = stopped = False                  # Ctrl+C while checking: a draft of the whole book
     try:
         # 1. fast for the whole book (minutes), cached per page
         missing = [n for n in numbers if not fast_file(n).exists() and n not in blank_pages]
@@ -404,6 +418,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
         offset = heads_offset()
 
         # 2. accurate page by page (hours), checked against fast and the text layer
+        checking = True
         todo = [n for n in numbers if not done(n)]
         started, done_now, recognised = time.time(), 0, 0
         failing: list[int] = []                    # pages in a row accurate failed on
@@ -499,16 +514,74 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                 progress(f"📄 page {n}/{numbers[-1]} · {page_note(source, info, retried)} · ⏱ {_short(seconds)}"
                          f" · {_fmt(elapsed)} elapsed"
                          + (f" · ~{_fmt(left)} left" if left is not None else ""))
+    except KeyboardInterrupt:
+        if not checking or only:
+            raise
+        stopped = True
     finally:
         stop(engine)
 
     # 3. the book (pages merged by an earlier version may still have their running heads)
     offset = heads_offset()
+
+    def assemble(target: Path, book_title: str, html_of: Callable[[int], str]):
+        """The book from html_of(page number) into target: (chapters, blocks)."""
+        return _assemble(pdf, target, book_title, author, lang, numbers, pages, pictures, body, offset, report,
+                         report_path, merged_file, work, html_of, log, mathml, done)
+
+    if stopped:
+        # a page not checked yet: its fast reading, else the PDF's own text
+        unchecked = lambda n: read(fast_file(n)) or (f"<p>{_escape(layer[n])}</p>" if layer[n].strip() else "")
+        raise Stopped(_draft(out, title, numbers, done, log,
+                             lambda target, name: assemble(target, name, lambda n: read(merged_file(n))
+                                                           if done(n) else unchecked(n))))
+
+    chapters, blocks = assemble(out, title, lambda n: read(merged_file(n)))
+    if not only:
+        (work / "done").write_text("")
+        draft = draft_path(out)
+        draft.unlink(missing_ok=True)
+        if draft.parent.exists() and not any(draft.parent.iterdir()):
+            draft.parent.rmdir()
+    log(f"done {out}")
+
+    report = {"pages": {k: v for k, v in report["pages"].items() if int(k) in numbers}}   # a trial: its pages
+    sources = base.Counter(p["source"] for p in report["pages"].values())
+    fixed = sum(p.get("fixed_words", 0) for p in report["pages"].values())
+    words = sum(len(b.text.split()) for b in blocks if b.kind in ("p", "list"))
+    parts = ", ".join(f"{k} {v}" for k, v in sorted(sources.items()))
+    check = to_check(report)
+    return (f"{len(chapters)} chapter(s), {words} words; pages: {parts}; {fixed} word(s) corrected"
+            + (f"; check: {', '.join(check)}" if check else "") + f" — «{title}»"
+            + (f", {author}" if author else ""))
+
+
+def _draft(out: Path, title: str, numbers: list[int], done, log, assemble) -> Path | None:
+    """The whole book as it is now: the pages checked as they are kept, the others from the
+    fast reading (the PDF's own text where fast has none). None if it could not be made
+    (stopped again, or it failed): the work so far is kept either way."""
+    target = draft_path(out)
+    checked = sum(1 for n in numbers if done(n))
+    target.parent.mkdir(exist_ok=True)
+    try:
+        assemble(target, f"{title} (draft: {checked} of {len(numbers)} pages checked)")
+        log(f"stopped: draft {target} ({checked} of {len(numbers)} pages checked)")
+        return target
+    except (Exception, KeyboardInterrupt) as e:
+        log(f"stopped: no draft ({type(e).__name__}: {e})")
+        target.with_name(target.name + ".part").unlink(missing_ok=True)
+        if not any(target.parent.iterdir()):
+            target.parent.rmdir()
+        return None
+
+
+def _assemble(pdf, out, title, author, lang, numbers, pages, pictures, body, offset, report, report_path,
+              merged_file, work, html_of, log, mathml, done):
     with tempfile.TemporaryDirectory(prefix="pdf2epub-") as tmp_name:
         tmp = Path(tmp_name)
         cover = base.render_page(pdf, 1, tmp / "cover", base.COVER_HEIGHT) if numbers[0] == 1 else None
         big = any(w * h >= 0.5 * pages[0].width * pages[0].height for w, h in pictures.get(1, []))
-        skip_first = cover is not None and first_page_is_cover(merged_file(1).read_text(encoding="utf-8"), big)
+        skip_first = cover is not None and first_page_is_cover(html_of(1), big)
         blocks: list[Block] = []
         for n in numbers:
             if skip_first and n == 1:
@@ -516,8 +589,8 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                     report["pages"]["1"]["reason"] = "cover"       # not in the text: nothing to check
                     _write(report_path, json.dumps(report, ensure_ascii=False, indent=1))
                 continue
-            page_html = read(merged_file(n))
-            entry = report["pages"].get(str(n), {})
+            page_html = html_of(n)
+            entry = report["pages"].get(str(n), {}) if done(n) else {}   # (a draft: a page not checked yet)
             # a title page set as a design: accurate takes it for a picture (reads nothing or too little),
             # fast loses letters and the layout; not a page where Marker failed (its fast text is fine)
             title_page = n <= FRONT_PAGES and entry.get("source") == "fast" \
@@ -566,17 +639,5 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
             raise RuntimeError("no text or pictures found")
         base.write_epub(out, title, author, lang, chapters, cover, img_names, tocs, main,
                         generator="pdf2epub hybrid")
-    if not only:
-        (work / "done").write_text("")
-    log(f"done {out}")
-
-    report = {"pages": {k: v for k, v in report["pages"].items() if int(k) in numbers}}   # a trial: its pages
-    sources = base.Counter(p["source"] for p in report["pages"].values())
-    fixed = sum(p.get("fixed_words", 0) for p in report["pages"].values())
-    words = sum(len(b.text.split()) for b in blocks if b.kind in ("p", "list"))
-    parts = ", ".join(f"{k} {v}" for k, v in sorted(sources.items()))
-    check = to_check(report)
-    return (f"{len(chapters)} chapter(s), {words} words; pages: {parts}; {fixed} word(s) corrected"
-            + (f"; check: {', '.join(check)}" if check else "") + f" — «{title}»"
-            + (f", {author}" if author else ""))
+    return chapters, blocks
 

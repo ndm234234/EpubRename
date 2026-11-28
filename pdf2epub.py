@@ -1424,7 +1424,8 @@ def main() -> int:
         else:
             pages = sum(len([n for n in args.only if n <= job[4]]) if args.only else job[4] for job in jobs)
             print(f"⏱️  {estimate(pages)} for {pages} pages "
-                  "(it can be stopped with Ctrl+C and goes on from the same page next time)\n")
+                  "(it can be stopped with Ctrl+C: a draft of the whole book is made, "
+                  "and it goes on from the same page next time)\n")
 
     for pdf, out, title, author, _ in jobs:
         print(f"⏳ {pdf.name} ...", flush=True)
@@ -1441,7 +1442,11 @@ def main() -> int:
                     progress.status("")
             else:
                 summary = convert(pdf, out, args, (title, author))
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as e:
+            draft = getattr(e, "draft", None)
+            if draft is not None:
+                print(f"\n📝 A draft to look at: {draft}\n"
+                      "   (the pages not checked yet are from the fast reading, with its mistakes)")
             print(f"\n⏸️  Stopped. Everything recognised so far is kept: run it again to go on "
                   f"from the same page.")
             return 130

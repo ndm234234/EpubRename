@@ -592,11 +592,17 @@ Every page is read from its picture, the way a person reads it, by
 3. All questions (author, title) are asked before the long part starts, so it can run
    unattended. It can be stopped any time (Ctrl+C, power off): the next run goes on from
    the same page. The work lives in `In/.pdf2epub-work/` and is removed when the book is done.
+4. Stopped with Ctrl+C during the careful pass, it first makes a draft of the whole book to look
+   at: `In/Drafts/<book> (draft).epub`, titled `<title> (draft: 120 of 228 pages checked)`. The
+   pages checked so far are as they will be; the others are from the fast reading, with its
+   mistakes. It takes a few seconds; a second Ctrl+C stops at once, without a draft. The draft is
+   in a folder of its own so `epub_rename.py` leaves it; the next stop replaces it, and the
+   finished book removes it.
 
 ```
 📚 Found 1 PDF file(s)
 
-⏱️  ~3.8 h for 228 pages (it can be stopped with Ctrl+C and goes on from the same page next time)
+⏱️  ~3.8 h for 228 pages (it can be stopped with Ctrl+C: a draft of the whole book is made, and it goes on from the same page next time)
 
 ⏳ Mila Fenwick - Quiet Rivers.pdf ...
    ⚡ fast recognition of 228 page(s)…
