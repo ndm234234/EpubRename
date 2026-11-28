@@ -423,11 +423,17 @@ def toc_lines(page: Page, body: float) -> list[tuple[Line, str, int | None]]:
     rows = []
     for line in page.lines:
         pieces = sorted(line.pieces, key=lambda p: p.left)
-        m = re.fullmatch(r"(.*?\w.*?)[\s.…·_]*?(\d{1,4})", line.text)
-        sure = False
-        if m and len(pieces) > 1 and re.fullmatch(r"[.…·_\s]*\d{1,4}", pieces[-1].text.strip()):
+        text = line.text.rstrip()
+        # after dot leaders the page number may come apart: "Random forests ...... 13 7"
+        lead = re.search(r"[.…·_]{3,}\s*(\d[\d ]*)$", text)
+        if lead and len(lead.group(1).replace(" ", "")) <= 4:
+            text = text[:lead.start(1)] + lead.group(1).replace(" ", "")
+        m = re.fullmatch(r"(.*?\w.*?)[\s.…·_]*?(\d{1,4})", text)
+        # dot leaders before the number are sure, also in a line that is one piece of text
+        sure = bool(m and re.search(r"\w.*?[.…·_]{3,}\s*\d{1,4}$", text))
+        if m and not sure and len(pieces) > 1 and re.fullmatch(r"[.…·_\s]*\d{1,4}", pieces[-1].text.strip()):
             gap = pieces[-1].left - max(p.right for p in pieces[:-1])
-            sure = gap > 1.5 * body or bool(re.search(r"[.…·_]{3,}\s*\d+$", line.text))
+            sure = gap > 1.5 * body
         rows.append((line, m, sure))
     # numbers stand in one column at the right; a number at that edge is a page number
     # even when it sits close to the text
@@ -460,6 +466,7 @@ def find_tocs(pages: list[Page], body: float) -> list[Toc]:
             groups.append([page])
 
     def clean(text):
+        text = re.sub(r"\s*[.…·_]{3,}[^\w(\[]*$", "", text)      # dot leaders and a stray mark after them
         text = re.sub(r"\s+([,.:;!?])", r"\1", re.sub(r"\s+", " ", text))
         text = re.sub(r"([,:;!?])(?=[^\W\d_])|(\.)(?=[^\W\d_]{2})", r"\1\2 ", text)  # "9.ТЕКСТ" -> "9. ТЕКСТ"
         return text.strip(" .")
@@ -469,7 +476,15 @@ def find_tocs(pages: list[Page], body: float) -> list[Toc]:
         current = Toc("", [], [])
         found = [current]
         pending: list[Line] = []     # lines of a title that goes on to the next line
-        loose: list[str] = []        # lines standing apart: the heading of a new contents
+        loose: list[Line] = []       # lines standing apart: the heading of a new contents
+
+        def stand_apart(lines: list[Line]) -> list[Line]:
+            """The heading so far, or these lines when they are as big (a small line under a
+            heading, such as a web address, is not the heading)."""
+            if loose and lines and max(l.size for l in lines) < 0.85 * max(l.size for l in loose):
+                return loose
+            return lines
+
         for page in group:
             pending = []
             for line, text, number in toc_lines(page, body):
@@ -477,15 +492,18 @@ def find_tocs(pages: list[Page], body: float) -> list[Toc]:
                     continue                                # dot leaders, stray marks
                 near = pending[-1] if pending else None
                 if near is not None and line.top - near.bottom > 1.2 * near.height:
-                    loose = [l.text for l in pending]       # not part of the next entry
+                    loose = stand_apart(pending)            # not part of the next entry
+                    pending = []
+                if near is not None and not 0.85 < line.size / max(near.size, 0.1) < 1.18:
+                    loose = stand_apart(pending)            # another font: a heading, not this entry
                     pending = []
                 if number is None:
                     pending.append(line)
                     continue
                 if not current.entries and loose and not current.title:
-                    current.title = " ".join(loose)
+                    current.title = " ".join(l.text for l in loose)
                 if current.entries and number < current.entries[-1].number - 10:
-                    current = Toc(" ".join(loose), [], [])  # page numbers start again: another contents
+                    current = Toc(" ".join(l.text for l in loose), [], [])  # page numbers start again: another contents
                     found.append(current)
                 loose = []
                 first = pending[0] if pending else line
@@ -495,7 +513,7 @@ def find_tocs(pages: list[Page], body: float) -> list[Toc]:
                     current.pages.append(page.number)
                 pending = []
             if not current.entries and pending:
-                loose = [l.text for l in pending]
+                loose = stand_apart(pending)
         for toc in found:
             numbers = [e.number for e in toc.entries]
             rising = sum(1 for a, b in zip(numbers, numbers[1:]) if b >= a)

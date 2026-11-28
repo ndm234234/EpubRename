@@ -94,6 +94,46 @@ class ProgressTest(unittest.TestCase):
         self.assertEqual(out.getvalue(), "   📄 page 1/4 · ok\n")
 
 
+class LayerContentsTest(unittest.TestCase):
+    @staticmethod
+    def page(number, rows):
+        """A contents page whose every line is one piece of text, dot leaders and page number included."""
+        page = pdf2epub.Page(number, 480, 640)
+        for i, (left, text, *size) in enumerate(rows):
+            size = size[0] if size else 11.0
+            piece = pdf2epub.Piece(40 + 14 * i, left, 400 - left, 11, size, [(text, False, False)])
+            page.lines.append(pdf2epub.Line([piece], number))
+        return page
+
+    def test_one_piece_lines_with_dot_leaders(self):
+        page = self.page(6, [(200, "Содержание", 28.0), (34, "https://example.org/watermark", 7.0),
+                             (41, "Отзывы о книге .............................. 15"),
+                             (41, "Введение ......................................... 17"),
+                             (55, "Почему я написала эту книгу ...................... 17"),
+                             (55, "Кому предназначена книга ......................... 19"),
+                             (41, "ГЛАВА 1. Почему так важно изучать математику"),
+                             (41, "искусственного интеллекта? ....................... 33"),
+                             (55, "Вперед, к математике ............................. 35"),
+                             (55, "Случайные леса ................................... 13 7"),
+                             (55, "Кластеризация ..................................... 138"),
+                             (55, "Случайные величины ........................., 140")])
+        tocs = pdf2epub.find_tocs([page], 11.0)
+        self.assertEqual(len(tocs), 1)
+        self.assertEqual(tocs[0].title, "Содержание", "the big line above, not the small one")
+        entries = tocs[0].entries
+        self.assertEqual([e.title for e in entries],
+                         ["Отзывы о книге", "Введение", "Почему я написала эту книгу", "Кому предназначена книга",
+                          "ГЛАВА 1. Почему так важно изучать математику искусственного интеллекта?",
+                          "Вперед, к математике", "Случайные леса", "Кластеризация", "Случайные величины"])
+        self.assertEqual([e.number for e in entries], [15, 17, 17, 19, 33, 35, 137, 138, 140], "13 7 is 137")
+        self.assertEqual([e.level for e in entries], [1, 1, 2, 2, 1, 2, 2, 2, 2])
+
+    def test_ordinary_text_with_numbers_is_not_contents(self):
+        page = self.page(6, [(41, "В 1990 году сад занимал 12"), (41, "гектаров, а в 2000 уже 15"),
+                             (41, "и рос дальше еще лет 20"), (41, "пока не достиг 30"), (41, "а потом 45")])
+        self.assertEqual(pdf2epub.find_tocs([page], 11.0), [])
+
+
 class MainTest(unittest.TestCase):
     def test_main_falls_back_to_quick(self):
         from test_hybrid import make_pdf
