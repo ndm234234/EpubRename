@@ -18,8 +18,9 @@ SENTENCES = ["Первая страница рассказывает о том, 
              "Третья страница подводит итог и завершает эту короткую тестовую книгу."]
 
 
-def make_pdf(path: Path, pages=SENTENCES, y=700) -> Path:
-    """A tiny text PDF, one Helvetica line per page (latin transliteration is enough for the layer)."""
+def make_pdf(path: Path, pages=SENTENCES, y=700, blank=(), drawn=()) -> Path:
+    """A tiny text PDF, one Helvetica line per page (latin transliteration is enough for the layer);
+    pages (0-based) in blank have nothing on them, in drawn only a thick line (a drawing, no text)."""
     objs = []
 
     def add(o):
@@ -30,6 +31,10 @@ def make_pdf(path: Path, pages=SENTENCES, y=700) -> Path:
     contents = []
     for n, _ in enumerate(pages):
         data = f"BT /F1 12 Tf 72 {y} Td (Page {n + 1} text line for the layer) Tj ET".encode()
+        if n in blank:
+            data = b""
+        elif n in drawn:
+            data = b"0 0 0 RG 12 w 100 100 m 500 700 l S"
         contents.append(add(b"<< /Length %d >>\nstream\n" % len(data) + data + b"\nendstream"))
     pages_id = len(objs) + len(pages) + 1
     kids = [add(b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 %d 0 R >> >>"
@@ -51,8 +56,9 @@ class FakeEngine:
     """Stands in for run_marker: records calls, can fail or be interrupted."""
 
     def __init__(self, fail_accurate=(), interrupt_on=None, fail_fast=(), loop_accurate=(), fast_heads=False,
-                 notes=False, endnotes=False, empty_accurate=(), empty_once=(), formula=False):
-        self.formula = formula
+                 notes=False, endnotes=False, empty_accurate=(), empty_once=(), formula=False,
+                 blank=(), short_accurate=()):
+        self.formula, self.blank, self.short_accurate = formula, set(blank), set(short_accurate)
         self.fast_heads, self.notes, self.endnotes = fast_heads, notes, endnotes
         self.empty_accurate, self.empty_once = set(empty_accurate), set(empty_once)
         self.calls, self.fail_accurate, self.interrupt_on = [], set(fail_accurate), interrupt_on
@@ -62,6 +68,10 @@ class FakeEngine:
 
     def __call__(self, engine, pdf, mode, pages, out_dir):
         self.calls.append((mode, list(pages)))
+        if set(pages) & self.blank:
+            raise MarkerError("TypeError: 'NoneType' object is not iterable")   # Marker on a blank page
+        if mode == "accurate" and set(pages) & self.short_accurate:
+            return {i: "<p>Глава</p>" if i in self.short_accurate else f"<p>{SENTENCES[i]}</p>" for i in pages}
         if self.clock is not None and mode == "accurate":
             self.clock[0] += 60 * len(pages)
         if mode == "accurate":
@@ -258,6 +268,28 @@ class HybridTest(unittest.TestCase):
         self.assertEqual(report["pages"]["2"]["source"], "fast")
         self.assertEqual(report["pages"]["2"]["reason"], "accurate found nothing")
         self.assertFalse((self.work() / "acc" / "page-0002.html").exists(), "a blank reading is a failure, not a result")
+
+    def test_blank_pages_are_not_given_to_marker(self):
+        """Marker fails on a blank page; one in a batch made it read the whole book again in halves."""
+        pdf = make_pdf(self.dir / "blank.pdf", pages=SENTENCES + ["", ""], blank={3}, drawn={4})
+        fake = FakeEngine(blank={3})
+        fake_pages = lambda: sorted({p for _, ps in fake.calls for p in ps})
+        sentences = SENTENCES + ["", "Пятая страница — рисунок."]
+        with mock.patch(f"{__name__}.SENTENCES", sentences):
+            self.convert(fake, pdf=pdf, keep_work=True)
+        self.assertNotIn(3, fake_pages(), "the blank page is not read")
+        self.assertIn(4, fake_pages(), "a drawing without text is read")
+        self.assertFalse(any(len(ps) > 1 and 3 in ps for _, ps in fake.calls))
+        report = json.loads((self.work(pdf) / "report.json").read_text())
+        self.assertEqual(report["pages"]["4"]["source"], "empty")
+        self.assertIn("4/5 · empty page", "\n".join(self.lines))
+
+    def test_accurate_reading_too_little_is_named(self):
+        self.convert(FakeEngine(short_accurate={1}), keep_work=True)
+        report = json.loads((self.work() / "report.json").read_text())
+        self.assertEqual(report["pages"]["2"]["source"], "fast")
+        self.assertEqual(report["pages"]["2"]["reason"], "accurate read too little")
+        self.assertTrue(any("page 2/3 · ⚠️ fast reading used (accurate read too little)" in l for l in self.lines))
 
     def test_summary_names_pages_to_check(self):
         summary = self.convert(FakeEngine(fail_accurate={0}))

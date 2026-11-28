@@ -315,6 +315,23 @@ def render_page(pdf: Path, number: int, out: Path, height: int) -> Path | None:
     return path if res.returncode == 0 and path.is_file() else None
 
 
+def page_is_blank(pdf: Path, number: int, tmp: Path) -> bool:
+    """Nothing is printed on the page: its small grey picture is white (a drawing made of lines
+    has no text and no pictures, but is not blank)."""
+    out = tmp / f"blank{number}"
+    res = run(["pdftoppm", "-gray", "-r", "12", "-f", str(number), "-l", str(number), "-singlefile",
+               str(pdf), str(out)])
+    path = out.with_suffix(".pgm")
+    if res.returncode != 0 or not path.is_file():
+        return False
+    data = path.read_bytes()
+    m = re.match(rb"P5\s+(\d+)\s+(\d+)\s+(\d+)\s", data)
+    if not m:
+        return False
+    pixels = data[m.end():]
+    return bool(pixels) and sum(1 for p in pixels if p < 230) <= 0.002 * len(pixels)
+
+
 def read_info(pdf: Path) -> dict[str, str]:
     res = run(["pdfinfo", "-enc", "UTF-8", str(pdf)])
     info = {}

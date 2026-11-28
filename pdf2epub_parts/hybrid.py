@@ -314,6 +314,10 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
     with tempfile.TemporaryDirectory(prefix="pdf2epub-") as tmp_name:
         tmp = Path(tmp_name)
         pages = base.read_text(pdf, tmp)
+        # Marker fails on a blank page, and one in a batch costs the whole batch: blank pages are not read
+        pictured = base.read_images(pdf)
+        blank_pages = {p.number for p in pages if not p.lines and not pictured.get(p.number)
+                       and (not only or p.number in only) and base.page_is_blank(pdf, p.number, tmp)}
     if not pages:
         raise RuntimeError("no pages found")
     sizes = base.Counter()
@@ -383,7 +387,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
 
     try:
         # 1. fast for the whole book (minutes), cached per page
-        missing = [n for n in numbers if not fast_file(n).exists()]
+        missing = [n for n in numbers if not fast_file(n).exists() and n not in blank_pages]
         if missing:
             progress(f"⚡ fast recognition of {len(missing)} page(s)…")
             recognise("fast", missing, lambda n, h: _write(fast_file(n), h))
@@ -407,7 +411,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
 
         for i in range(0, len(todo), ACC_BATCH):
             batch = todo[i:i + ACC_BATCH]
-            need = [n for n in batch if not acc_file(n).exists()]
+            need = [n for n in batch if not acc_file(n).exists() and n not in blank_pages]
             if need:
                 timed(need, lambda: recognise("accurate", need, lambda n, h: _write(acc_file(n), h)))
                 recognised += len(need)
@@ -422,6 +426,15 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                             acc_file(n).unlink()
                             blank.add(n)
             for n in batch:
+                if n in blank_pages:
+                    report["pages"][str(n)] = {"source": "empty", "retried": False, "seconds": 0}
+                    _write(report_path, json.dumps(report, ensure_ascii=False, indent=1))
+                    _write(merged_file(n), "")
+                    log(f"page {n}: empty (blank, not read)")
+                    done_now += 1
+                    progress(f"📄 page {n}/{numbers[-1]} · {page_note('empty', {}, False)} · ⏱ {_short(0)}"
+                             f" · {_fmt(time.time() - started)} elapsed")
+                    continue
                 fast_html = strip_running_heads(read(fast_file(n)), n, offset)
                 acc_html = strip_running_heads(read(acc_file(n)), n, offset) if acc_file(n).exists() else None
                 if acc_html is None:
@@ -452,6 +465,8 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                     merged, source = result.html, result.source
                     info = {"fixed_words": result.fixed_words, "inserted_blocks": result.inserted_blocks,
                             "coverage": round(result.coverage, 3)}
+                    if source == "fast":
+                        info["reason"] = "accurate read too little"     # less than half of what fast read
                     if result.looped and fast_html.strip():
                         merged, source, info["reason"] = fast_html, "fast", "accurate repeated itself"
                 elif fast_html.strip():

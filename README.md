@@ -610,6 +610,12 @@ the page took: Marker reads pages four at a time, so each gets its share of the 
 any second reading of its own. The same time is in `log.txt` and in `report.json`. The last
 line is live: it shows which pages Marker is reading and for how long.
 
+When the fast reading is used, the line says why: `accurate failed` (Marker stopped with an
+error), `accurate found nothing` (it read the page as blank), `accurate read too little` (less
+than half of what the fast reading found; typical for title pages with decorative lettering,
+which the careful pass takes for a picture). Pages with nothing printed on them are not given
+to Marker at all (it fails on them): they are `empty page` straight away.
+
 If the engine can't be installed (no internet on the first run, unsupported system), the
 script says so and uses quick mode. To remove the engine:
 
