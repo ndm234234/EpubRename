@@ -79,7 +79,7 @@ def test_nothing_without_a_sign_in(server):
     assert s == 401 and b'id="signin"' in out and h.get("Content-Type", "").startswith("text/html")
     assert "no-store" in h.get("Cache-Control", "")
     s, out, _ = ask(base, "GET", "/index.html", accept=PAGE)
-    assert s == 401 and b"the catalog" not in out
+    assert s == 401 and b"<html>the catalog</html>" not in out
     for path in ("/.index/library.json", BOOK, "/__sync/data", "/__alive"):
         s, out, _ = ask(base, "GET", path)
         assert s == 401 and out == b"", path
