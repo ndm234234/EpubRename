@@ -176,10 +176,12 @@ class MarkerRunTest(unittest.TestCase):
         def runner(args, **kw):
             args = [str(a) for a in args]
             calls.append((args, kw.get("env")))
+            self.read = Path(args[1]).read_bytes()
             if code == 0:
-                out = Path(args[args.index("--output_dir") + 1]) / self.pdf.stem
+                stem = Path(args[1]).stem                    # Marker names its output after the PDF
+                out = Path(args[args.index("--output_dir") + 1]) / stem
                 out.mkdir(parents=True, exist_ok=True)
-                (out / (self.pdf.stem + ".html")).write_text((FIXTURES / "paginated.html").read_text())
+                (out / (stem + ".html")).write_text((FIXTURES / "paginated.html").read_text())
                 (out / "_page_5_Figure_1.jpeg").write_bytes(b"\xff\xd8jpeg")
             return subprocess.CompletedProcess(args, code, b"", b"boom")
         return runner, calls
@@ -198,7 +200,7 @@ class MarkerRunTest(unittest.TestCase):
         pages = eng.run_marker(self.engine, self.pdf, "accurate", [3, 4], self.dir / "work", runner=runner)
         args, env = calls[0]
         for flag in ("--mode", "accurate", "--force_ocr", "--strip_existing_ocr", "--paginate_output",
-                     "--page_range", "3,4", str(self.pdf)):
+                     "--page_range", "3,4"):
             self.assertIn(flag, args)
         self.assertEqual(args[args.index("--output_format") + 1], "html")
         self.assertEqual(env["LLAMA_CPP_BINARY"], str(self.engine.llama_server))
@@ -207,6 +209,24 @@ class MarkerRunTest(unittest.TestCase):
         self.assertTrue(Path(img).is_file(), img)
         self.assertEqual(Path(img).parent, self.dir / "work" / "images")
         self.assertTrue(Path(img).name.startswith("accurate-"), "fast and accurate pictures must not mix")
+
+    def test_marker_gets_short_paths(self):
+        """Marker writes <out>/<pdf name>/<pdf name>.html: with a long book name on a Windows shared
+        folder (260 characters for a path) every page failed with "File name too long"."""
+        self.pdf = self.dir / ("Очень длинное имя книги " * 4 + ".pdf")
+        self.pdf.write_bytes(b"%PDF-1.4")
+        runner, calls = self.fake_marker()
+        pages = eng.run_marker(self.engine, self.pdf, "fast", [4], self.dir / "work", runner=runner)
+        self.assertEqual(set(pages), {4, 5})
+        args, _ = calls[0]
+        given = Path(args[1])
+        self.assertLess(len(given.name), 20)
+        self.assertEqual(self.read, b"%PDF-1.4", "Marker reads the same PDF")
+        out = Path(args[args.index("--output_dir") + 1])
+        self.assertNotIn(str(self.dir / "work"), str(out), "Marker's scratch is off the shared folder")
+        self.assertLess(len(str(out / given.stem / given.stem)) + 5, 200)
+        self.assertFalse(out.exists(), "Marker's scratch is removed")
+        self.assertTrue(self.pdf.exists())
 
     def test_run_marker_timeout(self):
         def runner(args, **kw):

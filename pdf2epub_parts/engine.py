@@ -172,18 +172,26 @@ def run_marker(engine: Engine, pdf: Path, mode: str, pages: list[int], out_dir: 
     Pictures Marker cuts out are moved to out_dir/images and the pages point to them.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    tmp = Path(tempfile.mkdtemp(prefix=f"marker-{mode}-", dir=out_dir))
+    # Marker writes <output_dir>/<pdf name>/<pdf name>.html: a long book name in the work folder
+    # passed the 260 characters a Windows shared folder allows for a path. So Marker works in
+    # the system temp folder on a short link to the PDF.
+    tmp = Path(tempfile.mkdtemp(prefix=f"marker-{mode}-"))
     try:
-        args = [engine.marker_single, pdf, "--mode", mode, "--force_ocr", "--strip_existing_ocr",
+        short = tmp / "book.pdf"
+        try:
+            short.symlink_to(pdf.resolve())
+        except OSError:
+            shutil.copyfile(pdf, short)
+        args = [engine.marker_single, short, "--mode", mode, "--force_ocr", "--strip_existing_ocr",
                 "--paginate_output", "--output_format", "html",
-                "--page_range", ",".join(str(p) for p in pages), "--output_dir", tmp]
+                "--page_range", ",".join(str(p) for p in pages), "--output_dir", tmp / "out"]
         env = dict(os.environ, LLAMA_CPP_BINARY=str(engine.llama_server))
         try:
             res = runner([str(a) for a in args], env=env, capture_output=True, check=False,
                          timeout=TIMEOUT_START + TIMEOUT_PAGE * len(pages))
         except subprocess.TimeoutExpired:
             raise MarkerError(f"Marker {mode} took too long on pages {pages}") from None
-        found = sorted(tmp.glob("*/*.html"))
+        found = sorted((tmp / "out").glob("*/*.html"))
         if res.returncode != 0 or not found:
             tail = (res.stderr or b"").decode(errors="replace").strip().splitlines()[-3:]
             raise MarkerError(f"Marker {mode} failed on pages {pages}: {' '.join(tail) or res.returncode}")
