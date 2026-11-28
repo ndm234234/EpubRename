@@ -326,12 +326,17 @@
   body.touchui #typo, body.touchui #acct { top: 52px; left: 0; right: 0; width: auto; max-height: calc(50% - 52px);
          border-width: 0 0 1px; border-radius: 0 0 16px 16px; transform: translateY(-16px); padding: 10px 14px 14px; }
   body.touchui #typo.open, body.touchui #acct.open { transform: none; }
-  /* all the fonts at once in half a screen: three in a row */
-  body.touchui .seg.faces { grid-template-columns: repeat(3, 1fr); }
-  body.touchui .seg.faces button { min-height: 46px; padding: 4px 2px; }
+  /* Aa: each tab whole, never scrolled (a setting below the fold goes unfound): a little over half
+     the screen if the fonts need it, still leaving the book's text in sight below */
+  body.touchui #typo { max-height: min(400px, calc(100% - 52px - 180px)); }
+  body.touchui #typo .check { margin-top: 8px; min-height: 42px; }
+  /* all the fonts at once: three in a row; "As in book" one line */
+  body.touchui .seg.faces { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  body.touchui .seg.faces button { min-height: 42px; padding: 3px 2px; }
+  body.touchui .seg.faces [data-v=book] { min-height: 36px; grid-auto-flow: column; justify-content: center; align-content: center; align-items: baseline; gap: 8px; }
   body.touchui .seg.faces button:not([data-v=book]) { grid-column: auto; }
   body.touchui .seg.faces b { font-size: 14px; }
-  body.touchui .seg.faces small { font-size: 12px; }
+  body.touchui .seg.faces small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* As much text as fits: no space around the page here; the page's own margins (typoCss) are
      the same above and below the text */
   body.touchui #viewer { margin-top: 0; margin-bottom: 0; }
@@ -424,7 +429,7 @@
         <button data-v="book" class="wide2"><b>As in book</b><small id="bookFont"></small></button>
       </div>
       <label class="check"><input type="checkbox" id="boldStarts">Bold word starts</label>
-      <p>The first letters of every word in bold, to lead the eye along the line. On this device only.</p></div>
+      <p>First letters of every word in bold. On this device only.</p></div>
     <div data-pane="layout" role="tabpanel">
       <div class="seg" id="layoutSeg">
         <button data-v="book">As in book</button>
