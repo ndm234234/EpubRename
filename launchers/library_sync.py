@@ -27,8 +27,12 @@ On-disk format, shared with the PowerShell twin:
     unparsable data/account file is an error (500) and is never overwritten.
 
 Throttle state (wrong codes, wrong passwords) lives in memory only.
-Dev server: python3 launchers/library_sync.py --serve ROOT --port N  (127.0.0.1, no browser; N=0: a free
-port, printed in the "Library:" line).
+
+Sign-in gate (the network launchers; `gate`): a request not from this computer gets nothing but the
+sign-in page (signin.html, status 401) unless it carries a device token, as the `libsess` cookie
+(set by login, register and /__sync/session, cleared by logout) or as the Bearer header.
+Dev server: python3 launchers/library_sync.py --serve ROOT --port N [--gate]  (127.0.0.1, no browser;
+N=0: a free port, printed in the "Library:" line; --gate: the network launchers' sign-in gate).
 """
 
 import contextlib
@@ -53,6 +57,13 @@ EMAIL_RE = re.compile(EMAIL_PATTERN)
 EMAIL_MAX = 128
 RESERVED = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
 TOKEN_RE = re.compile(r"[0-9a-f]{64}")
+COOKIE = "libsess"
+COOKIE_AGE = 400 * 24 * 3600     # 400 days, the browsers' cap
+# Not Secure: this server only sees plain HTTP (the router does the HTTPS)
+COOKIE_ATTRS = "HttpOnly; SameSite=Lax; Path=/"
+SIGNED_IN_CACHE = 60             # seconds a token found valid is taken as valid without a lookup
+# open without a sign-in (the sign-in page asks them); everything else is closed
+OPEN_POSTS = ("/__sync/login", "/__sync/register", "/__sync/session", "/__sync/logout")
 JSON_TYPE = "application/json; charset=utf-8"
 FREE_WRONG = 5          # wrong tries in a row before the pause starts
 FIRST_PAUSE = 60        # seconds; doubles per further wrong try
@@ -181,6 +192,8 @@ class SyncStore:
         self._now = time.time
         self._code_throttle = _Throttle()
         self._pw_throttle = _Throttle()
+        self._signed = {}        # token -> (login, valid until): the gate asks on every request
+        self._signed_lock = threading.Lock()
 
     # ---- files ----
     def code(self):
@@ -286,16 +299,33 @@ class SyncStore:
 
     def _auth(self, headers):
         """(login, token) of the account holding the bearer token, or (None, None)."""
-        auth = ""
-        for k, v in headers.items():
-            if k.lower() == "authorization":
-                auth = v.strip()
-        parts = auth.split(None, 1)
-        if len(parts) != 2 or parts[0].lower() != "bearer":
+        token = bearer(headers)
+        if token is None:
             return None, None
-        token = parts[1].strip().lower()
+        login = self._token_login(token)
+        return (login, token) if login else (None, None)
+
+    def signed_in(self, headers):
+        """The login whose device token the request carries (Bearer header or libsess cookie), or None."""
+        now = self._now()
+        for token in (bearer(headers), cookie_token(headers)):
+            if token is None:
+                continue
+            with self._signed_lock:
+                hit = self._signed.get(token)
+            if hit and hit[1] > now:
+                return hit[0]
+            login = self._token_login(token)
+            if login:
+                with self._signed_lock:
+                    self._signed[token] = (login, now + SIGNED_IN_CACHE)
+                return login
+        return None
+
+    def _token_login(self, token):
+        """The account holding this device token, or None."""
         if not TOKEN_RE.fullmatch(token):
-            return None, None
+            return None
         want = _hash_token(token)
         for path in sorted((self.dir / "accounts").glob("*.json")):
             try:
@@ -305,8 +335,8 @@ class SyncStore:
             if isinstance(acc, dict) and isinstance(acc.get("tokens"), list) \
                     and any(isinstance(t, str) and t.isascii() and hmac.compare_digest(want, t)
                             for t in acc["tokens"]):
-                return path.stem, token
-        return None, None
+                return path.stem
+        return None
 
     # ---- answers ----
     @staticmethod
@@ -330,7 +360,7 @@ class SyncStore:
     def handle(self, method, path, headers, body):
         path = re.split(r"[?#]", path, maxsplit=1)[0]
         routes = {"/__sync/register": "POST", "/__sync/login": "POST", "/__sync/logout": "POST",
-                  "/__sync/place": "POST", "/__sync/data": ("GET", "PUT")}
+                  "/__sync/session": "POST", "/__sync/place": "POST", "/__sync/data": ("GET", "PUT")}
         if path not in routes:
             return self._err(404, "not found")
         allowed = routes[path]
@@ -430,7 +460,14 @@ class SyncStore:
             self._write(self._account_path(login), acc)
         return self._json(200, {"token": token})
 
+    def _session(self, method, headers, body):
+        """A device signed in before the gate: its Bearer token becomes the cookie (see respond)."""
+        login, _ = self._auth(headers)
+        return self._err(401, "unauthorized") if login is None else (204, JSON_TYPE, b"")
+
     def _logout(self, method, headers, body):
+        with self._signed_lock:
+            self._signed.clear()
         with self._locked():
             login, token = self._auth(headers)
             if login is None:
@@ -509,17 +546,121 @@ def respond(handler, store):
         handler.send_header("Content-Type", ctype)
     handler.send_header("Content-Length", str(len(out)))
     handler.send_header("Cache-Control", "no-store")
+    cookie = _answer_cookie(re.split(r"[?#]", handler.path, maxsplit=1)[0], status, out, handler.headers)
+    if cookie:
+        handler.send_header("Set-Cookie", cookie)
     handler.end_headers()
     if out:
         handler.wfile.write(out)
 
 
-def serve(root, port):
+def _answer_cookie(path, status, out, headers):
+    """The libsess cookie a sync answer sets (sign-in, registration, session) or clears (sign-out)."""
+    token = None
+    if path in ("/__sync/login", "/__sync/register") and status == 200:
+        try:
+            token = json.loads(out)["token"]
+        except (ValueError, KeyError, TypeError):
+            token = None
+    elif path == "/__sync/session" and status == 204:
+        token = bearer(dict(headers.items()))
+    elif path == "/__sync/logout":   # always: the page can't clear an HttpOnly cookie itself
+        return f"{COOKIE}=; {COOKIE_ATTRS}; Max-Age=0"
+    if token and TOKEN_RE.fullmatch(token):
+        return f"{COOKIE}={token}; {COOKIE_ATTRS}; Max-Age={COOKIE_AGE}"
+    return None
+
+
+def bearer(headers):
+    """The lower-case token of an `Authorization: Bearer` header, or None."""
+    auth = ""
+    for k, v in headers.items():
+        if k.lower() == "authorization":
+            auth = v.strip()
+    parts = auth.split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    token = parts[1].strip().lower()
+    return token if TOKEN_RE.fullmatch(token) else None
+
+
+def cookie_token(headers):
+    """The token in the libsess cookie, or None."""
+    for k, v in headers.items():
+        if k.lower() != "cookie":
+            continue
+        for part in v.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == COOKIE and TOKEN_RE.fullmatch(value.strip().lower()):
+                return value.strip().lower()
+    return None
+
+
+def is_local(handler):
+    """This computer asking for itself: a loopback client AND a loopback host name. A tunnel or
+    proxy on this computer comes from 127.0.0.1 too, but with its own public host name."""
+    ip = handler.client_address[0]
+    if ip.startswith("::ffff:"):
+        ip = ip[7:]
+    if ip not in ("127.0.0.1", "::1"):
+        return False
+    host = (handler.headers.get("Host") or "").strip().lower()
+    if host.startswith("["):
+        host = host[:host.find("]") + 1]
+    elif host.count(":") == 1:
+        host = host.split(":")[0]
+    return host in ("localhost", "127.0.0.1", "[::1]")
+
+
+def gate(handler, store, page):
+    """True: the request may go on. False: it was answered 401 (a page asked for gets the sign-in
+    page, `page`; anything else an empty body)."""
+    path = re.split(r"[?#]", handler.path, maxsplit=1)[0]
+    if is_local(handler):
+        return True
+    if path != "/__library_root":   # only launchers on this computer ask it
+        if handler.command in ("GET", "HEAD") and unquote(path) == "/signin.html":
+            return True
+        if handler.command == "POST" and path in OPEN_POSTS:
+            return True
+        if store.signed_in(dict(handler.headers.items())):
+            return True
+    accept = handler.headers.get("Accept") or ""
+    asks_page = (handler.headers.get("Sec-Fetch-Mode") == "navigate" or "text/html" in accept
+                 or (handler.command in ("GET", "HEAD") and (path.endswith("/") or path.endswith(".html"))))
+    body = b""
+    if asks_page:
+        try:
+            body = Path(page).read_bytes()
+        except OSError:
+            body = b"<!doctype html><title>Library</title><p id=\"signin\">Sign in to open the library.</p>"
+    handler.send_response(401)
+    handler.send_header("Content-Type", "text/html; charset=utf-8" if asks_page else "text/plain; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    if body and handler.command != "HEAD":
+        handler.wfile.write(body)
+    return False
+
+
+def serve(root, port, gated=False):
     import functools
     root = str(Path(root).resolve())
     store = SyncStore(root)
+    page = Path(root) / "signin.html"
 
     class Handler(http.server.SimpleHTTPRequestHandler):
+        def parse_request(self):   # every method behind the sign-in gate (--gate)
+            if not super().parse_request():
+                return False
+            if gated and not gate(self, store, page):
+                self.command = "_CLOSED"   # answered already: no do_ method runs
+            return True
+
+        def do__CLOSED(self):
+            pass
+
         def _sync(self):
             if self.path.startswith("/__sync/"):
                 respond(self, store)
@@ -570,5 +711,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Dev server: static files of ROOT plus the sync routes.")
     ap.add_argument("--serve", required=True, metavar="ROOT")
     ap.add_argument("--port", type=int, required=True)
+    ap.add_argument("--gate", action="store_true", help="the network launchers' sign-in gate")
     args = ap.parse_args()
-    serve(args.serve, args.port)
+    serve(args.serve, args.port, args.gate)
