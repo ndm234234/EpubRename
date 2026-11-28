@@ -186,6 +186,37 @@ class SpliceTest(unittest.TestCase):
         r = merge_page(acc, fast, layer, digital=True)
         self.assertIn("только в текстовом слое", r.html)
 
+    def test_words_on_a_picture_are_not_missing(self):
+        """A diagram accurate keeps as a picture: fast and the text layer read its labels as text
+        (a table of scraps); they are the picture's, not text accurate lost."""
+        intro = "<p>Именно так мы будем заниматься математикой в этой книге и полностью погружаемся.</p>"
+        motto = "Мы уже погрузились. Мы уже все знаем. Можно трогаться."
+        about = "<p>Инфографика связывает визуально все темы книги в единую картину.</p>"
+        caption = "<p><b>Рис. В1.</b> Инфографика</p>"
+        labels = ("Восприятие Зрение Слух Измерение Понимание Управление Робототехника Размышления Логическое "
+                  "Казуальное Этическое Осознавание Память База данных Коммуникация Язык Чтение Письмо Речь "
+                  "Воображение Имитация Создание Совершенствование Обучение Подкрепление Расстановка приоритетов "
+                  "Созидательные инструменты Автоматизация Вход Любые данные Числа Векторы Матрицы Тензоры")
+        acc = f'{intro}<p><i>{motto}</i></p><h2>Инфографика</h2>{about}<p><img src="diagram.jpeg"></p>{caption}'
+        fast = (f"{intro}<p>{motto}</p><h2>Инфографика</h2>{about}"
+                f"<table><tr><td>{labels[:200]}</td><td>{labels[200:]}</td></tr></table>{caption}")
+        layer = text(f"{intro}<p>{motto}</p>Инфографика{about}{labels}{caption}")
+        r = merge_page(acc, fast, layer, digital=True)
+        self.assertEqual(r.source, "accurate")
+        self.assertIn(f"<i>{motto}</i>", r.html)
+        self.assertIn('<img src="diagram.jpeg">', r.html)
+        self.assertNotIn("Робототехника", r.html)
+        self.assertNotIn("<table>", r.html)
+        self.assertFalse(needs_retry(r))
+
+    def test_text_away_from_a_picture_is_still_put_back(self):
+        p1 = "Первый абзац рассказывает о том, как яблони растут и цветут."
+        p2 = "Второй абзац пропал у точного режима целиком, хотя он важен."
+        p3 = "Третий абзац завершает страницу и подводит итог сказанному."
+        acc = f'<p><img src="tree.jpeg"></p><p>{p1}</p><p>{p3}</p>'
+        r = merge_page(acc, f"<p>{p1}</p><p>{p2}</p><p>{p3}</p>", "", digital=False)
+        self.assertIn(p2, text(r.html))
+
     def test_scan_layer_text_not_spliced(self):
         acc = ("<p>Это относится не только к попыткам садовника помочь яблоне, но также к подкормке и методам "
                "специальной обрезки — избегайте тех, кто сосредоточен исключительно на обрезке веток. "

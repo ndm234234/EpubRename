@@ -256,6 +256,37 @@ def _runs(n: int, covered: set[int]) -> list[tuple[int, int]]:
     return runs
 
 
+def _pictures_at(root: Node) -> list[int]:
+    """Where the pictures are among the page's words: the number of words before each one."""
+    at, words = [], 0
+
+    def walk(node):
+        nonlocal words
+        if isinstance(node, Text):
+            words += len(WORD.findall(node.s))
+        elif node.tag == "img":
+            at.append(words)
+        else:
+            for c in node.children:
+                walk(c)
+    walk(root)
+    return at
+
+
+def _on_pictures(witness: list[Tok], acc: list[Tok], pictures: list[int], covered: set[int]) -> set[int]:
+    """Witness words the accurate page lacks that stand where it has a picture: the labels of a
+    diagram or a chart, which fast and the text layer read as text and accurate keeps as a picture."""
+    if not pictures or not witness:
+        return set()
+    to_w = align(acc, witness)
+    out = set()
+    for k in pictures:
+        before = next((to_w[i] for i in range(k - 1, -1, -1) if i in to_w), -1)
+        after = next((to_w[i] for i in range(k, len(acc)) if i in to_w), len(witness))
+        out.update(i for i in range(before + 1, after) if i not in covered)
+    return out
+
+
 def merge_page(acc_html: str, fast_html: str, layer_text: str, digital: bool) -> MergeResult:
     acc_root = parse(acc_html)
     acc_units = units_of(acc_root)
@@ -267,6 +298,9 @@ def merge_page(acc_html: str, fast_html: str, layer_text: str, digital: bool) ->
 
     fast_cov = _covered(fast, acc)
     layer_cov = _covered(layer, acc)
+    pictures = _pictures_at(acc_root)
+    fast_cov |= _on_pictures(fast, acc, pictures, fast_cov)
+    layer_cov |= _on_pictures(layer, acc, pictures, layer_cov)
     base = fast if fast else layer
     cov = (len(fast_cov) / len(fast) if fast else len(layer_cov) / len(layer)) if base else 1.0
     if fast and cov < WHOLE_PAGE_FAST:
