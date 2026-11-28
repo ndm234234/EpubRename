@@ -264,7 +264,10 @@ and [JSZip](https://stuk.github.io/jszip/) (both bundled, no internet needed). N
   don't matter; `Esc` clears it). The book search (`Ctrl+F`) also lists matching bookmarks and notes,
   in a separate group above the matches in the text.
 - Theme: Auto (the system's light or dark, also inside an open book) · light · sepia · dark,
-  remembered; one setting with the catalog (changing it in one changes the other).
+  remembered; one setting with the catalog (changing it in one changes the other). Pictures of
+  ink on paper (a page or title page put in as a picture, black-and-white drawings and diagrams)
+  follow it: in sepia their white paper takes the sepia colour, in dark they turn light on dark.
+  Colour pictures and photos are not recoloured; in dark they are only dimmed.
 - **Print** (computer; also `Ctrl+P` or the browser's Print menu) prints exactly what is on the
   screen, like a picture of it: the open pages, without the bars and buttons, scaled to fit an
   A4 sheet (landscape for a wide window, portrait for a tall one), black on white whatever the theme.

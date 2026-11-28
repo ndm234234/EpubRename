@@ -53,5 +53,6 @@ wait "${PIDS[@]}"   # the checks, not the server
 node $T/folders.mjs $B > "$LOGS/0-folders.txt" 2>&1
 # the app's theme (catalog and reader), also with a library of its own, after the others likewise
 node $T/theme.mjs $B > "$LOGS/0-theme.txt" 2>&1
+node $T/pictures.mjs $B > "$LOGS/0-pictures.txt" 2>&1
 cat "$LOGS"/*.txt | grep -v "^  ok"
 ! grep -q "FAIL\|Error" "$LOGS"/*.txt   # exit status: 0 when every check passed

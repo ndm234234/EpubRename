@@ -549,11 +549,41 @@ const Sync = window.LibrarySync || { available: () => false, signedIn: () => fal
 const THEME_CSS = {
   light: { "body.light": { color: "#1d1d1f", background: "#fdfcf8" } },
   sepia: { "body.sepia": { color: "#3b2f1e !important", background: "#f4ecd8 !important" },
-           "body.sepia *": { color: "inherit !important", "background-color": "transparent !important" } },
+           "body.sepia *": { color: "inherit !important", "background-color": "transparent !important" },
+           // a picture of ink on paper (markInk): its white takes the page's colour
+           "body.sepia img.ink": { "mix-blend-mode": "multiply" } },
   dark:  { "body.dark": { color: "#d8d8dc !important", background: "#161618 !important" },
            "body.dark *": { color: "inherit !important", "background-color": "transparent !important" },
-           "body.dark a, body.dark a *": { color: "#6ea0ff !important" } },
+           "body.dark a, body.dark a *": { color: "#6ea0ff !important" },
+           // ink on paper turns light on dark; other pictures (photos, colour) are only dimmed
+           "body.dark img.ink": { filter: "invert(1) hue-rotate(180deg) brightness(.85)", "mix-blend-mode": "screen" },
+           "body.dark img:not(.ink)": { filter: "brightness(.85)" } },
 };
+// Pictures of ink on paper (a scanned page, a title page, a black-and-white diagram) get the class
+// "ink", so sepia and dark can recolour them like the text. Seen small: little colour, mostly
+// light, few middle greys (a black-and-white photo has many: it is not ink and is not inverted).
+const INK = { size: 40, chroma: 20, light: 0.5, mid: 0.3 };
+function isInk(img) {
+  const c = document.createElement("canvas");
+  c.width = c.height = INK.size;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(img, 0, 0, INK.size, INK.size);
+  const d = x.getImageData(0, 0, INK.size, INK.size).data;   // throws for a picture from elsewhere: not marked
+  let n = 0, chroma = 0, light = 0, mid = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 128) continue;   // see-through
+    const r = d[i], g = d[i + 1], b = d[i + 2], v = (r + g + b) / 3;
+    n++; chroma += Math.max(r, g, b) - Math.min(r, g, b);
+    if (v > 200) light++; else if (v > 60) mid++;
+  }
+  return n > 0 && chroma / n < INK.chroma && light / n > INK.light && mid / n < INK.mid;
+}
+function markInk(doc) {
+  for (const img of doc.images) {
+    const look = () => { try { img.classList.toggle("ink", isInk(img)); } catch {} };
+    if (img.complete && img.naturalWidth) look(); else img.addEventListener("load", look, { once: true });
+  }
+}
 const PREFS = { theme: "auto", font: 100, face: "book", layout: "book" };
 const prefs = Object.assign({}, PREFS, store.get("epubReader:prefs"));
 delete prefs.scroll;
@@ -717,6 +747,7 @@ function makeRendition() {
   rendition.themes.fontSize(prefs.font + "%");
   rendition.hooks.content.register(contents => {
     applyTypo(contents.document);
+    markInk(contents.document);
     contents.document.addEventListener("wheel", onWheel, { passive: false });
     // Taps on the text are heard here, not through epub.js: it listens passively, so the browser
     // would ignore "this tap is the reader's" and act on it too (Chrome's "Touch to Search" sheet)
