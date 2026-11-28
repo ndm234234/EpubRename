@@ -187,7 +187,8 @@ EPUB files are only read. Keep `.index/` next to `index.html` when moving the ca
   they are names in the catalog only, nothing on disk moves or changes). The first one is made from
   a book's page: **Folders** next to Read lists your folders with a tick box each (tick to put the
   book in, untick to take it out, it takes effect at once) and **＋ New folder**. A book can be in
-  several folders. Then a strip of chips appears under the search: your folders by name with
+  several folders; its card shows their names under the author (two, then "+N"; inside a folder,
+  the others), and its page shows them as chips: a tap opens that folder. Then a strip of chips appears under the search: your folders by name with
   their counts, **＋** for a new folder, *Unfiled* (the books in none of them) and *All* (all
   books) at the right end. The chips wrap onto as many rows as they need; on a computer the strip
   stays at the top with the search bar, on a phone it scrolls away with the list while the bar

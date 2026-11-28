@@ -434,6 +434,17 @@ PAGE = r"""<!DOCTYPE html>
   .authors a { color: inherit; text-decoration: none; cursor: pointer; }
   .authors a:hover { color: var(--accent); }
   .meta { color: var(--muted); font-size: 12px; opacity: .85; }
+  /* the folders a book is in: a plain line on its card (one line, … at the end), chips on its page */
+  .bfolders { display: flex; align-items: center; gap: 4px; min-width: 0; color: var(--muted); font-size: 12px; }
+  .bfolders .ic { flex: none; width: 13px; height: 13px; }
+  .bfolders span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dfolders { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .ftag { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 30px; padding: 0 10px;
+          font: inherit; font-size: 13px; font-weight: 500; color: var(--text); background: var(--surface);
+          border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+  .ftag:hover { background: var(--surface-2); color: var(--accent); }
+  .ftag .ic { flex: none; width: 14px; height: 14px; color: var(--muted); }
+  .ftag b { min-width: 0; font-weight: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .actions { display: flex; align-items: center; gap: 4px; margin: auto 0 0; padding-top: 8px; }   /* bottom of the card: Read buttons line up */
   .act { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 8px; border: 0;
          border-radius: 8px; background: none; font: inherit; font-size: 13px; font-weight: 500;
@@ -507,6 +518,7 @@ PAGE = r"""<!DOCTYPE html>
     .dact .btn { padding: 0 18px; }
     .dact .long { display: none; }
     .dtext { margin-top: 0; border-top: 0; padding-top: 0; }
+    .dfolders { margin-bottom: 16px; }   /* the text follows at once here (the buttons are pinned below) */
   }
 
   .note { max-width: 1400px; margin: 16px auto 0; padding: 12px 16px; border-radius: 12px; display: flex;
@@ -998,7 +1010,7 @@ function openDetail(b, animate = true) {
   const body = el("div", { class: "dbody" },
     el("h3", {}, el("button", { class: "dtitle", type: "button", title: "Copy the title", on: () => copyTitle(b.title) }, b.title)),
     authorLinks(b),
-    el("div", { class: "meta" }, metaLine(b)),
+    el("div", { class: "meta" }, metaLine(b)), pageFolders(shelves(), b),
     el("div", { class: "dact" }, read, folderButton(b), ...(offline ? [offline.bookButton(b), saveLink(b, { class: "btn", "aria-label": "Save the file" }, icon("download"))]
                                            : [saveLink(b, { class: "btn" }, icon("download"), "Save")])),
     b.description ? el("div", { class: "dtext" }, b.description)
@@ -1079,7 +1091,7 @@ function card(b) {
     saveLink(b, { class: "act save", "aria-label": "Save as…" }, icon("download")));
   return el("article", { class: "book" + (offline ? offline.marks(b) : ""), "data-key": b.href }, shelf,
     el("div", { class: "info" }, title, authorLinks(b),
-      el("div", { class: "meta" }, metaLine(b)),
+      el("div", { class: "meta" }, metaLine(b)), cardFolders(b),
       b.error ? el("div", { class: "err" }, "⚠ " + b.error) : null, actions));
 }
 
@@ -1097,12 +1109,18 @@ function render(keep) {
   const anchor = keep ? topRow() : null;
   renderList();
   if (anchor) placeRow(anchor);
+  if (current) {   // the open book page's folder chips follow a tick, a rename, a sync
+    const old = detail.querySelector(".dfolders"), now = pageFolders(drawn.map, current);
+    if (old) old.replaceWith(...(now ? [now] : []));
+    else if (now) detail.querySelector(".dbody .meta").after(now);
+  }
 }
 function renderList() {
   $("searchBox").classList.toggle("filled", !!$("q").value);   // hides the "/" hint
   const words = norm($("q").value).split(/\s+/).filter(Boolean);
   openedAt = openedTimes();
   const map = shelves(), open = renderFolders(map);
+  drawn = { map, live: liveFolders(map), open: open ? open.id : null };
   const inside = open ? folderBooks(map, open) : books, where = open && (open.id === UNFILED ? "not in folders" : `in ${open.name}`);
   const shown = inside.filter(b => words.every(w => b._search.includes(w))).sort(sorters[$("sort").value]);
   $("count").textContent = open
@@ -1156,6 +1174,34 @@ function saveShelves(map) {
   try { localStorage.setItem(SHELVES, JSON.stringify(map)); } catch {}
   Sync.changed();
   render(true);
+}
+// The folders a book is in, by name: a line on its card (the open folder left out, two names then
+// +N, all of them in its title; plain text, the cover and the title open the book page) and chips on
+// its page (all of them; a tap opens that folder). Nothing for a book in no folder.
+let drawn = { map: {}, live: [], open: null };   // what renderList drew with, for the cards
+const foldersOf = (map, b, live = liveFolders(map)) => live.filter(f => Shelves.has(map, f.id, b.id));
+function cardFolders(b) {
+  if (!Shelves) return null;
+  const all = foldersOf(drawn.map, b, drawn.live), names = all.filter(f => f.id !== drawn.open).map(f => f.name);
+  if (!names.length) return null;
+  const text = names.slice(0, 2).join(" · ") + (names.length > 2 ? ` +${names.length - 2}` : "");
+  return el("div", { class: "bfolders", title: all.map(f => f.name).join(", ") }, icon("shelf"), el("span", {}, text));
+}
+function pageFolders(map, b) {
+  if (!Shelves) return null;
+  const all = foldersOf(map, b);
+  return all.length ? el("div", { class: "dfolders", role: "group", "aria-label": "In folders" }, ...all.map(f =>
+    el("button", { class: "ftag", type: "button", "data-folder": f.id, title: `Open the folder "${f.name}"`, on: () => goFolder(f.id) },
+       icon("shelf"), el("b", {}, f.name)))) : null;
+}
+// from a book page: the page (and its sheet) leave history first, then the folder opens as its one step
+function goFolder(id) {
+  const st = history.state || {}, steps = (st.book ? 1 : 0) + (st.pick ? 1 : 0);
+  closePick(false);
+  closeDetail();
+  if (!steps) { openFolder(id); return; }
+  addEventListener("popstate", () => openFolder(id), { once: true });
+  history.go(-steps);
 }
 const liveFolders = map => Shelves ? Shelves.list(map, id => bookIds.has(id), coll.compare) : [];
 // the books of an open folder ({id, name}), or of Not in folders ({id: UNFILED})
