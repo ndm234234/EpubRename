@@ -2,7 +2,7 @@
 
 Small Python scripts to tidy up an EPUB collection:
 
-- **`epub_rename.py`** — copies books from `In/` into `Out/<Author>/<Author> - <Title>.epub`,
+- **`epub_rename.py`** — copies books from `In/` into `Out/Books/<Author>/<Author> - <Title>.epub`,
   using the author and title stored inside each book, and verifies every copy.
 - **`make_server.py`** — builds `index.html`, an offline catalog of a book folder
   with covers, search, sorting and a built-in reader. It runs automatically at the end of `epub_rename.py`
@@ -63,15 +63,18 @@ python3 epub_rename.py
 ```
 
 `In/` and `Out/` are taken from the **current folder**: run the script where your `In/`
-folder is. `Out/` is created automatically.
+folder is. `Out/` is created automatically. Books go into `Out/Books/`; the catalog
+(`index.html`, the "Open Library" launchers) sits in `Out/` itself. Books left in `Out/` outside
+`Books/` (the old layout) are listed with a warning: move their folders into `Out/Books/`.
 
 ```
 In/                                  Out/
-├── a8f3k2.epub          ──►         ├── Clara Whitmore/
-├── x91bd0.epub                      │   ├── Clara Whitmore - The Lantern Keeper.epub
-└── q7mm41.epub                      │   └── Clara Whitmore - Paper Harbors.epub
-                                     ├── Oskar Brandt, Mila Fenwick/
-                                     │   └── Oskar Brandt, Mila Fenwick - The Clockwork Orchard.epub
+├── a8f3k2.epub          ──►         ├── Books/
+├── x91bd0.epub                      │   ├── Clara Whitmore/
+└── q7mm41.epub                      │   │   ├── Clara Whitmore - The Lantern Keeper.epub
+                                     │   │   └── Clara Whitmore - Paper Harbors.epub
+                                     │   └── Oskar Brandt, Mila Fenwick/
+                                     │       └── Oskar Brandt, Mila Fenwick - The Clockwork Orchard.epub
                                      ├── index.html
                                      └── .index/covers/
 ```
@@ -86,7 +89,7 @@ In/                                  Out/
   - `Whitmore, Clara` → `Clara Whitmore` (exactly one comma means "Last, First");
   - `WHITMORE CLARA` → `Whitmore Clara` (all caps → normal case);
   - the same author written with a different word order, case or `ё`/`е`
-    goes into one folder; an existing folder in `Out/` wins.
+    goes into one folder; an existing folder in `Out/Books/` wins.
 - **Co-authors** — all authors are used, separated by commas; with more than two
   authors the first two are kept followed by `и др.` ("et al.").
 - **Source files are never modified** — books in `In/` are only read; their SHA-256 is

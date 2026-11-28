@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Copy EPUB files from the In folder to Out/<Authors>/<Authors> - <Title>.epub.
+"""Copy EPUB files from the In folder to Out/Books/<Authors>/<Authors> - <Title>.epub.
+
+The catalog (index.html, launchers) is built in Out/ itself, next to Books/.
 
 Author and title are taken from the book metadata (the OPF file inside the EPUB).
 Source files in In are only read, never modified.
@@ -20,6 +22,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent  # real location (symlinks resolved
 BASE_DIR = Path.cwd()                         # In/ and Out/ are taken from the current folder
 IN_DIR = BASE_DIR / "In"
 OUT_DIR = BASE_DIR / "Out"
+BOOKS_DIR = OUT_DIR / "Books"                 # author folders live here
 UNKNOWN_AUTHOR = "Unknown Author"
 AUTHOR_SEPARATOR = ", "   # between co-authors (" - " separates authors from the title)
 MAX_AUTHORS_SHOWN = 2     # more authors than this -> first two + ET_AL
@@ -110,12 +113,12 @@ def author_key(name: str) -> tuple[str, ...]:
 def build_author_names(raw_authors: list[str]) -> dict[tuple[str, ...], str]:
     """Pick a single spelling for each author, used as the folder name.
 
-    Priority: an existing folder in Out, then the most frequent
+    Priority: an existing folder in Out/Books, then the most frequent
     spelling among the books in the current run.
     """
     names: dict[tuple[str, ...], str] = {}
-    if OUT_DIR.is_dir():
-        for d in sorted(OUT_DIR.iterdir()):
+    if BOOKS_DIR.is_dir():
+        for d in sorted(BOOKS_DIR.iterdir()):
             if d.is_dir():
                 names.setdefault(author_key(d.name), d.name)
 
@@ -163,8 +166,8 @@ def process_book(book: Path, book_meta, author_names) -> tuple[str, str, str]:
     safe_author = sanitize(display_author, UNKNOWN_AUTHOR)
     safe_title = sanitize(title, book.stem)
 
-    author_dir = OUT_DIR / safe_author
-    author_dir.mkdir(exist_ok=True)
+    author_dir = BOOKS_DIR / safe_author
+    author_dir.mkdir(parents=True, exist_ok=True)
 
     # The file name keeps the full author string (e.g. trailing "и др."), which
     # is not allowed at the end of a folder name
@@ -195,6 +198,19 @@ def process_book(book: Path, book_meta, author_names) -> tuple[str, str, str]:
     return ("overwritten" if exists else "new"), rel, line
 
 
+def warn_old_layout() -> None:
+    """Point at books still in Out/ outside Books/ (the old layout): they'd show twice in the catalog."""
+    stray = sorted(p for p in OUT_DIR.rglob("*.epub")
+                   if p.is_file() and BOOKS_DIR not in p.parents and ".index" not in p.parts)
+    if stray:
+        print(f"⚠️  {len(stray)} book(s) are outside Out/Books — move their folders into Out/Books:")
+        for p in stray[:10]:
+            print(f"  {p.relative_to(OUT_DIR)}")
+        if len(stray) > 10:
+            print(f"  … and {len(stray) - 10} more")
+        print()
+
+
 def main() -> int:
     # Print each line immediately, even when output goes to a pipe or a file
     sys.stdout.reconfigure(line_buffering=True)
@@ -208,7 +224,8 @@ def main() -> int:
         print(f"❌ In and Out folders must not be the same or nested in each other:\n"
               f"  In:  {in_real}\n  Out: {out_real}")
         return 1
-    OUT_DIR.mkdir(exist_ok=True)
+    BOOKS_DIR.mkdir(parents=True, exist_ok=True)
+    warn_old_layout()
 
     books = sorted(p for p in IN_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".epub")
     if not books:

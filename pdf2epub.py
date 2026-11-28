@@ -7,7 +7,7 @@ Usage:
                         [--keep-work]
 
 By default every .pdf in ./Pdf is converted into ./In/<same name>.epub, so that
-epub_rename.py can then sort the new books into Out/ like any other EPUB.
+epub_rename.py can then sort the new books into Out/Books/ like any other EPUB.
 The PDF files are only read, never changed.
 
 Every page is recognised from its picture by Marker (free, offline), read twice (fast and
@@ -1462,7 +1462,7 @@ def main() -> int:
         print(f"Have a look; the whole book: the same command without {'--pages' if args.pages else '--page'}"
               + (" (the pages recognised now are not read again)" if engine else ""))
     elif done:
-        print("Next: python3 epub_rename.py  (sorts them into Out/ and updates the catalog)")
+        print("Next: python3 epub_rename.py  (sorts them into Out/Books/ and updates the catalog)")
     return 1 if failed else 0
 
 
