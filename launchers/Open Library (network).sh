@@ -2,7 +2,8 @@
 # Opens the book catalog (index.html in this folder) for this computer AND your home network,
 # so you can read on a phone or tablet connected to the same Wi-Fi.
 # Only devices with home-network addresses (192.168.x.x, 10.x.x.x, 172.16-31.x.x) get an answer;
-# files are only read, nothing can be changed. Anyone on your Wi-Fi who knows the address can open it.
+# files are only read, nothing can be changed. Other devices get only a sign-in page until they sign in
+# with an account (a router that forwards the internet to this port arrives from a home address).
 # Stop it with Ctrl+C or by closing the terminal; it also stops by itself after
 # 3 hours without use. Needs python3 (installed on most Linux systems).
 cd "$(dirname "$0")" || exit 1
@@ -316,7 +317,7 @@ def stop_when_idle():
 addresses = home_addresses()
 print("\n  Library is open on your home network.\n")
 if addresses:
-    print("  On a phone or tablet in the same Wi-Fi open:")
+    print("  This computer in the home network (forward this port on the router, which does the https):")
     for a in addresses:
         print(f"      http://{a}:{port}/")
     if len(addresses) > 1:
@@ -325,8 +326,8 @@ else:
     print("  This computer doesn't seem to be in a home network (no 192.168.x.x / 10.x.x.x address).")
 print(f"\n  On this computer:  http://localhost:{port}/\n  Folder:            {ROOT}\n")
 print("  The phone can't connect? Check that a firewall (ufw, firewalld) allows port", port)
-print("  Anyone on this Wi-Fi who knows the address can open the library; only reading places are written")
-print("  (to the .sync folder), and only by signed-in devices.")
+print("  Other devices see only a sign-in page until they sign in, on the library's https:// address")
+print("  (the router's); a new account needs the library code. Only reading places are written (.sync).")
 print(f"  Library code (to create an account on a new device): {store.code()}")
 print("  Press Ctrl+C or close this window to stop.", flush=True)
 print("\n  Devices using the library:", flush=True)

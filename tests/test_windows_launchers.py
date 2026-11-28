@@ -188,9 +188,11 @@ def test_ps1_has_the_sign_in_cookie_as_python():
     assert "'/__sync/session'" in text and "Max-Age=0" in text
     for name in ("Test-SyncSignedIn", "Get-SyncCookieToken", "Invoke-SyncSession"):
         assert re.search(rf"(?m)^function {name}\b", text), name
-    # sign-out forgets the remembered sign-ins at once
+    # sign-out forgets that key's remembered sign-in at once (only a real sign-out: not anyone's)
     logout = text[text.index("function Invoke-SyncLogout"):]
-    assert "$store.Signed.Clear()" in logout[:logout.index("\n}\n")]
+    logout = logout[:logout.index("\n}\n")]
+    assert "$store.Signed.Remove($auth.Token)" in logout and "Signed.Clear()" not in logout
+    assert logout.index("return (New-SyncError 401") < logout.index("$store.Signed.Remove")
 
 
 def test_network_bat_shuts_everything_before_a_sign_in():
@@ -202,4 +204,9 @@ def test_network_bat_shuts_everything_before_a_sign_in():
     assert "signin.html" in code and "not signed in" in code
     assert "Set-Cookie: $($answer.Cookie)" in code
     local = code[code.index("function IsLocal("):]
-    assert "'localhost', '127.0.0.1', '[::1]'" in local[:local.index("\n}\n")]
+    # the gate decides on the decoded path, as the files are served (%5F_library_root is __library_root)
+    g = code[code.index("function Gate("):]
+    g = g[:g.index("\n}\n")]
+    assert "UnescapeDataString($target.Split('?')[0])" in g
+    assert "'^\\[::1\\](:\\d+)?\\z'" in local[:local.index("\n}\n")]
+    assert "Secure" in PS1.read_text(encoding="utf-8").split("$global:SyncCookieAttrs = ")[1].split("\n")[0]

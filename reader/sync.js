@@ -133,8 +133,8 @@
   function logout() {
     var a = readAccount();
     lsDel(K_ACCOUNT);
-    if (!a || !a.token) return Promise.resolve({ ok: true });
-    return limited(AUTH_TIMEOUT, function (signal) { return call('POST', '/__sync/logout', a.token, null, signal); })
+    // asked even without a token here: the server also clears the sign-in cookie (network library)
+    return limited(AUTH_TIMEOUT, function (signal) { return call('POST', '/__sync/logout', a && a.token, null, signal); })
       .then(function () { return { ok: true }; }, function () { return { ok: true }; });
   }
 

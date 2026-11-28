@@ -41,7 +41,7 @@ $global:SyncEmailPattern = '(?=[^@]{1,64}@)[a-z0-9_+-]+(?:\.[a-z0-9_+-]+)*@[a-z0
 $global:SyncEmailMax = 128
 # The sign-in cookie of the network library (library_sync.py: COOKIE, COOKIE_ATTRS, COOKIE_AGE)
 $global:SyncCookie = 'libsess'
-$global:SyncCookieAttrs = 'HttpOnly; SameSite=Lax; Path=/'
+$global:SyncCookieAttrs = 'HttpOnly; Secure; SameSite=Lax; Path=/'
 $global:SyncCookieAge = 34560000
 $global:SyncSignedFor = 60   # seconds a token found valid is taken as valid without a lookup
 # One JSON token (after optional whitespace) per match; \G makes the matches back to back, so the
@@ -858,11 +858,11 @@ function Invoke-SyncSession($store, [hashtable]$headers, [byte[]]$body) {
 }
 
 function Invoke-SyncLogout($store, [hashtable]$headers, [byte[]]$body) {
-  $store.Signed.Clear()
   $lock = Enter-SyncLock $store
   try {
     $auth = Get-SyncAuth $store $headers
     if ($null -eq $auth) { return (New-SyncError 401 'unauthorized') }
+    $store.Signed.Remove($auth.Token)   # this key is no sign-in any more, at once
     $path = Get-SyncAccountPath $store $auth.Login
     $j = Read-SyncJson $path ($auth.Login + '.json')
     $tokens = Get-SyncMember $j.Node 'tokens'

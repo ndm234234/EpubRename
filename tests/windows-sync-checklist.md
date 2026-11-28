@@ -50,7 +50,7 @@ requests that are neither. Here `<ip>` is the Windows computer's home address an
    `! <ip> · unknown browser — not signed in` line, not one per request.
 2. On this computer: `http://localhost:<port>/` opens the catalog without a sign-in.
 3. `curl -i -X POST -H "Content-Type: application/json" -d '{"login":"jane.doe@example.com","password":"<pw>"}' http://<ip>:<port>/__sync/login`
-   → `200` with `Set-Cookie: libsess=<64 hex>; HttpOnly; SameSite=Lax; Path=/; Max-Age=34560000`.
+   → `200` with `Set-Cookie: libsess=<64 hex>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=34560000`.
    `curl -i -H "Cookie: libsess=<that>" http://<ip>:<port>/index.html` → `200`, the catalog.
 4. `curl -i -X POST -H "Authorization: Bearer <that>" http://<ip>:<port>/__sync/session` → `204` with the
    same `Set-Cookie`; with a made-up 64-hex token → `401`, no `Set-Cookie`.

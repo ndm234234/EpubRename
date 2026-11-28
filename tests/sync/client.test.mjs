@@ -52,7 +52,7 @@ function fakeServer() {
       if (body.login === 'slow@example.com') return Promise.resolve(res(429, { wait: 60 }));
       return Promise.resolve(s.accounts[body.login] === body.password ? res(200, { token: s.token }) : res(401, {}));
     }
-    if (url === '/__sync/logout') return Promise.resolve(res(204, null));
+    if (url === '/__sync/logout') { s.logouts = (s.logouts || 0) + 1; return Promise.resolve(res(204, null)); }
     if (!authed) return Promise.resolve(res(401, {}));
     if (url === '/__sync/data' && (opts.method || 'GET') === 'GET') return Promise.resolve(res(200, { version: s.version, doc: JSON.parse(JSON.stringify(s.doc)) }));
     if (url === '/__sync/data') {
@@ -161,6 +161,13 @@ test('account: register / login / logout and error mapping', async () => {
   // logout while offline still signs out locally
   assert.deepEqual(await S.logout(), { ok: true });
   assert.equal(S.account(), null);
+});
+
+test('logout asks the server even without an account here (it clears the sign-in cookie)', async () => {
+  const S = env({ signedIn: false });
+  const before = srv.logouts || 0;
+  assert.deepEqual(await S.logout(), { ok: true });
+  assert.equal(srv.logouts, before + 1);
 });
 
 test('sync merges both ways', async () => {

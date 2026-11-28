@@ -3,7 +3,7 @@ rem Opens the book catalog (index.html in this folder) for this computer AND you
 rem so you can read on a phone or tablet connected to the same Wi-Fi.
 rem Only devices with home-network addresses (192.168.x.x, 10.x.x.x, 172.16-31.x.x) get an answer;
 rem files are only read; signed-in devices save their reading places in the .sync folder (library-sync.ps1,
-rem next to this file). Anyone on your Wi-Fi who knows the address can open it.
+rem next to this file). Other devices get only a sign-in page until they sign in with an account.
 rem The first time, Windows asks whether PowerShell may use the network: allow it for Private networks.
 rem Close this window to stop. Uses PowerShell, which is part of Windows: nothing to install.
 set "LIB_SELF=%~f0"
@@ -128,20 +128,19 @@ function IsLocal($addr, $headers) {
   if ($addr.IsIPv4MappedToIPv6) { $addr = $addr.MapToIPv4() }
   if (-not [Net.IPAddress]::IsLoopback($addr)) { return $false }
   $h = ([string]$headers['Host']).Trim().ToLowerInvariant()
-  if ($h.StartsWith('[')) { $h = $h.Substring(0, $h.IndexOf(']') + 1) }
-  elseif ($h.Split(':').Count -eq 2) { $h = $h.Split(':')[0] }
-  return (@('localhost', '127.0.0.1', '[::1]') -ccontains $h)
+  return (($h -cmatch '^(localhost|127\.0\.0\.1)(:\d+)?\z') -or ($h -cmatch '^\[::1\](:\d+)?\z'))
 }
 
 # $true: the request may go on. $false: answered 401 already (a page asked for gets signin.html,
 # anything else an empty body); logged once per device until it is let in.
 function Gate($rq, $method, $target, $addr, $ip, $ua) {
   $headers = $rq.Headers
-  $p = $target.Split('?')[0]
+  # decoded, as the files are served (%5F_library_root is __library_root there)
+  try { $p = '/' + [Uri]::UnescapeDataString($target.Split('?')[0]).TrimStart('/') } catch { $p = $target.Split('?')[0] }
   $key = "$ip|$(DeviceKind $ua)"
   $ok = IsLocal $addr $headers
   if (-not $ok -and $p -cne '/__library_root') {   # only launchers on this computer ask that one
-    if (($method -ceq 'GET' -or $method -ceq 'HEAD') -and [Uri]::UnescapeDataString($p) -ceq '/signin.html') { $ok = $true }
+    if (($method -ceq 'GET' -or $method -ceq 'HEAD') -and $p -ceq '/signin.html') { $ok = $true }
     elseif ($method -ceq 'POST' -and $openPosts -ccontains $p) { $ok = $true }
     else {
       try { if (Test-SyncSignedIn $store $headers) { $ok = $true } } catch {}
@@ -439,7 +438,7 @@ Write-Host ""
 Write-Host "  Library is open on your home network." -ForegroundColor Green
 Write-Host ""
 if ($addresses.Count) {
-  Write-Host "  On a phone or tablet in the same Wi-Fi open:"
+  Write-Host "  This computer in the home network (forward this port on the router, which does the https):"
   foreach ($a in $addresses) { Write-Host "      http://${a}:$port/" -ForegroundColor Cyan }
   if ($addresses.Count -gt 1) { Write-Host "  (several addresses: this computer has several networks; try the 192.168... one first)" }
 } else {
@@ -451,8 +450,8 @@ Write-Host "  Folder:            $root"
 Write-Host ""
 Write-Host "  The phone can't connect? Allow PowerShell in the Windows Firewall question" -ForegroundColor DarkGray
 Write-Host "  (Private networks), and check that this Wi-Fi is set as a Private network." -ForegroundColor DarkGray
-Write-Host "  Anyone on this Wi-Fi who knows the address can open the library; only reading places are written" -ForegroundColor DarkGray
-Write-Host "  (to the .sync folder), and only by signed-in devices." -ForegroundColor DarkGray
+Write-Host "  Other devices see only a sign-in page until they sign in, on the library's https:// address" -ForegroundColor DarkGray
+Write-Host "  (the router's); a new account needs the library code. Only reading places are written (.sync)." -ForegroundColor DarkGray
 try { $code = Get-SyncCode $store } catch { $code = "(can't read .sync\code.txt: $($_.Exception.Message))" }
 Write-Host "  Library code (to create an account on a new device): $code"
 Write-Host "  Close this window to stop."

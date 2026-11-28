@@ -56,7 +56,8 @@ need the library code, which the owner gives out.
 - **The cookie** holds the same device token the sync already uses (`Authorization: Bearer`):
   sign-in (`/__sync/login`) and registration (`/__sync/register`) answers set it as well as
   returning the token as now. `HttpOnly`, `SameSite=Lax`, `Path=/`, long-lived (400 days, the
-  browsers' cap). Not `Secure`: the server itself only sees plain HTTP (the router does HTTPS).
+  browsers' cap). `Secure` (changed after review: the browser speaks https to the router, so the
+  cookie still flows, and a plain-http request elsewhere can't leak it in the clear).
 - **HTTPS only for passwords (the owner's choice):** at home too the library is opened by the
   router's `https://` address. Opened over plain `http://` (e.g. `http://192.168...`, not
   localhost), the sign-in page shows no form, only "Open the library by its https:// address" —

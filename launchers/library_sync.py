@@ -59,8 +59,10 @@ RESERVED = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f
 TOKEN_RE = re.compile(r"[0-9a-f]{64}")
 COOKIE = "libsess"
 COOKIE_AGE = 400 * 24 * 3600     # 400 days, the browsers' cap
-# Not Secure: this server only sees plain HTTP (the router does the HTTPS)
-COOKIE_ATTRS = "HttpOnly; SameSite=Lax; Path=/"
+# Secure: the browser sends it only over https (it speaks https to the router, which passes plain
+# HTTP on to this server), so a page on plain http elsewhere can't make it leak in the clear
+COOKIE_ATTRS = "HttpOnly; Secure; SameSite=Lax; Path=/"
+LOCAL_HOST_RE = re.compile(r"(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?")
 SIGNED_IN_CACHE = 60             # seconds a token found valid is taken as valid without a lookup
 # open without a sign-in (the sign-in page asks them); everything else is closed
 OPEN_POSTS = ("/__sync/login", "/__sync/register", "/__sync/session", "/__sync/logout")
@@ -466,12 +468,12 @@ class SyncStore:
         return self._err(401, "unauthorized") if login is None else (204, JSON_TYPE, b"")
 
     def _logout(self, method, headers, body):
-        with self._signed_lock:
-            self._signed.clear()
         with self._locked():
             login, token = self._auth(headers)
             if login is None:
                 return self._err(401, "unauthorized")
+            with self._signed_lock:   # this key is no sign-in any more, at once
+                self._signed.pop(token, None)
             acc = self._read_json(self._account_path(login))
             acc["tokens"] = [t for t in acc["tokens"] if t != _hash_token(token)]
             self._write(self._account_path(login), acc)
@@ -604,12 +606,7 @@ def is_local(handler):
         ip = ip[7:]
     if ip not in ("127.0.0.1", "::1"):
         return False
-    host = (handler.headers.get("Host") or "").strip().lower()
-    if host.startswith("["):
-        host = host[:host.find("]") + 1]
-    elif host.count(":") == 1:
-        host = host.split(":")[0]
-    return host in ("localhost", "127.0.0.1", "[::1]")
+    return bool(LOCAL_HOST_RE.fullmatch((handler.headers.get("Host") or "").strip().lower()))
 
 
 def gate(handler, store, page):

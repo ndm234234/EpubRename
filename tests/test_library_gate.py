@@ -96,9 +96,8 @@ def test_sign_in_gives_the_cookie_and_it_opens_the_library(server):
     token = json.loads(out)["token"]
     c = cookie_of(h)
     assert c and c.startswith(f"libsess={token};")
-    for part in ("HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=34560000"):
-        assert part in c
-    assert "Secure" not in c
+    for part in ("HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=34560000", "Secure"):
+        assert part in c   # Secure: never sent over plain http (the browser speaks https to the router)
     s, out, _ = ask(base, "GET", "/index.html", accept=PAGE, cookie=token)
     assert s == 200 and b"the catalog" in out
     s, out, _ = ask(base, "GET", BOOK, cookie=token)
@@ -132,3 +131,12 @@ def test_sign_out_closes_the_library(server):
     # an already dead key: the cookie is still cleared (the page can't clear an HttpOnly cookie)
     s, _, h = ask(base, "POST", "/__sync/logout", body={}, cookie=token)
     assert s == 401 and "Max-Age=0" in cookie_of(h)
+
+
+def test_only_this_computer_s_own_names_are_local(server):
+    base, _ = server
+    port = base.rsplit(":", 1)[1]
+    for host in ("[::1].evil.com", "[::1]evil", "localhost.evil.com", "127.0.0.1.nip.io", f"[::1]:{port}x"):
+        assert ask(base, "GET", "/index.html", host=host)[0] == 401, host
+    for host in ("[::1]", f"[::1]:{port}", f"localhost:{port}"):
+        assert ask(base, "GET", "/index.html", host=host)[0] == 200, host
