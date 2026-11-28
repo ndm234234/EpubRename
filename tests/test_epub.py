@@ -182,6 +182,38 @@ class AskTest(unittest.TestCase):
             self.assertEqual(pdf2epub.ask("Title ", "Тихие реки"), "Тихие реки, том 2")
 
 
+class BookMetaTest(unittest.TestCase):
+    def meta(self, answers, tty=True, **args):
+        from test_hybrid import make_pdf
+        ns = type("Args", (), {"title": None, "author": None, "yes": False, **args})()
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf = make_pdf(Path(tmp) / "Мила Фенвик - Тихие реки.pdf")
+            asked = []
+
+            def answer(prompt):
+                asked.append(prompt)
+                return answers.pop(0)
+            with mock.patch("builtins.input", side_effect=answer), \
+                    mock.patch.object(sys.stdin, "isatty", return_value=tty), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                title, author, _ = pdf2epub.book_meta(pdf, ns)
+        return title, author, asked
+
+    def test_found_names_are_asked_too(self):
+        """A guess can be wrong: the title and author found are offered, not taken silently."""
+        title, author, asked = self.meta(["", "Мила Ф. Фенвик"])
+        self.assertEqual((title, author), ("Тихие реки", "Мила Ф. Фенвик"))
+        self.assertIn("[Тихие реки]", asked[0])
+        self.assertIn("[Мила Фенвик]", asked[1])
+
+    def test_not_asked(self):
+        self.assertEqual(self.meta([], yes=True), ("Тихие реки", "Мила Фенвик", []))
+        self.assertEqual(self.meta([], tty=False), ("Тихие реки", "Мила Фенвик", []))
+        self.assertEqual(self.meta([], title="Т", author="А"), ("Т", "А", []))
+        title, author, asked = self.meta([""], author="Ян Тук")
+        self.assertEqual((title, author, len(asked)), ("Тихие реки", "Ян Тук", 1), "only what is not given")
+
+
 class MainTest(unittest.TestCase):
     def test_main_falls_back_to_quick(self):
         from test_hybrid import make_pdf

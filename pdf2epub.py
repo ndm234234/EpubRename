@@ -31,7 +31,7 @@ What ends up in the book:
   - the first page as the cover;
   - title and author from the PDF properties or from a file name like
     "Author - Title.pdf", or "Title Author Name.pdf" when that name is on the first pages;
-    when the author is unknown the script asks (or use
+    they are only suggestions: the script asks for both (or use
     --title / --author, --yes to never ask).
 
 A book that already exists in the output folder is skipped (--force overwrites it).
@@ -1238,15 +1238,17 @@ def ask(prompt: str, default: str) -> str:
 
 
 def book_meta(pdf: Path, args) -> tuple[str, str, int]:
-    """Title, author (asked when unknown) and the number of pages."""
+    """Title, author and the number of pages. What was found is only a suggestion (it can be
+    wrong): it is asked, unless --yes, --title/--author, or no terminal to ask in."""
     info = read_info(pdf)
     first = run(["pdftotext", "-f", "1", "-l", "5", "-enc", "UTF-8", str(pdf), "-"]).stdout.decode("utf-8", "replace")
     title, author = guess_meta(pdf, info, args, first)
-    if not author and not args.yes and sys.stdin.isatty():
-        print(f"\n📄 {pdf.name}: the author is not in the file; Enter keeps a suggestion, "
-              "Tab puts it in to change it")
-        title = ask("Title ", title)
-        author = ask("Author", author)
+    if not args.yes and sys.stdin.isatty() and (args.title is None or args.author is None):
+        print(f"\n📄 {pdf.name}: Enter keeps the suggestion, Tab puts it in to change it")
+        if args.title is None:
+            title = ask("Title ", title)
+        if args.author is None:
+            author = ask("Author", author)
     try:
         pages = int(info.get("Pages", "0"))
     except ValueError:
