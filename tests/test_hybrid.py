@@ -13,8 +13,8 @@ import pdf2epub_parts.hybrid as hy  # noqa: E402
 from pdf2epub import check_epub  # noqa: E402
 from pdf2epub_parts.engine import Engine, MarkerError  # noqa: E402
 
-SENTENCES = ["Первая страница рассказывает о том, как дети растут и учатся новому каждый день.",
-             "Вторая страница продолжает рассказ о воспитании и о том, что важно родителям.",
+SENTENCES = ["Первая страница рассказывает о том, как яблони растут и цветут каждую весну.",
+             "Вторая страница продолжает рассказ об уходе за садом и о том, что важно садоводам.",
              "Третья страница подводит итог и завершает эту короткую тестовую книгу."]
 
 
@@ -316,11 +316,11 @@ class BookPartsTest(unittest.TestCase):
         blocks = [Block("page", level=1, page=1), Block("h", "СОДЕРЖАНИЕ", "СОДЕРЖАНИЕ", 1, page=1),
                   Block("table", rows=[["<b>ПРЕДИСЛОВИЕ</b>", "<b>15</b>"]], page=1),
                   Block("page", level=2, page=2),
-                  Block("h", "ПРИНЦИП 1. КЛЮЧИ 37", "ПРИНЦИП 1. КЛЮЧИ 37", 2, page=2),
-                  Block("p", "Ключ 1. Оценка 42", "Ключ 1. Оценка 42", page=2),
+                  Block("h", "ШАГ 1. ПОЛИВ 37", "ШАГ 1. ПОЛИВ 37", 2, page=2),
+                  Block("p", "Совет 1. Утро 42", "Совет 1. Утро 42", page=2),
                   Block("page", level=3, page=3), Block("p", "Текст главы.", "Текст главы.", page=3)]
-        toc = Toc("СОДЕРЖАНИЕ", [TocEntry("ПРЕДИСЛОВИЕ", 15, 0, 1), TocEntry("ПРИНЦИП 1. КЛЮЧИ", 37, 0, 2),
-                                 TocEntry("Ключ 1. Оценка", 42, 10, 2, level=2)], [1, 2])
+        toc = Toc("СОДЕРЖАНИЕ", [TocEntry("ПРЕДИСЛОВИЕ", 15, 0, 1), TocEntry("ШАГ 1. ПОЛИВ", 37, 0, 2),
+                                 TocEntry("Совет 1. Утро", 42, 10, 2, level=2)], [1, 2])
         tocs = hy.place_tocs(blocks, [toc])
         self.assertEqual(tocs, [toc])
         self.assertEqual([b.kind for b in blocks], ["page", "h", "toc", "page", "page", "p"])
@@ -329,9 +329,9 @@ class BookPartsTest(unittest.TestCase):
         from pdf2epub import Block
         blocks = [Block("h", "СОДЕРЖАНИЕ", "СОДЕРЖАНИЕ", 1, page=1),
                   Block("table", rows=[["<b>ПРЕДИСЛОВИЕ</b>", "<b>15</b>"], ["Как читать", "17"],
-                                       ["<b>ВВЕДЕНИЕ</b>", "<b>19</b>"], ["Симптомы", "21"]], page=1)]
+                                       ["<b>ВВЕДЕНИЕ</b>", "<b>19</b>"], ["Почва", "21"]], page=1)]
         tocs = hy.place_tocs(blocks, [])
-        self.assertEqual([e.title for e in tocs[0].entries], ["ПРЕДИСЛОВИЕ", "Как читать", "ВВЕДЕНИЕ", "Симптомы"])
+        self.assertEqual([e.title for e in tocs[0].entries], ["ПРЕДИСЛОВИЕ", "Как читать", "ВВЕДЕНИЕ", "Почва"])
 
 
 class PageNoteTest(unittest.TestCase):

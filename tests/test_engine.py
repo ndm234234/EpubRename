@@ -187,11 +187,11 @@ class MarkerRunTest(unittest.TestCase):
     def test_split_pages(self):
         pages = eng.split_pages((FIXTURES / "paginated.html").read_text())
         self.assertEqual(set(pages), {4, 5})
-        self.assertIn("Крепко прижать", pages[4])
+        self.assertIn("Крепкие ветки", pages[4])
         self.assertIn("Вложенный блок", pages[4])
         self.assertNotIn("пятой", pages[4])
         self.assertIn("<b>жирным</b>", pages[5])
-        self.assertNotIn("Крепко", pages[5])
+        self.assertNotIn("Крепкие", pages[5])
 
     def test_run_marker_command(self):
         runner, calls = self.fake_marker()

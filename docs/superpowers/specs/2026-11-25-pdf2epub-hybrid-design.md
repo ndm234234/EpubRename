@@ -1,209 +1,213 @@
-# pdf2epub: гибридное распознавание (Marker fast + accurate + текстовый слой)
+# pdf2epub: hybrid recognition (Marker fast + accurate + text layer)
 
-Дата: 2026-11-25. Статус: на согласовании (после проверки исполнителем).
+Date: 2026-11-25. Status: under review (after the implementer's check).
 
-## Зачем
+## Why
 
-`pdf2epub.py` превращает PDF из `Pdf/` в EPUB в `In/`, откуда их раскладывает `epub_rename.py`.
-Сейчас он берёт **текстовый слой PDF** (Poppler `pdftohtml`) и угадывает структуру по шрифтам и
-отступам. На сканированных книгах с плохим старым распознаванием результат пользователь оценил как
-«ерунда»: ошибки распознавания («Гпавная», «Свгг»), потерянные галочки списков, врезки, вклеенные
-в середину предложений, таблицы в кашу, потерянный жирный.
+`pdf2epub.py` turns PDFs from `Pdf/` into EPUBs in `In/`, from where `epub_rename.py` sorts them.
+Today it takes the **PDF text layer** (Poppler `pdftohtml`) and guesses the structure from fonts and
+indents. On scanned books with a poor old OCR layer the user called the result nonsense:
+recognition errors («Гпавное» for «Главное», "main thing"; «Пояив» for «Полив», "watering"), lost
+list check marks, sidebars glued into the middle of sentences, tables turned to mush, lost bold.
 
-Цель: EPUB, который выглядит так, будто книгу аккуратно перенабрал человек, видящий страницу:
-абзацы, склеенные переносы, жирный/курсив, заголовки, списки, таблицы, оглавление как в книге —
-**без потерь и без выдуманного текста**.
+Goal: an EPUB that looks as if a person who sees the page had carefully retyped the book:
+paragraphs, joined hyphenations, bold/italic, headings, lists, tables, a table of contents as in the
+book — **with nothing lost and no invented text**.
 
-## Цели
+## Goals
 
-- Каждая страница заново распознаётся по картинке (не по старому текстовому слою).
-- Структура и форматирование — максимально близко к оригиналу.
-- Текст полный и точный: ни одна строка книги не теряется, слова не подменяются.
-- Работает **бесплатно и офлайн** (интернет нужен только один раз для установки).
-- Одна книга может обрабатываться всю ночь (5–8 часов на 230 страниц) — это приемлемо.
-- Прерванный запуск (выключили компьютер, Ctrl+C) продолжается с места остановки.
-- **Запуск без ключей** (требование пользователя): просто `python3 pdf2epub.py` — и всё.
-  Первый запуск сам ставит движок и продолжает конвертацию; повторный запуск сам продолжает
-  прерванную работу. Ключи могут существовать для особых случаев, но пользователю они не нужны.
+- Every page is recognized afresh from its image (not from the old text layer).
+- Structure and formatting as close to the original as possible.
+- The text is complete and exact: not one line of the book is lost, no words are swapped.
+- Works **free and offline** (internet is needed only once, for the install).
+- One book may take the whole night (5–8 hours for 230 pages) — that is acceptable.
+- An interrupted run (computer turned off, Ctrl+C) continues from where it stopped.
+- **Run without flags** (user requirement): just `python3 pdf2epub.py` and that is it.
+  The first run installs the engine itself and goes on with the conversion; a repeat run picks up
+  the interrupted work by itself. Flags may exist for special cases, but the user does not need them.
 
-## Не цели
+## Non-goals
 
-- Скорость. Быстрый вариант остаётся только как запасной режим.
-- Работа на Windows/macOS в этой итерации (пользователь на Ubuntu 26.04 в VMware; пути
-  установки делаем переносимыми, но тестируем только Linux).
-- Исправление ошибок, которые есть в самой книге.
-- Онлайн-сервисы, платные API.
+- Speed. The fast variant stays only as a fallback mode.
+- Windows/macOS support in this iteration (the user is on Ubuntu 26.04 in VMware; install paths
+  are kept portable, but only Linux is tested).
+- Fixing errors that are in the book itself.
+- Online services, paid APIs.
 
-## Анти-цели (провал, даже если «работает»)
+## Anti-goals (a failure, even if "it works")
 
-- Тихо потерянный текст (абзац, пункт списка, кусок страницы) — хуже любой ошибки вёрстки.
-- Выдуманные или «пересказанные» моделью слова в итоговом тексте.
-- Запуск, который после 6 часов падает и всё теряет.
-- Установка, которая ломает системный Python или проект.
+- Silently lost text (a paragraph, a list item, part of a page) — worse than any layout error.
+- Words invented or "retold" by the model in the final text.
+- A run that crashes after 6 hours and loses everything.
+- An install that breaks the system Python or the project.
 
-## Ограничения и факты (проверено пробой 2026-11-25)
+## Constraints and facts (checked by a trial on 2026-11-25)
 
-- Машина: 16 ядер (i7-14700K в VMware), 30 ГБ ОЗУ, **нет GPU**, ~39 ГБ свободно, Ubuntu 26.04,
-  системный Python 3.14, `pip` не установлен системно, есть `venv`.
-- `marker-pdf` (с `surya-ocr` 0.23) **не ставится на Python 3.14** (старый Pillow без колёс).
-  Работает в venv на **Python 3.12**, полученном через `uv` (`uv venv --python 3.12`), с CPU-сборкой
-  PyTorch (`--index-url https://download.pytorch.org/whl/cpu`).
-- Режимы Marker (`marker_single --mode`):
-  - `fast` — лёгкие ONNX-модели. 9 страниц за 43 с. Текст полный и заметно чище старого слоя,
-    врезки не вклеиваются. Структура средняя: оглавление слипается в абзац, галочки списков → «©»/«О»,
-    жирный теряется, буквица «В» → «D», отдельные ошибки («Супер» → «Cnep»).
-  - `accurate` — полностраничная VLM Surya 2.5 (GGUF, ~1.2 ГБ + mmproj ~0.2 ГБ, кэш
-    `~/.cache/huggingface`) через **`llama-server` из llama.cpp** (переменная `LLAMA_CPP_BINARY`;
-    официальная сборка `llama-bXXXXX-bin-ubuntu-x64.tar.gz` с GitHub releases ggml-org/llama.cpp).
-    ~1,5–2 мин/страница. Структура отличная: оглавление → таблица с жирными главами, `<b>`/`<i>`,
-    списки с чекбоксами, многострочные заголовки. **Но**: на одной из 3 страниц оборвал вывод
-    (пропали 5 пунктов списка и 3 абзаца), подменил слово («когда» → «quando»), «Это» с большой буквы
-    посреди фразы.
-- Нужные флаги: `--force_ocr --strip_existing_ocr`; `--paginate_output --output_format html` даёт
-  `<div class='page' data-page-id='N'>` — постраничное сопоставление возможно; `--page_range`.
-- Запуск скачанного бинарника `llama-server` требует разрешения пользователя (получено для пробы).
-- Существующий `pdf2epub.py` (только stdlib + Poppler) уже умеет: читать текстовый слой с позициями,
-  находить колонтитулы и печатные номера страниц, разбирать печатное оглавление (уровни по отступу,
-  связь печатных номеров со страницами PDF), собирать EPUB 3 + NCX с обложкой, проверять результат
-  (`check_epub`), совместимость с `fix_cover.py`/`make_index.py` подтверждена.
+- Machine: 16 cores (i7-14700K in VMware), 30 GB RAM, **no GPU**, ~39 GB free, Ubuntu 26.04,
+  system Python 3.14, `pip` not installed system-wide, `venv` available.
+- `marker-pdf` (with `surya-ocr` 0.23) **does not install on Python 3.14** (an old Pillow without wheels).
+  It works in a venv on **Python 3.12**, obtained through `uv` (`uv venv --python 3.12`), with a CPU build
+  of PyTorch (`--index-url https://download.pytorch.org/whl/cpu`).
+- Marker modes (`marker_single --mode`):
+  - `fast` — light ONNX models. 9 pages in 43 s. The text is complete and noticeably cleaner than the
+    old layer, sidebars are not glued in. Structure is middling: the table of contents sticks into one
+    paragraph, list check marks → «©»/«О», bold is lost, the drop cap «В» → «D», occasional errors
+    («Сорт» → «Copm», Latin lookalikes).
+  - `accurate` — the full-page VLM Surya 2.5 (GGUF, ~1.2 GB + mmproj ~0.2 GB, cache
+    `~/.cache/huggingface`) through **`llama-server` from llama.cpp** (variable `LLAMA_CPP_BINARY`;
+    the official build `llama-bXXXXX-bin-ubuntu-x64.tar.gz` from the ggml-org/llama.cpp GitHub releases).
+    ~1.5–2 min/page. Excellent structure: table of contents → a table with bold chapters, `<b>`/`<i>`,
+    lists with checkboxes, multi-line headings. **But**: on one of 3 pages it cut its output short
+    (5 list items and 3 paragraphs were missing), swapped a word («когда», "when" → «quando»), and wrote
+    «Это» ("this") with a capital letter mid-sentence.
+- Needed flags: `--force_ocr --strip_existing_ocr`; `--paginate_output --output_format html` gives
+  `<div class='page' data-page-id='N'>` — page-by-page matching is possible; `--page_range`.
+- Running the downloaded `llama-server` binary needs the user's permission (granted for the trial).
+- The existing `pdf2epub.py` (stdlib + Poppler only) can already: read the text layer with positions,
+  find running heads and printed page numbers, parse the printed table of contents (levels by indent,
+  linking printed numbers to PDF pages), build EPUB 3 + NCX with a cover, check the result
+  (`check_epub`); compatibility with `fix_cover.py`/`make_index.py` is confirmed.
 
-## Подходы (рассмотрены)
+## Approaches (considered)
 
-1. **Только fast + доработки правилами.** Полный точный текст, 15–20 мин/книга, но структура
-   и форматирование хуже. Отклонён как основной: не даёт «как человек видит».
-2. **Только accurate.** Лучшая структура, но риск потери/подмены текста без контроля. Отклонён:
-   нарушает главную анти-цель.
-3. **Гибрид (выбран пользователем).** Каждая страница распознаётся обоими режимами; структуру и
-   форматирование берём из accurate, а его текст сверяем со свидетелями (fast и текстовый слой PDF)
-   и чиним/заменяем при расхождениях. 5–8 ч/книга, запуск на ночь.
+1. **fast only + rule-based fixes.** Complete, exact text, 15–20 min/book, but structure and
+   formatting are worse. Rejected as the main mode: it does not give "as a person sees it".
+2. **accurate only.** The best structure, but a risk of lost/swapped text with no check. Rejected:
+   it breaks the main anti-goal.
+3. **Hybrid (chosen by the user).** Every page is recognized in both modes; structure and
+   formatting come from accurate, and its text is checked against the witnesses (fast and the PDF
+   text layer) and repaired/replaced where they disagree. 5–8 h/book, run overnight.
 
-## Решение
+## Decision
 
-### Архитектура
+### Architecture
 
-- `pdf2epub.py` остаётся точкой входа, **сам по-прежнему только на stdlib** (+ Poppler). Тяжёлые
-  зависимости живут в отдельном окружении, которое скрипт вызывает подпроцессом.
-- Окружение распознавания («движок») ставится **автоматически при первом запуске**
-  `python3 pdf2epub.py` (без ключей): скрипт сообщает, что скачивает движок (~2–3 ГБ, один раз),
-  ставит его и сразу продолжает конвертацию. Место — постоянное, вне проекта и временных папок:
-  `~/.local/share/pdf2epub/` (venv на Python 3.12 через `uv`, CPU-PyTorch, `marker-pdf`,
-  llama.cpp `llama-server`; модели — в обычном кэше HuggingFace). Проект лежит на общей папке
-  VMware (`/mnt/hgfs`), туда venv не ставим. *(Решение исполнителя/Claude, можно переиграть.)*
-- Если поставить движок не удалось (нет интернета, ошибка установки) — понятное сообщение, что
-  именно не получилось, и конвертация старым режимом (Poppler + правила), чтобы ночь не пропала.
-  Недоустановленный движок при следующем запуске доустанавливается. Флаг `--quick` (необязательный)
-  принудительно включает старый режим.
+- `pdf2epub.py` stays the entry point and **is itself still stdlib only** (+ Poppler). The heavy
+  dependencies live in a separate environment that the script calls as a subprocess.
+- The recognition environment (the "engine") is installed **automatically on the first run** of
+  `python3 pdf2epub.py` (no flags): the script says it is downloading the engine (~2–3 GB, once),
+  installs it and goes straight on with the conversion. The location is permanent, outside the
+  project and temp folders: `~/.local/share/pdf2epub/` (a venv on Python 3.12 through `uv`, CPU PyTorch,
+  `marker-pdf`, llama.cpp `llama-server`; models in the usual HuggingFace cache). The project lives on a
+  VMware shared folder (`/mnt/hgfs`), so the venv does not go there. *(The implementer's/Claude's
+  decision, open to change.)*
+- If the engine cannot be installed (no internet, install error) — a clear message saying what
+  exactly failed, and conversion in the old mode (Poppler + rules), so the night is not wasted.
+  A half-installed engine is completed on the next run. The `--quick` flag (optional) forces the
+  old mode.
 
-### Постраничный конвейер
+### Per-page pipeline
 
-Для каждой страницы PDF:
+For each PDF page:
 
 1. **fast**: Marker `--mode fast --force_ocr --strip_existing_ocr --paginate_output`, HTML.
-   Быстро, можно гнать всю книгу одним вызовом в начале (даёт ранний результат и свидетеля).
-2. **accurate**: то же с `--mode accurate` постранично или небольшими пачками
-   (`--page_range`, `--keep_server` чтобы не перезапускать `llama-server` каждый раз).
-3. **Свидетель 3**: существующий текстовый слой PDF (уже читается `read_text`), если он есть.
-4. **Сверка текста** accurate против свидетелей:
-   - нормализовать (регистр, ё/е, кавычки, тире, пробелы, переносы) и выровнять последовательности
-     слов (difflib или аналог);
-   - **покрытие**: какая доля слов fast найдена в accurate. Если accurate потерял кусок
-     (покрытие ниже порога, напр. < 97 %, или пропущен непрерывный фрагмент ≥ N слов) →
-     повторить accurate для страницы один раз; если снова неполно → взять страницу из fast
-     (с его структурой), пометить в отчёте;
-   - **замены слов**: где accurate и fast расходятся по одному слову, решает голосование трёх
-     свидетелей (accurate, fast, слой PDF): слово, с которым согласны два из трёх, побеждает;
-     при ничьей — accurate (у него лучшее распознавание), кроме слов не на языке книги
-     (латиница в русском тексте при кириллице у свидетелей — как «quando»);
-   - правки вносятся только в текст внутри HTML accurate, разметка (`<b>`, `<i>`, списки,
-     заголовки, таблицы) сохраняется.
-5. **Кэш**: результат каждого шага каждой страницы сохраняется на диск в рабочую папку книги
-   (напр. `In/.pdf2epub-work/<имя книги>/`: `fast.html`, `acc-0042.html`, `merged-0042.html`,
-   `report.json`). Повторный запуск пропускает готовые страницы — так работает продолжение после
-   прерывания. После успешной сборки EPUB рабочая папка удаляется (флаг `--keep-work` оставляет).
+   Quick; the whole book can go through in one call at the start (gives an early result and a witness).
+2. **accurate**: the same with `--mode accurate`, page by page or in small batches
+   (`--page_range`, `--keep_server` so `llama-server` is not restarted every time).
+3. **Witness 3**: the existing PDF text layer (already read by `read_text`), if there is one.
+4. **Text check** of accurate against the witnesses:
+   - normalize (case, ё/е, quotes, dashes, spaces, hyphenation) and align the word sequences
+     (difflib or similar);
+   - **coverage**: what share of fast's words is found in accurate. If accurate lost a piece
+     (coverage below a threshold, e.g. < 97 %, or a continuous fragment of ≥ N words is missing) →
+     rerun accurate for the page once; if still incomplete → take the page from fast
+     (with its structure) and flag it in the report;
+   - **word swaps**: where accurate and fast differ by a single word, a vote of the three
+     witnesses (accurate, fast, PDF layer) decides: the word two of three agree on wins;
+     on a tie — accurate (it has the best recognition), except for words not in the book's language
+     (Latin in Russian text when the witnesses have Cyrillic — like «quando»);
+   - fixes go only into the text inside accurate's HTML; the markup (`<b>`, `<i>`, lists,
+     headings, tables) is kept.
+5. **Cache**: the result of every step for every page is saved to disk in the book's work folder
+   (e.g. `In/.pdf2epub-work/<book name>/`: `fast.html`, `acc-0042.html`, `merged-0042.html`,
+   `report.json`). A repeat run skips finished pages — this is how continuing after an
+   interruption works. After the EPUB is built successfully the work folder is deleted (the
+   `--keep-work` flag keeps it).
 
-### Сборка EPUB из HTML Marker
+### Building the EPUB from Marker HTML
 
-- Блоки Marker → блоки текущей сборки (`Block`): `h1–h6` → заголовки, `p` → абзацы, `ul/ol/li`
-  → списки (новый вид блока; чекбоксы → «☐» в тексте, не `<input>`), `table` → таблицы (новый
-  вид блока), `img` → картинки (Marker извлекает изображения), `b/i` сохраняются.
-- Абзац, разорванный границей страницы, склеивается (последний абзац страницы без конечной
-  пунктуации + первый абзац следующей со строчной буквы).
-- Колонтитулы и номера страниц убрать (Marker помечает `PageHeader`/`PageFooter`; в HTML они
-  по умолчанию вырезаются; печатные номера страниц для оглавления брать, как сейчас, из слоя PDF
-  или из колонтитулов).
-- Буквица: «В се» / «D се» в начале главы — склеить первую букву со словом (правило: одиночная
-  заглавная буква + пробел + строчное продолжение в первом абзаце после заголовка главы; для «D»
-  латиница вместо кириллицы — сверка со свидетелями решает).
-- **Оглавление**: печатное оглавление (у accurate это таблица «название | номер») → тот же
-  механизм, что сейчас: уровни (жирные строки = уровень 1, остальные по отступу/жирности),
-  связь с местами в тексте, кликабельный список в книге, nav/NCX читалки, деление на главы по
-  пунктам верхнего уровня. Существующий код `find_tocs`/`anchor_tocs`/`split_chapters`/`write_epub`
-  переиспользовать, адаптировав вход.
-- Обложка, метаданные, вопрос автора, проверка `check_epub`, запись через временный файл — как сейчас.
+- Marker blocks → blocks of the current build (`Block`): `h1–h6` → headings, `p` → paragraphs, `ul/ol/li`
+  → lists (a new block kind; checkboxes → «☐» in the text, not `<input>`), `table` → tables (a new
+  block kind), `img` → images (Marker extracts images), `b/i` are kept.
+- A paragraph broken by a page boundary is joined (the last paragraph of a page without final
+  punctuation + the first paragraph of the next one starting with a lowercase letter).
+- Running heads and page numbers are removed (Marker marks `PageHeader`/`PageFooter`; in HTML they
+  are cut by default; printed page numbers for the table of contents are taken, as now, from the
+  PDF layer or from the running heads).
+- Drop cap: «В се садовники» / «D се садовники» ("All gardeners", split) at the start of a chapter →
+  join the first letter to the word, «Все садовники» (rule: a single capital letter + space +
+  lowercase continuation in the first paragraph after a chapter heading; for «D», Latin instead of
+  Cyrillic, the check against the witnesses decides).
+- **Table of contents**: the printed table of contents (in accurate it is a "title | number" table) →
+  the same mechanism as now: levels (bold lines = level 1, the rest by indent/boldness),
+  links to places in the text, a clickable list in the book, the reader's nav/NCX, splitting into
+  chapters by top-level entries. Reuse the existing `find_tocs`/`anchor_tocs`/`split_chapters`/`write_epub`
+  code, adapting its input.
+- Cover, metadata, the author question, the `check_epub` check, writing through a temp file — as now.
 
-### Наблюдаемость (ночной запуск)
+### Observability (overnight run)
 
-- Строка прогресса: страница N/M, этап, прошло, оценка оставшегося времени.
-- Лог в рабочей папке.
-- Итоговый отчёт: сколько страниц из accurate, сколько исправлено слов, какие страницы взяты из
-  fast (и почему), какие страницы без текста (вставлены картинкой).
+- A progress line: page N/M, stage, elapsed, estimated time left.
+- A log in the work folder.
+- A final report: how many pages from accurate, how many words fixed, which pages were taken from
+  fast (and why), which pages have no text (inserted as an image).
 
-### Ресурсы
+### Resources
 
-- `llama-server` использует все ядра; fast и accurate не запускать одновременно.
-- Диск: модели ~2–3 ГБ один раз; рабочая папка — десятки МБ на книгу.
+- `llama-server` uses all cores; fast and accurate are not run at the same time.
+- Disk: models ~2–3 GB once; the work folder is tens of MB per book.
 
-## Решено пользователем
+## Decided by the user
 
-- Бесплатно и офлайн (интернет только для установки).
-- Подход: гибрид; книга может обрабатываться всю ночь.
-- Marker как основа (точный режим — модель Surya через llama.cpp).
-- Разрешён запуск официальной сборки `llama-server`.
-- Скрипт запускается без ключей; установка движка — автоматически при первом запуске.
+- Free and offline (internet only for the install).
+- Approach: hybrid; a book may take the whole night.
+- Marker as the base (the accurate mode is the Surya model through llama.cpp).
+- Running the official `llama-server` build is allowed.
+- The script runs without flags; the engine is installed automatically on the first run.
 
-## Решения исполнителя (Claude) — можно переиграть
+## The implementer's (Claude's) decisions — open to change
 
-- Место установки движка `~/.local/share/pdf2epub/`.
-- Пороги сверки (покрытие 97 %, длина пропущенного фрагмента) — подобрать на пробных страницах.
-- Рабочая папка внутри `In/.pdf2epub-work/` и её удаление после успеха.
-- Старый режим остаётся запасным (`--quick` и при отсутствии движка).
-- Чекбоксы списков показывать символом «☐», а не элементом формы.
+- Engine install location `~/.local/share/pdf2epub/`.
+- Check thresholds (97 % coverage, length of a missing fragment) — tuned on trial pages.
+- The work folder inside `In/.pdf2epub-work/` and its removal after success.
+- The old mode stays as the fallback (`--quick` and when there is no engine).
+- List checkboxes shown as the «☐» character, not as a form element.
 
-## Ответы на вопросы проверки (решения Claude, можно переиграть)
+## Answers to the review questions (Claude's decisions, open to change)
 
-1. **PDF с хорошим текстовым слоем** (не скан: на странице нет полностраничной картинки-скана,
-   определяется как сейчас через `pdfimages -list`). Текст такой страницы точный, поэтому при
-   голосовании слов **слой PDF побеждает** (а не один из трёх равных). Marker всё равно
-   прогоняется — ради структуры. На сканах слой — обычный третий свидетель.
-2. **Обычный запуск** `python3 pdf2epub.py` — гибрид для всех книг из `Pdf/`, по очереди:
-   книга целиком, затем следующая. В начале печатается оценка времени («~6 ч на 228 стр.»),
-   без вопросов. Лимита страниц нет.
-3. **Установка движка** — автоматически при первом запуске, без подтверждений (пользователь
-   уже разрешил `llama-server` и хочет запуск без ключей). Версии **закреплены**: конкретные
-   версии `marker-pdf`/`surya-ocr`/`torch` и конкретный релиз llama.cpp (с проверкой SHA-256
-   архива); модели — те, что загружает закреплённая версия surya. `uv` ставится внутрь
-   служебного venv через `pip` (системный `pip` не нужен), не полагаемся на `~/.local/bin/uv`.
-4. **Потеря текста в accurate**: сначала повтор страницы; если снова неполно — **вставка
-   недостающих фрагментов** из fast в страницу accurate на их место (по выравниванию блоков:
-   после последнего совпавшего блока), а не замена всей страницы. Замена всей страницы fast —
-   только если accurate покрыл меньше половины.
-5. **Проверка во время разработки** (решено пользователем 2026-11-25): исполнителю разрешено
-   ставить движок в `~/.local/share/pdf2epub/` и запускать `llama-server`/Marker на пробных
-   страницах сколько нужно. Тесты сборки дополнительно опираются на сохранённые HTML Marker
-   (фикстуры), чтобы быстрые проверки не ждали распознавания.
-6. **Проверка полноты** — против объединения свидетелей: fast **и** текстовый слой PDF (если
-   есть). Фрагмент, который есть хотя бы у одного свидетеля и отсутствует у accurate, считается
-   потерянным. Расхождение целого фрагмента между двумя свидетелями — берётся вариант того
-   свидетеля, с которым согласен третий; без третьего — accurate.
-7. **Книги, уже лежащие в `In/`**, пропускаются, как сейчас (`--force` переделывает). В EPUB
-   пишется `<meta name="generator" content="pdf2epub hybrid|quick">`, чтобы было видно, чем
-   сделана книга.
+1. **A PDF with a good text layer** (not a scan: the page has no full-page scan image,
+   detected as now through `pdfimages -list`). The text of such a page is exact, so in the word
+   vote **the PDF layer wins** (rather than being one of three equals). Marker is still run —
+   for the structure. On scans the layer is an ordinary third witness.
+2. **A normal run** `python3 pdf2epub.py` — hybrid for all books in `Pdf/`, one after another:
+   a whole book, then the next. At the start a time estimate is printed ("~6 h for 228 pages"),
+   with no questions. There is no page limit.
+3. **Engine install** — automatic on the first run, with no confirmations (the user
+   has already allowed `llama-server` and wants a run without flags). Versions are **pinned**: specific
+   versions of `marker-pdf`/`surya-ocr`/`torch` and a specific llama.cpp release (with a SHA-256 check
+   of the archive); the models are those the pinned surya version downloads. `uv` is installed inside
+   a service venv through `pip` (the system `pip` is not needed); `~/.local/bin/uv` is not relied on.
+4. **Text lost in accurate**: first a rerun of the page; if still incomplete — **insert the
+   missing fragments** from fast into the accurate page in their place (by block alignment:
+   after the last matched block), not a replacement of the whole page. Replacing the whole page with
+   fast — only if accurate covered less than half.
+5. **Checking during development** (decided by the user on 2026-11-25): the implementer may
+   install the engine into `~/.local/share/pdf2epub/` and run `llama-server`/Marker on trial
+   pages as much as needed. The build tests also rely on saved Marker HTML
+   (fixtures), so quick checks do not wait for recognition.
+6. **Completeness check** — against the union of the witnesses: fast **and** the PDF text layer (if
+   there is one). A fragment that at least one witness has and accurate lacks counts as
+   lost. When two witnesses disagree on a whole fragment, the version of the witness the third
+   agrees with is taken; without a third — accurate.
+7. **Books already in `In/`** are skipped, as now (`--force` redoes them). The EPUB gets
+   `<meta name="generator" content="pdf2epub hybrid|quick">`, so it is clear what made
+   the book.
 
-## Оставлено исполнителю
+## Left to the implementer
 
-- Конкретный алгоритм выравнивания и голосования слов, пороги.
-- Размер пачек для accurate и использование `--keep_server`.
-- Как именно Marker отдаёт картинки в HTML и как их забрать в EPUB.
-- Тесты: на 9-страничной выборке (стр. 7, 8, 26, 38, 39, 101, 119, 133, 135 тестовой
-  книги) — полнота текста против fast, отсутствие латиницы-подмен, структура оглавления;
-  плюс синтетические PDF (текстовый с картинкой, скан без текста).
+- The exact word alignment and voting algorithm, thresholds.
+- Batch size for accurate and the use of `--keep_server`.
+- How exactly Marker returns images in HTML and how to bring them into the EPUB.
+- Tests: on the 9-page sample (pages 7, 8, 26, 38, 39, 101, 119, 133, 135 of the test
+  book) — text completeness against fast, no Latin swaps, table of contents structure;
+  plus synthetic PDFs (a text PDF with an image, a scan with no text).

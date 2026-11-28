@@ -20,14 +20,14 @@ class PageBlocksTest(unittest.TestCase):
         kinds = [b.kind for b in self.blocks]
         self.assertEqual(kinds[:5], ["h", "h", "h", "p", "p"])
         self.assertEqual([b.level for b in self.blocks[:3]], [1, 2, 1])
-        self.assertEqual(self.blocks[4].html, "<b>ПРОБЛЕМА.</b> Очень трудно предсказать результаты для детей с СДВГ.")
+        self.assertEqual(self.blocks[4].html, "<b>СОВЕТ.</b> Заранее трудно предсказать урожай молодых яблонь.")
         self.assertTrue(all(b.page == 38 for b in self.blocks))
 
     def test_checkbox_list(self):
         lists = [b for b in self.blocks if b.kind == "list"]
         self.assertEqual(len(lists), 2)
-        self.assertEqual(lists[0].items, ["■ высоким интеллектом;", "■ высоким уровнем образования;"])
-        self.assertTrue(lists[1].items[0].startswith("☐ Крепко"), lists[1].items)
+        self.assertEqual(lists[0].items, ["■ солнечным летом;", "■ регулярным поливом и подкормкой;"])
+        self.assertTrue(lists[1].items[0].startswith("☐ Крепкие"), lists[1].items)
         self.assertNotIn("input", " ".join(lists[1].items))
 
     def test_table(self):
@@ -40,9 +40,9 @@ class PageBlocksTest(unittest.TestCase):
         self.assertEqual(last.text, "Обычный текст со словом и ссылкой тут.")
 
     def test_italic_heading(self):
-        h = next(b for b in self.blocks if b.kind == "h" and "Невербальные" in b.text)
+        h = next(b for b in self.blocks if b.kind == "h" and "Признаки" in b.text)
         self.assertEqual(h.level, 3)
-        self.assertEqual(h.html, "<i>Невербальные знаки одобрения</i>")
+        self.assertEqual(h.html, "<i>Признаки здорового сада</i>")
 
 
 class ImageTest(unittest.TestCase):
@@ -62,11 +62,11 @@ class ImageTest(unittest.TestCase):
 
 class DropCapTest(unittest.TestCase):
     def check(self, start):
-        blocks = [Block("h", "ПРИНЦИП 1", "ПРИНЦИП 1", 1), Block("p", start + " родители мечтают", start + " родители мечтают"),
-                  Block("p", "Не все дети растут быстро.", "Не все дети растут быстро.")]
+        blocks = [Block("h", "ШАГ 1", "ШАГ 1", 1), Block("p", start + " садовники мечтают", start + " садовники мечтают"),
+                  Block("p", "Не все яблони растут быстро.", "Не все яблони растут быстро.")]
         fix_drop_cap(blocks)
-        self.assertEqual(blocks[1].html, "Все родители мечтают")
-        self.assertEqual(blocks[1].text, "Все родители мечтают")
+        self.assertEqual(blocks[1].html, "Все садовники мечтают")
+        self.assertEqual(blocks[1].text, "Все садовники мечтают")
 
     def test_space_after_capital(self):
         self.check("В се")
@@ -82,12 +82,12 @@ class DropCapTest(unittest.TestCase):
 
 class JoinPagesTest(unittest.TestCase):
     def test_sentence_across_pages(self):
-        blocks = [Block("p", "Все родители мечтают, чтобы их", "Все родители мечтают, чтобы их", page=1),
+        blocks = [Block("p", "Все садовники мечтают, чтобы их", "Все садовники мечтают, чтобы их", page=1),
                   Block("page", level=2, page=2),
-                  Block("p", "дети выросли.", "дети выросли.", page=2)]
+                  Block("p", "яблони выросли.", "яблони выросли.", page=2)]
         out = join_pages(blocks)
         paras = [b for b in out if b.kind == "p"]
-        self.assertEqual([p.text for p in paras], ["Все родители мечтают, чтобы их дети выросли."])
+        self.assertEqual([p.text for p in paras], ["Все садовники мечтают, чтобы их яблони выросли."])
         self.assertEqual([b.kind for b in out], ["p", "page"])
 
     def test_hyphen_across_pages(self):
@@ -110,14 +110,14 @@ class TocTest(unittest.TestCase):
         self.assertEqual(toc.title, "СОДЕРЖАНИЕ")
         self.assertEqual([e.level for e in toc.entries], [1, 1, 1, 2, 1, 2])
         self.assertEqual([e.number for e in toc.entries], [13, 14, 15, 17, 19, 19])
-        self.assertEqual(toc.entries[0].title, "ПРИМЕЧАНИЕ АВТОРА")
+        self.assertEqual(toc.entries[0].title, "ОТ СОСТАВИТЕЛЯ")
         self.assertEqual([b.kind for b in blocks], ["h", "toc"])
         self.assertEqual(toc.pages, [7])
 
     def test_toc_continues_on_next_page(self):
         first = page_blocks((FIXTURES / "toc_page.html").read_text(), page=7)
         second = page_blocks("<table>" + "".join(
-            f"<tr><td><b>ПРИНЦИП {n}</b></td><td><b>{30 + n * 10}</b></td></tr>" for n in range(1, 6)) + "</table>", page=8)
+            f"<tr><td><b>ШАГ {n}</b></td><td><b>{30 + n * 10}</b></td></tr>" for n in range(1, 6)) + "</table>", page=8)
         blocks = first + [Block("page", level=8, page=8)] + second
         tocs = tocs_from_blocks(blocks)
         self.assertEqual(len(tocs), 1)
@@ -136,8 +136,8 @@ class RunningHeadTest(unittest.TestCase):
              24: "<p>текст страницы продолжается.</p><p>ВВЕДЕНИЕ 23</p>",
              33: "<h2>32 ВВЕДЕНИЕ</h2><p>дения или развлечения.</p>",
              53: "<h2>52 ГЛАВА 1</h2><p>шения. Ежедневно.</p>",
-             8: "<h2>ГЛАВА 1. КЛЮЧИ К УСПЕХУ 37</h2><p>Содержание</p>",
-             27: "<p>Текст.</p><p>1 Иногда их называют иначе. — Примеч. перев.</p>",
+             8: "<h2>ГЛАВА 1. ПОЛИВ ПО УТРАМ 37</h2><p>Содержание</p>",
+             27: "<p>Текст.</p><p>1 Иногда их называют дичками. — Примеч. перев.</p>",
              40: "<h1>ГЛАВА 3</h1><p>Начало главы.</p>",
              60: "<p>Обычная страница без колонтитула.</p><p>59</p>"}
 
@@ -167,10 +167,10 @@ class FootnoteTest(unittest.TestCase):
         return [Block("page", level=n, page=n)] + page_blocks(html, n)
 
     def book(self):
-        return (self.page(154, "<p>и лечение эффективны в <i>момент исполнения.</i><sup>9</sup></p>"
-                               "<p>Составляйте списки. Когда обычно пишете список</p><p></p>"
-                               "<p><sup>9</sup> Иногда это называют “правилом нужного момента”. — <i>Примеч. перев</i>.</p>")
-                + self.page(155, "<p>“дел”, вы именно так и поступаете.</p>"))
+        return (self.page(154, "<p>и подкормка полезны в <i>момент цветения.</i><sup>9</sup></p>"
+                               "<p>Ведите дневник сада. Когда обычно составляете список</p><p></p>"
+                               "<p><sup>9</sup> Иногда это называют “правилом раннего полива”. — <i>Примеч. перев</i>.</p>")
+                + self.page(155, "<p>“работ”, вы именно так и поступаете.</p>"))
 
     def test_note_leaves_the_text_and_follows_its_paragraph(self):
         blocks, notes = take_footnotes(self.book())
@@ -182,9 +182,9 @@ class FootnoteTest(unittest.TestCase):
         body = [b for b in blocks if b.kind != "page"]
         self.assertIn('<a epub:type="noteref" href="#fn1" id="fnref1"><sup>9</sup></a>', body[0].html)
         self.assertEqual(body[1].anchor, "fn1")
-        self.assertIn("правилом нужного момента", body[1].html)
+        self.assertIn("правилом раннего полива", body[1].html)
         self.assertIn('href="#fnref1"', body[1].html)
-        self.assertEqual(body[2].text, "Составляйте списки. Когда обычно пишете список “дел”, вы именно так и поступаете.")
+        self.assertEqual(body[2].text, "Ведите дневник сада. Когда обычно составляете список “работ”, вы именно так и поступаете.")
 
     def test_sup_without_a_reference_is_not_a_note(self):
         blocks = self.page(10, "<p>Площадь 5 м<sup>2</sup> хватит.</p><p><sup>2</sup> м — квадратные метры.</p>")
