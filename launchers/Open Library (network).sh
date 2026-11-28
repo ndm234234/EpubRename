@@ -7,7 +7,7 @@
 # 3 hours without use. Needs python3 (installed on most Linux systems).
 cd "$(dirname "$0")" || exit 1
 exec python3 - "$PWD" <<'PY'
-import functools, http.server, ipaddress, os, posixpath, socket, subprocess, sys, threading, time, urllib.parse, urllib.request, webbrowser
+import functools, http.server, io, ipaddress, os, posixpath, socket, subprocess, sys, threading, time, urllib.parse, urllib.request, webbrowser
 
 ROOT, IDLE_HOURS = sys.argv[1], 3
 sys.path.insert(0, ROOT)
@@ -56,22 +56,42 @@ def plain_ip(addr):
 def minutes(sec):
     return f"{round(sec / 60)} min" if sec >= 90 else f"{round(sec)} s"
 
-def seen(ip, ua, path):
-    """Note a request; print new devices and opened books."""
+def device(ip, ua):
+    """The device a request came from; a new one is printed."""
     kind, now = device_kind(ua), time.time()
     key = (ip, kind)
     with lock:
         d = devices.get(key)
         new = d is None
         if new:
-            d = devices[key] = {"first": now, "label": f"{ip} · {kind}", "book": "", "bye": 0}
+            d = devices[key] = {"first": now, "label": f"{ip} · {kind}", "base": f"{ip} · {kind}",
+                                "login": None, "book": "", "bye": 0}
         d["last"] = now
         d["bye"] = 0
         count = len(devices)
     if new:
         name = "this computer" if ip in ("127.0.0.1", "::1") else host_name(ip)
-        d["label"] = f"{ip}{f' ({name})' if name else ''} · {kind}"
+        d["base"] = f"{ip}{f' ({name})' if name else ''} · {kind}"
+        d["label"] = d["base"] + (f" · {d['login']}" if d["login"] else "")
         say(f"+ {d['label']} — connected    [devices: {count}]")
+    return d
+
+def signed(ip, ua, login, announce):
+    """The account a device is signed in to (None: signed out); shown once when it changes."""
+    d = device(ip, ua)
+    with lock:
+        if d["login"] == login:
+            return
+        was, d["login"] = d["label"], login
+        d["label"] = d["base"] + (f" · {login}" if login else "")
+    if not login:
+        say(f"👤 {was} — signed out")
+    elif announce:
+        say(f"👤 {d['base']} — {login}")
+
+def seen(ip, ua, path):
+    """Note a request; print new devices and opened books."""
+    d = device(ip, ua)
     if path.lower().endswith(".epub"):
         d["book"] = posixpath.basename(path)[:-5]
         say(f"📖 {d['label']} — «{d['book']}»")
@@ -151,14 +171,35 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().send_response(code, message)
 
     def sync(self):
-        """Sync routes; sign-ins and registrations are shown in the window (never passwords)."""
+        """Sync routes; sign-ins and registrations are shown in the window with the account's
+        login, and so is the account of a device first seen syncing (never passwords or keys)."""
         path = self.path.split("?")[0]
+        ip, ua = plain_ip(self.client_address[0]), self.headers.get("User-Agent")
+        login = None
+        if path in ("/__sync/register", "/__sync/login"):   # the login typed, read ahead of the store
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if 0 < n <= library_sync.BODY_LIMIT:
+                body = self.rfile.read(n)
+                self.rfile = io.BytesIO(body)
+                cred = store._credentials(body)
+                login = cred[1] if cred else None
+        elif self.headers.get("Authorization"):              # before a sign-out drops the key
+            login, _ = store._auth(self.headers)
         library_sync.respond(self, store)
+        status = self.sync_status
         if path in ("/__sync/register", "/__sync/login"):
-            ip = plain_ip(self.client_address[0])
             what = "registration" if path.endswith("register") else "sign-in"
-            ok = self.sync_status == 200
-            say(f"🔑 {ip} · {device_kind(self.headers.get('User-Agent'))} — {what} {'ok' if ok else 'refused'} ({self.sync_status})")
+            ok = status == 200
+            say(f"🔑 {ip} · {device_kind(ua)} — {what} {'ok' if ok else 'refused'} ({status}){f': {login}' if login else ''}")
+            if ok and login:
+                signed(ip, ua, login, announce=False)
+        elif path == "/__sync/logout" and status < 300:
+            signed(ip, ua, None, announce=True)
+        elif login and status < 300:
+            signed(ip, ua, login, announce=True)
 
     def list_directory(self, path):          # no folder listings on the network
         self.send_error(404)

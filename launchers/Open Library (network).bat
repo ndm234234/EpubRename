@@ -65,17 +65,33 @@ function HostName($ip) {
 
 function Minutes($sec) { if ($sec -ge 90) { "$([math]::Round($sec / 60)) min" } else { "$([math]::Round($sec)) s" } }
 
-function Seen($ip, $ua, $rel) {
+# The device a request came from; a new one is printed
+function Device($ip, $ua) {
   $kind = DeviceKind $ua; $key = "$ip|$kind"; $now = [DateTime]::UtcNow
   $d = $devices[$key]
   if (-not $d) {
     $name = if ($ip -eq '127.0.0.1' -or $ip -eq '::1') { 'this computer' } else { HostName $ip }
-    $label = if ($name) { "$ip ($name) · $kind" } else { "$ip · $kind" }
-    $d = @{ first = $now; label = $label; book = ''; bye = $null }
+    $base = if ($name) { "$ip ($name) · $kind" } else { "$ip · $kind" }
+    $d = @{ first = $now; label = $base; base = $base; login = $null; book = ''; bye = $null }
     $devices[$key] = $d
-    Say "+ $label — connected    [devices: $($devices.Count)]"
+    Say "+ $base — connected    [devices: $($devices.Count)]"
   }
   $d.last = $now; $d.bye = $null
+  return $d
+}
+
+# The account a device is signed in to ($null: signed out); shown once when it changes
+function Signed($ip, $ua, $login, $announce) {
+  $d = Device $ip $ua
+  if ($d.login -ceq $login) { return }
+  $was = $d.label; $d.login = $login
+  if ($login) { $d.label = "$($d.base) · $login" } else { $d.label = $d.base }
+  if (-not $login) { Say "* $was — signed out" }
+  elseif ($announce) { Say "* $($d.base) — $login" }
+}
+
+function Seen($ip, $ua, $rel) {
+  $d = Device $ip $ua
   if ($rel.ToLower().EndsWith('.epub')) {
     $d.book = [IO.Path]::GetFileNameWithoutExtension($rel)
     Say "> $($d.label) — «$($d.book)»"
@@ -216,6 +232,13 @@ function ServeSync($rq, $method, $target) {
   elseif ($length -gt $SyncBodyLimit) { $answer = New-SyncError 413 'too large'; $rq.Linger = $true }
   else {
     $body = ReadBody $rq $length
+    # whose request, for the window: the login typed, or the account of the device key (read
+    # before a sign-out drops it); never the password or the key
+    $p = $target.Split('?')[0]
+    try {
+      if ($p -ceq '/__sync/register' -or $p -ceq '/__sync/login') { $c = Get-SyncCredentials $body; if ($c) { $rq.Login = $c.Login } }
+      else { $a = Get-SyncAuth $store $rq.Headers; if ($a) { $rq.Login = $a.Login } }
+    } catch {}
     try { $answer = Invoke-SyncRequest $store $method $target $rq.Headers $body }
     catch { $answer = New-SyncError 500 'server error' }
   }
@@ -272,12 +295,16 @@ function Serve($client) {
         ($method -ceq 'GET' -and $isSync -and -not (Test-SyncPrivate $target))) {
       if ($method -ceq 'GET') { Seen $ip $ua ([Uri]::UnescapeDataString($target.Split('?')[0]).TrimStart('/')) }
       $status = ServeSync $rq $method $target
-      $what = $target.Split('?')[0]
-      if ($what -ceq '/__sync/register' -or $what -ceq '/__sync/login') {   # shown here, never the password
+      $what = $target.Split('?')[0]; $who = $rq.Login
+      if ($what -ceq '/__sync/register' -or $what -ceq '/__sync/login') {   # shown here with the login, never the password
         if ($what -ceq '/__sync/register') { $what = 'registration' } else { $what = 'sign-in' }
         if ($status -eq 200) { $how = 'ok' } else { $how = 'refused' }
-        Say "@ $ip · $(DeviceKind $ua) — $what $how ($status)"
+        if ($who) { $tail = ": $who" } else { $tail = '' }
+        Say "@ $ip · $(DeviceKind $ua) — $what $how ($status)$tail"
+        if ($status -eq 200 -and $who) { Signed $ip $ua $who $false }
       }
+      elseif ($what -ceq '/__sync/logout') { if ($status -lt 300) { Signed $ip $ua $null $true } }
+      elseif ($who -and $status -lt 300) { Signed $ip $ua $who $true }   # a device signed in before: its first sync
       return
     }
     if ($method -ceq 'POST' -or $method -ceq 'PUT') {

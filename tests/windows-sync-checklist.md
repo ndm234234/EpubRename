@@ -28,10 +28,15 @@ with `python3 make_server.py <folder>`), so `library-sync.ps1` sits next to the 
    `python3 tests/sync_contract.py http://<windows-ip>:<port> <copy of code.txt>`
    (or `LIBRARY_CODE=<code> python3 tests/sync_contract.py http://<windows-ip>:<port>`).
    Expected: `all ok`.
-3. The window logs `@ <ip> · <device> — registration ok (200)` and `sign-in ok (200)` lines and the
-   device as connected; no password anywhere.
-4. A phone in the same Wi-Fi still opens the catalog and a book (static files unchanged).
-5. With both `.bat` files running on the same library, run the contract against each port in turn:
+3. The window logs `@ <ip> · <device> — registration ok (200): <login>` and `sign-in ok (200): <login>`
+   lines and the device as connected; no password or device key anywhere.
+4. Sign in on a phone (catalog → account): `sign-in ok (200): <login>`; opening a book then shows
+   `> <ip> · Android · Chrome · <login> — «...»`. Close the window, start it again, open the catalog on
+   the phone: one `* <ip> · Android · Chrome — <login>` line on its first sync, not one per sync.
+   Sign out on the phone: `* <ip> · Android · Chrome · <login> — signed out`; a wrong password shows
+   `sign-in refused (401): <login>`.
+5. A phone in the same Wi-Fi still opens the catalog and a book (static files unchanged).
+6. With both `.bat` files running on the same library, run the contract against each port in turn:
    both `all ok`.
 
 ## 3. Short-name check (only the `.bat` servers need it)
