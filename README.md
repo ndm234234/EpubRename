@@ -643,8 +643,11 @@ rm -rf ~/.local/share/pdf2epub ~/.cache/huggingface/hub/models--datalab-to--*
 - **Cover** — the first page as a picture. If that page is a picture itself, it is not
   repeated in the text.
 - **Title and author** come from the PDF properties, or from a file name like
-  `Author - Title.pdf`. If the author is still unknown, the script asks for the title and
-  author (Enter keeps the suggestion); `--title`/`--author` set them, `--yes` skips the question.
+  `Author - Title.pdf`, or `Title Author Name.pdf` / `Author Name Title.pdf` when that name
+  (2–4 capitalised words, initials count) stands as a line of its own on the first pages, as
+  on a title page. If the author is still unknown, the script asks for the title and author
+  (Enter keeps the suggestion, Tab puts it in to change it); `--title`/`--author` set them,
+  `--yes` skips the question.
 - **Language** is guessed from the text (Russian, Ukrainian or English); `--lang` sets it.
 - PDF files are only read. A book already in `In/` is skipped unless `--force`;
   a new book is written to a temporary file and checked (every page is valid, every

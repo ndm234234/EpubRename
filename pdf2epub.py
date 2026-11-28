@@ -30,7 +30,8 @@ What ends up in the book:
     of the whole page;
   - the first page as the cover;
   - title and author from the PDF properties or from a file name like
-    "Author - Title.pdf"; when the author is unknown the script asks (or use
+    "Author - Title.pdf", or "Title Author Name.pdf" when that name is on the first pages;
+    when the author is unknown the script asks (or use
     --title / --author, --yes to never ask).
 
 A book that already exists in the output folder is skipped (--force overwrites it).
@@ -40,7 +41,7 @@ into <out>/Preview/ (out of the way of
 epub_rename.py and of the whole book). The pages it recognises are kept, so the whole book
 later goes on from them.
 
-Needs Poppler (the pdftohtml, pdftoppm, pdfinfo and pdfimages programs):
+Needs Poppler (the pdftohtml, pdftoppm, pdfinfo, pdfimages and pdftotext programs):
     Linux:   sudo apt install poppler-utils   (or dnf/pacman install poppler)
     macOS:   brew install poppler
     Windows: download poppler (https://github.com/oschwartz10612/poppler-windows/releases),
@@ -69,7 +70,7 @@ from pathlib import Path
 BASE_DIR = Path.cwd()                  # Pdf/ and In/ are taken from the current folder
 PDF_DIR = BASE_DIR / "Pdf"
 OUT_DIR = BASE_DIR / "In"
-TOOLS = ("pdftohtml", "pdftoppm", "pdfinfo", "pdfimages")
+TOOLS = ("pdftohtml", "pdftoppm", "pdfinfo", "pdfimages", "pdftotext")
 
 HEADING_RATIO = 1.15      # a line this much bigger than the body text is a heading
 CHAPTER_RATIO = 1.45      # ... and this much bigger starts a new chapter
@@ -1110,7 +1111,31 @@ def check_epub(path: Path) -> None:
 
 # ---------------------------------------------------------------- one book
 
-def guess_meta(pdf: Path, info: dict[str, str], args) -> tuple[str, str]:
+AUTHOR_WORDS = (2, 4)      # an author's name in a file name: this many words (initials count)
+
+
+def _compact(text: str) -> str:
+    return re.sub(r"[\W_]+", "", text).lower().replace("ё", "е")
+
+
+def author_in_name(stem: str, first_pages: str) -> tuple[str, str] | None:
+    """(title, author) of a file name like "Title Author Name" or "Author Name Title": capitalised
+    words at its end or start that stand as a line of their own on the first pages of the book,
+    as on a title page (letter-spaced too)."""
+    words = stem.split()
+    lines = {_compact(l) for l in first_pages.splitlines()} - {""}
+    if not lines:
+        return None
+    for n in range(AUTHOR_WORDS[1], AUTHOR_WORDS[0] - 1, -1):
+        if len(words) <= n:
+            continue
+        for author, title in ((words[-n:], words[:-n]), (words[:n], words[n:])):
+            if all(w[:1].isupper() for w in author) and _compact(" ".join(author)) in lines:
+                return " ".join(title), " ".join(author)
+    return None
+
+
+def guess_meta(pdf: Path, info: dict[str, str], args, first_pages: str = "") -> tuple[str, str]:
     title, author = info.get("Title", ""), info.get("Author", "")
     junk = re.compile(r"^(untitled|unknown|microsoft|document|\S+\.(docx?|pdf|indd|tex|rtf))|^\W*$", re.I)
     if junk.search(title):
@@ -1123,6 +1148,8 @@ def guess_meta(pdf: Path, info: dict[str, str], args) -> tuple[str, str]:
     if not title:
         if " - " in stem and not author:
             author, title = (s.strip() for s in stem.split(" - ", 1))
+        elif not author and (found := author_in_name(stem, first_pages)):
+            title, author = found
         else:
             title = stem
     return args.title or title, args.author if args.author is not None else author
@@ -1196,7 +1223,8 @@ def ask(prompt: str, default: str) -> str:
 def book_meta(pdf: Path, args) -> tuple[str, str, int]:
     """Title, author (asked when unknown) and the number of pages."""
     info = read_info(pdf)
-    title, author = guess_meta(pdf, info, args)
+    first = run(["pdftotext", "-f", "1", "-l", "5", "-enc", "UTF-8", str(pdf), "-"]).stdout.decode("utf-8", "replace")
+    title, author = guess_meta(pdf, info, args, first)
     if not author and not args.yes and sys.stdin.isatty():
         print(f"\n📄 {pdf.name}: the author is not in the file; Enter keeps a suggestion, "
               "Tab puts it in to change it")

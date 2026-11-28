@@ -140,6 +140,33 @@ class LayerContentsTest(unittest.TestCase):
         self.assertEqual(pdf2epub.find_tocs([page], 11.0), [])
 
 
+class GuessMetaTest(unittest.TestCase):
+    ARGS = type("Args", (), {"title": None, "author": None})()
+
+    def guess(self, name, text, info=None):
+        return pdf2epub.guess_meta(Path(name), info or {}, self.ARGS, text)
+
+    def test_author_at_the_end_of_the_file_name(self):
+        text = "ТИХИЕ РЕКИ\n12 ПРИНЦИПОВ\n  М И Л А  Ф. Ф Е Н В И К\nИздательство"
+        self.assertEqual(self.guess("Тихие реки 12 принципов Мила Ф Фенвик.pdf", text),
+                         ("Тихие реки 12 принципов", "Мила Ф Фенвик"))
+
+    def test_author_at_the_start_of_the_file_name(self):
+        self.assertEqual(self.guess("Mila_Fenwick_Quiet_rivers.pdf", "Quiet Rivers\nMila Fenwick\n"),
+                         ("Quiet rivers", "Mila Fenwick"))
+
+    def test_capital_words_not_on_the_title_page_are_the_title(self):
+        self.assertEqual(self.guess("Python Crash Course.pdf", "Python Crash Course\nby Mila Fenwick"),
+                         ("Python Crash Course", ""))
+        self.assertEqual(self.guess("Тихие реки Мила Фенвик.pdf", ""), ("Тихие реки Мила Фенвик", ""),
+                         "no text to check by (a scan): don't guess")
+
+    def test_dash_and_properties_still_win(self):
+        self.assertEqual(self.guess("Мила Фенвик - Тихие реки.pdf", "Мила Фенвик"), ("Тихие реки", "Мила Фенвик"))
+        self.assertEqual(self.guess("x.pdf", "Ян Тук", {"Title": "Тихие реки", "Author": "Мила Фенвик"}),
+                         ("Тихие реки", "Мила Фенвик"))
+
+
 class AskTest(unittest.TestCase):
     def test_tab_puts_the_suggestion_in_to_edit(self):
         complete = pdf2epub.tab_completer("Воспитание ребенка с СДВГ")
