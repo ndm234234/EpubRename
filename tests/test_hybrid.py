@@ -263,7 +263,8 @@ class HybridTest(unittest.TestCase):
         self.assertEqual(fake.accurate_pages(), [0, 1, 1, 2])
 
     def test_empty_accurate_page_is_not_kept(self):
-        self.convert(FakeEngine(empty_accurate={1}), keep_work=True)
+        with mock.patch.object(hy, "FRONT_PAGES", 0):        # not a title page made a picture
+            self.convert(FakeEngine(empty_accurate={1}), keep_work=True)
         report = json.loads((self.work() / "report.json").read_text())
         self.assertEqual(report["pages"]["2"]["source"], "fast")
         self.assertEqual(report["pages"]["2"]["reason"], "accurate found nothing")
@@ -282,10 +283,47 @@ class HybridTest(unittest.TestCase):
         self.assertFalse(any(len(ps) > 1 and 3 in ps for _, ps in fake.calls))
         report = json.loads((self.work(pdf) / "report.json").read_text())
         self.assertEqual(report["pages"]["4"]["source"], "empty")
+        self.assertNotIn("4 (empty)", hy.to_check(report), "blank on purpose: nothing to check")
         self.assertIn("4/5 · empty page", "\n".join(self.lines))
 
-    def test_accurate_reading_too_little_is_named(self):
+    def test_title_page_accurate_cannot_read_is_a_picture(self):
+        """A title page set as a design (accurate reads too little, fast loses letters and the layout)
+        goes in as a picture of the page."""
         self.convert(FakeEngine(short_accurate={1}), keep_work=True)
+        with zipfile.ZipFile(self.out) as zf:
+            text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+            pictures = [n for n in zf.namelist() if n.startswith("OEBPS/images/img")]
+        self.assertNotIn(SENTENCES[1], text)
+        self.assertIn(SENTENCES[2], text)
+        self.assertEqual(len(pictures), 1)
+        report = json.loads((self.work() / "report.json").read_text())
+        self.assertEqual(report["pages"]["2"]["source"], "picture")
+        self.assertNotIn("check:", self.convert(FakeEngine(), keep_work=True), "nothing left to check")
+
+    def test_first_page_like_that_is_the_cover_only(self):
+        self.convert(FakeEngine(short_accurate={0}), keep_work=True)
+        with zipfile.ZipFile(self.out) as zf:
+            text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+            pictures = [n for n in zf.namelist() if n.startswith("OEBPS/images/img")]
+        self.assertIn("images/cover.jpg", " ".join(zipfile.ZipFile(self.out).namelist()))
+        self.assertEqual(pictures, [], "not the cover a second time")
+        self.assertNotIn(SENTENCES[0], text)
+        self.out.unlink()
+        self.convert(FakeEngine(), keep_work=True)                 # built again from the cache
+        with zipfile.ZipFile(self.out) as zf:
+            text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+        self.assertNotIn(SENTENCES[0], text)
+
+    def test_pages_further_in_or_well_read_stay_text(self):
+        with mock.patch.object(hy, "FRONT_PAGES", 1):
+            self.convert(FakeEngine(short_accurate={1}), keep_work=True)       # page 2 is past the front
+        with zipfile.ZipFile(self.out) as zf:
+            text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+        self.assertIn(SENTENCES[1], text)
+
+    def test_accurate_reading_too_little_is_named(self):
+        with mock.patch.object(hy, "FRONT_PAGES", 0):
+            self.convert(FakeEngine(short_accurate={1}), keep_work=True)
         report = json.loads((self.work() / "report.json").read_text())
         self.assertEqual(report["pages"]["2"]["source"], "fast")
         self.assertEqual(report["pages"]["2"]["reason"], "accurate read too little")

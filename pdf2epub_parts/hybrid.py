@@ -52,6 +52,7 @@ def time_left(elapsed: float, recognised: int, remaining: int) -> float | None:
 
 
 COVER_WORDS = 40       # a first page with more recognised words is a page of the book, not a cover
+FRONT_PAGES = 12       # title pages, imprint: a short page here that accurate can't read goes in as a picture
 
 
 def first_page_is_cover(page_html: str, big_picture: bool) -> bool:
@@ -264,6 +265,8 @@ def to_check(report: dict) -> list[str]:
     """Pages worth a look: not from the accurate reading, or checked less well."""
     out = []
     for n, p in sorted(report["pages"].items(), key=lambda x: int(x[0])):
+        if p.get("reason") in ("title page", "blank", "cover"):
+            continue                            # on purpose: a picture, a blank page, the cover
         if p["source"] not in ("accurate", "spliced"):
             out.append(f"{n} ({p['source']})")
         elif p.get("coverage", 1) < CHECK_COVERAGE:
@@ -427,7 +430,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                             blank.add(n)
             for n in batch:
                 if n in blank_pages:
-                    report["pages"][str(n)] = {"source": "empty", "retried": False, "seconds": 0}
+                    report["pages"][str(n)] = {"source": "empty", "retried": False, "reason": "blank", "seconds": 0}
                     _write(report_path, json.dumps(report, ensure_ascii=False, indent=1))
                     _write(merged_file(n), "")
                     log(f"page {n}: empty (blank, not read)")
@@ -504,9 +507,32 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
         blocks: list[Block] = []
         for n in numbers:
             if skip_first and n == 1:
+                if "1" in report["pages"] and report["pages"]["1"].get("reason") != "cover":
+                    report["pages"]["1"]["reason"] = "cover"       # not in the text: nothing to check
+                    _write(report_path, json.dumps(report, ensure_ascii=False, indent=1))
                 continue
+            page_html = read(merged_file(n))
+            entry = report["pages"].get(str(n), {})
+            # a title page set as a design: accurate takes it for a picture (reads nothing or too little),
+            # fast loses letters and the layout; not a page where Marker failed (its fast text is fine)
+            title_page = n <= FRONT_PAGES and entry.get("source") == "fast" \
+                and entry.get("reason") in ("accurate found nothing", "accurate read too little") \
+                and len(text_of(page_html).split()) <= COVER_WORDS
+            if n == 1 and cover is not None and (title_page or entry.get("reason") == "title page"):
+                if title_page:
+                    entry.update(source="picture", reason="title page")
+                    _write(report_path, json.dumps(report, ensure_ascii=False, indent=1))
+                continue                        # it is the cover already
             blocks.append(Block("page", level=n, page=n))
-            blocks += page_blocks(strip_running_heads(read(merged_file(n)), n, offset), n)
+            if title_page:
+                picture = base.render_page(pdf, n, work / "images" / f"page-{n:04d}", base.PAGE_IMAGE_HEIGHT)
+                if picture:
+                    page_html = f'<p><img src="{_escape(str(picture))}" alt="page {n}"/></p>'
+                    entry.update(source="picture", reason="title page")
+                    _write(merged_file(n), page_html)
+                    _write(report_path, json.dumps(report, ensure_ascii=False, indent=1))
+                    log(f"page {n}: title page kept as a picture")
+            blocks += page_blocks(strip_running_heads(page_html, n, offset), n)
         align_right(blocks, pages, body)
         blocks, notes = take_footnotes(blocks)
         blocks = join_pages(blocks)

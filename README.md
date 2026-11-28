@@ -616,6 +616,13 @@ than half of what the fast reading found; typical for title pages with decorativ
 which the careful pass takes for a picture). Pages with nothing printed on them are not given
 to Marker at all (it fails on them): they are `empty page` straight away.
 
+Title pages set as a design (big letters of different sizes): Marker takes them for a picture
+and the fast reading loses letters and the layout. A page like that among the first 12
+(the careful pass read nothing or too little there, and it has at most 40 words) goes into
+the book as a picture of the page; the first page is the cover already. Pages Marker failed
+on keep their fast text. The summary's `check:` list leaves out such pages, blank pages and
+the cover.
+
 If the engine can't be installed (no internet on the first run, unsupported system), the
 script says so and uses quick mode. To remove the engine:
 
