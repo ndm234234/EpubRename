@@ -36,6 +36,7 @@ for book in "$@"; do
     node $T/hits.mjs $B "$book" "${WORD:-что}" 60 opendyslexic 120
     node $T/touch.mjs $B "$book"; node $T/status.mjs $B "$book"; node $T/typo.mjs $B "$book"
     node $T/subpixel.mjs $B "$book"
+    node $T/openfile.mjs $B "$book"
     node $T/scroll.mjs $B "$book" "${WORD:-что}"
     # bold word starts: addresses, the switch, and the page turns and the ribbon with it on
     node $T/bold-unit.mjs $B "$book"; node $T/bold.mjs $B "$book"

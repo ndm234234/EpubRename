@@ -590,8 +590,9 @@ let offerShown = null;   // the action of the "Continue from …" toast (offerPl
 // From the catalog: reader.html#book=<epub url relative to this page>
 const params = new URLSearchParams(location.hash.slice(1));
 const src = params.get("book");
+// opened from the catalog (a book, or its "Open file": #from=catalog): the way back to it
+if (src || params.get("from") === "catalog") $("back").classList.remove("hidden");
 if (src) {
-  $("back").classList.remove("hidden");
   // The catalog lists the books opened last first (app and browser tab): {href from the catalog: time}
   try {
     const k = "epubLibrary:opened", m = JSON.parse(localStorage.getItem(k)) || {};

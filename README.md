@@ -654,6 +654,8 @@ FULL=1 tests/reader/run.sh "Jane Doe/Jane Doe - A Quiet Harbour.epub"   # every 
   resizes; contents, search, bookmarks and taps in scroll mode, on a phone and a desktop;
 - `subpixel.mjs` — a phone's scroll position a fraction of a pixel past the page still turns to
   a chapter's last page;
+- `openfile.mjs` — the catalog's "Open file" opens the reader with its "Catalog" button, which
+  stays after a file is chosen and leads back;
 - `bold-unit.mjs`, `bold.mjs` — *Bold word starts*: which letters get bold, every address the
   same with it as without it (made and resolved), the switch on this device only, the place and
   bookmarks kept across switching; `nav.mjs` and `scroll.mjs` run again with it on (`BOLD=1`);
