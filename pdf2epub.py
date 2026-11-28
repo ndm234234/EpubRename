@@ -625,6 +625,7 @@ class Block:
     anchor: str = ""    # id, when the contents link here
     items: list = field(default_factory=list)   # list: html of each item
     rows: list = field(default_factory=list)    # table: html of each cell, row by row
+    align: str = ""     # p: "right" when the book prints it at the right (a signature under a quote)
 
 
 def runs_html(runs: list) -> str:
@@ -845,6 +846,7 @@ CSS = """\
 body { margin: 0 4%; line-height: 1.45; }
 p { margin: 0; text-indent: 1.3em; text-align: justify;
     -webkit-hyphens: auto; hyphens: auto; adobe-hyphenate: auto; }
+p.right { text-align: right; text-indent: 0; }
 h1, h2, h3 { text-align: center; line-height: 1.25; margin: 1.6em 0 0.9em; page-break-after: avoid; }
 h1 { font-size: 1.5em; page-break-before: always; }
 h2 { font-size: 1.2em; }
@@ -978,7 +980,8 @@ def write_epub(out: Path, title: str, author: str, lang: str, chapters: list[Cha
                 b.anchor = f"h{hid}"
             id_attr = f' id="{b.anchor}"' if b.anchor else ""
             if b.kind == "p":
-                parts.append(f"<p{id_attr}>{b.html}</p>")
+                cls = f' class="{b.align}"' if b.align else ""
+                parts.append(f"<p{id_attr}{cls}>{b.html}</p>")
             elif b.kind == "endnote":
                 parts.append(f'<div class="endnote" epub:type="endnote"{id_attr}><p>{b.html}</p></div>')
             elif b.kind == "note":

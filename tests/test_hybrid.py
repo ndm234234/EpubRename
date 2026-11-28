@@ -352,6 +352,42 @@ class BookPartsTest(unittest.TestCase):
         self.assertEqual([e.title for e in tocs[0].entries], ["ПРЕДИСЛОВИЕ", "Как читать", "ВВЕДЕНИЕ", "Почва"])
 
 
+class RightAlignedTest(unittest.TestCase):
+    @staticmethod
+    def page(rows):
+        """A page of lines (left, right, text), 11 pt, one under another."""
+        from pdf2epub import Line, Page, Piece
+        page = Page(16, 480, 640)
+        for i, (left, right, text) in enumerate(rows):
+            page.lines.append(Line([Piece(60 + 14 * i, left, right - left, 11, 11.0, [(text, False, False)])], 16))
+        return page
+
+    def test_signature_under_a_quote_goes_right(self):
+        from pdf2epub import Block
+        page = self.page([(55, 440, "Рынки технологий подобны реке, где отдельные участки движутся быстрее"),
+                          (40, 440, "других. Хала сделала математику увлекательной для широкого круга"),
+                          (40, 300, "участников будущего!"),
+                          (330, 440, "— Мила Фенвик,"),
+                          (180, 440, "руководитель группы по аналитике рисков"),
+                          (260, 440, "банк Тихие Реки"),
+                          (55, 440, "Книги по искусственному интеллекту обычно представляют собой либо"),
+                          (40, 250, "рукописи для специалистов.")])
+        quote = Block("p", "Рынки ...", "Рынки технологий подобны реке, где отдельные участки движутся быстрее "
+                      "других. Хала сделала математику увлекательной для широкого круга участников будущего!", page=16)
+        sign = Block("p", "— <i>Мила Фенвик,<br/>руководитель...</i>",
+                     "— Мила Фенвик, руководитель группы по аналитике рисков банк Тихие Реки", page=16)
+        after = Block("p", "Книги ...", "Книги по искусственному интеллекту обычно представляют собой либо "
+                      "рукописи для специалистов.", page=16)
+        hy.align_right([Block("page", level=16, page=16), quote, sign, after], [page], 11.0)
+        self.assertEqual([quote.align, sign.align, after.align], ["", "right", ""])
+
+    def test_no_text_layer_changes_nothing(self):
+        from pdf2epub import Block, Page
+        b = Block("p", "Текст", "Текст", page=1)
+        hy.align_right([b], [Page(1, 480, 640)], 11.0)
+        self.assertEqual(b.align, "")
+
+
 class PageNoteTest(unittest.TestCase):
     def test_notes(self):
         self.assertEqual(hy.page_note("accurate", {"fixed_words": 0, "inserted_blocks": 0, "coverage": 1.0}, False), "ok")

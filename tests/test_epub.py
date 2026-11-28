@@ -49,6 +49,12 @@ class EpubTest(unittest.TestCase):
         self.assertIn("hyphens: manual", re.search(r"div.toc p \{([^}]*)\}", pdf2epub.CSS).group(1),
                       "contents lines are not hyphenated")
 
+    def test_right_aligned_paragraph(self):
+        pages, _ = write([Block("h", "Отзывы", "Отзывы", 1), Block("p", "Текст отзыва.", "Текст отзыва."),
+                          Block("p", "— <i>Мила Фенвик</i>", "— Мила Фенвик", align="right")])
+        self.assertIn('<p class="right">— <i>Мила Фенвик</i></p>', pages)
+        self.assertIn("<p>Текст отзыва.</p>", pages)
+
     def test_generator_meta(self):
         _, opf = write([Block("p", "Текст", "Текст", page=1)])
         self.assertIn('<meta name="generator" content="pdf2epub hybrid"/>', opf)

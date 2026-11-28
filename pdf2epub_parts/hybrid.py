@@ -75,6 +75,41 @@ def place_tocs(blocks: list[Block], layer_tocs: list) -> list:
     return layer_tocs
 
 
+RIGHT_INDENT = 0.2     # a line that starts this far into the column and ends at its right edge is set right
+
+
+def align_right(blocks: list[Block], pages: list, body: float) -> None:
+    """Paragraphs the book prints at the right (a signature under a quote, a date under a letter):
+    Marker gives them as ordinary paragraphs, the PDF text layer still knows where their lines are."""
+    def words(text: str) -> list[str]:
+        return [w.lower() for w in re.findall(r"\w+", text)]
+
+    by_page = {p.number: p for p in pages}
+    for number, page in by_page.items():
+        lines = [l for l in page.lines if l.kind == "text" and words(l.text)]
+        paras = [b for b in blocks if b.kind == "p" and b.page == number]
+        if not lines or not paras:
+            continue
+        left, right = base.column_edges(page, (min(l.left for l in lines), max(l.right for l in lines)))
+        width = right - left
+        if width <= 0:
+            continue
+        sets = [set(words(b.text)) for b in paras]
+        mine: dict[int, list] = {}
+        for line in lines:
+            lw = words(line.text)
+            share = [sum(1 for w in lw if w in s) / len(lw) for s in sets]
+            best = max(range(len(paras)), key=lambda i: share[i])
+            if share[best] >= 0.6:
+                mine.setdefault(best, []).append(line)
+        for i, own in mine.items():
+            covered = sum(len(words(l.text)) for l in own)
+            if covered < 0.6 * len(words(paras[i].text)):
+                continue                        # most of the paragraph is not found: don't guess
+            if all(abs(l.right - right) <= body and l.left - left >= RIGHT_INDENT * width for l in own):
+                paras[i].align = "right"
+
+
 def _short(seconds: float) -> str:
     """0:57, 1:52, 1:02:05: the time one page took."""
     s = int(round(seconds))
@@ -363,6 +398,7 @@ def _convert(pdf, out, title, author, lang, engine, keep_work, progress, run, st
                 continue
             blocks.append(Block("page", level=n, page=n))
             blocks += page_blocks(strip_running_heads(read(merged_file(n)), n, offset), n)
+        align_right(blocks, pages, body)
         blocks, notes = take_footnotes(blocks)
         blocks = join_pages(blocks)
         place_footnotes(blocks, notes)
