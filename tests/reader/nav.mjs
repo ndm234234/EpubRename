@@ -1,6 +1,6 @@
 // Navigation e2e: page turns forward/back with no skips or repeats, status total = real columns,
 // no clipped lines, place kept on font/size changes, bookmarks and search hits land on the shown page.
-// node nav.mjs <base> <book under Out/> [maxTurns]   env FACES=book,literata,... SIZES=100,140 W H
+// node nav.mjs <base> <book under Out/> [maxTurns]   env FACES=book,literata,... SIZES=100,140 W H BOLD=1 (bold word starts on)
 import { launch, sleep } from "./cdp.mjs";
 import { HELPERS } from "./helpers.mjs";
 const [BASE, BOOK, MAXT = "100000"] = process.argv.slice(2);
@@ -21,7 +21,7 @@ const st = async p => JSON.parse(await p.eval("JSON.stringify(__state())"));
 async function open(face, size) {
   const p = await launch({ width: W, height: H, touch: TOUCH });
   await p.send("Page.addScriptToEvaluateOnNewDocument", { source:
-    `try { localStorage.setItem("epubReader:prefs", JSON.stringify({ theme: "light", font: ${size}, face: "${face}", layout: "book" })); } catch {}` });
+    `try { localStorage.setItem("epubReader:prefs", JSON.stringify({ theme: "light", font: ${size}, face: "${face}", layout: "book" })); } catch {}` + (process.env.BOLD ? `;try { localStorage.setItem("epubReader:bold", "true"); } catch {}` : "") });
   await p.goto(`${BASE}/reader/reader.html#book=${encodeURIComponent("../Out/" + BOOK)}`);
   await p.waitFor("typeof rendition !== 'undefined' && rendition && rendition.location && rendition.location.start");
   await p.eval(HELPERS.replace("TOUCH_UI", "touchUi.matches"));
