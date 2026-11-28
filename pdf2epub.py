@@ -3,7 +3,8 @@
 
 Usage:
     python3 pdf2epub.py [PDF or FOLDER ...] [--out DIR] [--title T] [--author A]
-                        [--lang CODE] [--force] [--yes] [--quick] [--pages N] [--keep-work]
+                        [--lang CODE] [--force] [--yes] [--quick] [--pages N | --page LIST]
+                        [--keep-work]
 
 By default every .pdf in ./Pdf is converted into ./In/<same name>.epub, so that
 epub_rename.py can then sort the new books into Out/ like any other EPUB.
@@ -33,7 +34,8 @@ What ends up in the book:
 
 A book that already exists in the output folder is skipped (--force overwrites it).
 
---pages N is a trial: only the first N pages, into <out>/Preview/ (out of the way of
+--pages N is a trial: only the first N pages (--page 23 or --page 20-25,40: those pages),
+into <out>/Preview/ (out of the way of
 epub_rename.py and of the whole book). The pages it recognises are kept, so the whole book
 later goes on from them.
 
@@ -1172,8 +1174,11 @@ def convert(pdf: Path, out: Path, args, meta: tuple[str, str] | None = None) -> 
         body = weighted_median(sizes) if sizes else 10.0
 
         drop_headers_footers(pages, body)
-        if args.pages:
-            del pages[args.pages:]       # headers and footers were found on the whole book
+        if args.only:
+            total = len(pages)
+            pages[:] = [p for p in pages if p.number in args.only]   # headers and footers: on the whole book
+            if not pages:
+                raise RuntimeError(f"the book has only {total} page(s)")
         tocs = find_tocs(pages, body)
         by_number = {p.number: p for p in pages}
         for n, toc in enumerate(tocs):
@@ -1193,7 +1198,7 @@ def convert(pdf: Path, out: Path, args, meta: tuple[str, str] | None = None) -> 
                 page.figures = page_figures(pdf, page, tmp)
 
         # the cover: the first page as a picture; it is left out of the text when it is a picture itself
-        cover = render_page(pdf, 1, tmp / "cover", COVER_HEIGHT)
+        cover = render_page(pdf, 1, tmp / "cover", COVER_HEIGHT) if pages[0].number == 1 else None
         first_pics = images.get(1, [])
         skip_first = cover is not None and any(w * h >= 0.5 * pages[0].width * pages[0].height for w, h in first_pics)
 
@@ -1227,6 +1232,20 @@ def convert(pdf: Path, out: Path, args, meta: tuple[str, str] | None = None) -> 
 
 # ---------------------------------------------------------------- main
 
+def page_list(spec: str) -> set[int]:
+    """"23" or "20-25,40" -> {23} or {20, ..., 25, 40} (pages count from 1)."""
+    out: set[int] = set()
+    for part in spec.split(","):
+        first, dash, last = part.strip().partition("-")
+        if not first.isdigit() or (dash and not last.strip().isdigit()):
+            raise ValueError(f"not a page or pages: {part.strip()!r}")
+        a, b = int(first), int(last) if dash else int(first)
+        if a < 1 or b < a:
+            raise ValueError(f"not a page or pages: {part.strip()!r}")
+        out.update(range(a, b + 1))
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Turn PDF books into EPUB (Pdf/*.pdf -> In/*.epub).")
     ap.add_argument("paths", nargs="*", type=Path, help="PDF files or folders (default: ./Pdf)")
@@ -1241,11 +1260,19 @@ def main() -> int:
     ap.add_argument("--pages", type=int, metavar="N",
                     help="a trial: only the first N pages, into <out>/Preview/ (made again every time); "
                          "the pages it recognises are kept, so the whole book goes on from them")
+    ap.add_argument("--page", metavar="LIST",
+                    help="a trial of these pages only, e.g. 23 or 20-25,40, into <out>/Preview/ (like --pages)")
     ap.add_argument("--keep-work", action="store_true",
                     help="keep the recognition work folder (In/.pdf2epub-work) after the book is done")
     args = ap.parse_args()
     if args.pages is not None and args.pages < 1:
         ap.error("--pages must be 1 or more")
+    if args.pages and args.page:
+        ap.error("use either --pages or --page")
+    try:
+        args.only = page_list(args.page) if args.page else set(range(1, args.pages + 1)) if args.pages else None
+    except ValueError as e:
+        ap.error(f"--page: {e}")
 
     missing = [t for t in TOOLS if not shutil.which(t)]
     if missing:
@@ -1271,16 +1298,16 @@ def main() -> int:
         print("❌ --title and --author can only be used with one PDF")
         return 1
 
-    out_dir = args.out / "Preview" if args.pages else args.out
+    out_dir = args.out / "Preview" if args.only else args.out
     out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"📚 Found {len(pdfs)} PDF file(s)" + (f", a trial of the first {args.pages} page(s)" if args.pages else "")
-          + "\n")
+    trial = (f"the first {args.pages} page(s)" if args.pages else f"page(s) {args.page}") if args.only else ""
+    print(f"📚 Found {len(pdfs)} PDF file(s)" + (f", a trial of {trial}" if trial else "") + "\n")
     done = skipped = failed = 0
     # all questions first, so that the long recognition can then run unattended (overnight)
     jobs = []
     for pdf in pdfs:
         out = out_dir / (safe_name(pdf.stem) + ".epub")
-        if out.exists() and not args.force and not args.pages:
+        if out.exists() and not args.force and not args.only:
             print(f"⏭️  {pdf.name}: {out.name} already exists (--force to overwrite)")
             skipped += 1
             continue
@@ -1297,7 +1324,7 @@ def main() -> int:
         if engine is None:
             print("⚠️  The recognition engine is not available: using quick mode (the PDF text layer only)")
         else:
-            pages = sum(min(job[4], args.pages or job[4]) for job in jobs)
+            pages = sum(len([n for n in args.only if n <= job[4]]) if args.only else job[4] for job in jobs)
             print(f"⏱️  {estimate(pages)} for {pages} pages "
                   "(it can be stopped with Ctrl+C and goes on from the same page next time)\n")
 
@@ -1311,7 +1338,7 @@ def main() -> int:
                 try:
                     summary = convert_hybrid(pdf, out, title, author, args.lang, engine, args.keep_work,
                                              progress, status=progress.status,
-                                             first_pages=args.pages, work_root=args.out)
+                                             only=args.only, work_root=args.out)
                 finally:
                     progress.status("")
             else:
@@ -1328,9 +1355,9 @@ def main() -> int:
         done += 1
 
     print(f"\nDone: {done} converted, {skipped} skipped, {failed} failed. Books are in {out_dir}/")
-    if done and args.pages:
-        print("Have a look; the whole book: the same command without --pages"
-              + (f" (the {args.pages} page(s) recognised now are not read again)" if engine else ""))
+    if done and args.only:
+        print(f"Have a look; the whole book: the same command without {'--pages' if args.pages else '--page'}"
+              + (" (the pages recognised now are not read again)" if engine else ""))
     elif done:
         print("Next: python3 epub_rename.py  (sorts them into Out/ and updates the catalog)")
     return 1 if failed else 0

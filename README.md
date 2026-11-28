@@ -550,6 +550,7 @@ python3 pdf2epub.py --yes           # never ask questions
 python3 pdf2epub.py --lang uk       # language of the book (normally guessed from the text)
 python3 pdf2epub.py --quick         # only the PDF text layer: seconds instead of hours
 python3 pdf2epub.py --pages 10      # a trial: only the first 10 pages, into In/Preview/
+python3 pdf2epub.py --page 23       # a trial of chosen pages: 23, or 20-25,40
 python3 pdf2epub.py --keep-work     # keep In/.pdf2epub-work (recognised pages, report.json)
 ```
 
@@ -560,6 +561,9 @@ python3 pdf2epub.py "Pdf/Mila Fenwick - Quiet Rivers.pdf" --pages 10   # ~10 min
 # open In/Preview/Mila Fenwick - Quiet Rivers.epub; if it looks right:
 python3 pdf2epub.py "Pdf/Mila Fenwick - Quiet Rivers.pdf"              # the whole book
 ```
+
+To look into one page that came out wrong, take just that page: `--page 23` (or several:
+`--page 20-25,40`). A trial without page 1 has no cover.
 
 The trial goes to `In/Preview/` and is made again every time, so it never blocks the
 whole book and `epub_rename.py` does not sort it into the library (it reads only `In/`

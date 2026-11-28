@@ -269,7 +269,7 @@ class HybridTest(unittest.TestCase):
         trial = self.out.parent / "Preview" / "book.epub"
         trial.parent.mkdir()
         first = FakeEngine()
-        self.convert(first, out=trial, first_pages=2, work_root=self.out.parent)
+        self.convert(first, out=trial, only={1, 2}, work_root=self.out.parent)
         self.assertEqual(first.accurate_pages(), [0, 1])
         self.assertEqual(sorted(p for m, ps in first.calls if m == "fast" for p in ps), [0, 1])
         check_epub(trial)
@@ -287,6 +287,24 @@ class HybridTest(unittest.TestCase):
             text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
         self.assertIn(SENTENCES[2], text)
         self.assertFalse(self.work().exists())
+
+    def test_trial_of_one_page(self):
+        trial = self.out.parent / "Preview" / "book.epub"
+        trial.parent.mkdir()
+        fake = FakeEngine()
+        self.convert(fake, out=trial, only={3}, work_root=self.out.parent)
+        self.assertEqual(fake.accurate_pages(), [2])
+        check_epub(trial)
+        with zipfile.ZipFile(trial) as zf:
+            text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+            self.assertNotIn("OEBPS/images/cover.jpg", zf.namelist(), "no page 1, no cover")
+        self.assertIn(SENTENCES[2], text)
+        self.assertNotIn(SENTENCES[0], text)
+        # the summary speaks of the trial's pages, not of everything in the work folder
+        summary = self.convert(FakeEngine(fail_accurate={0}), out=trial, only={3}, work_root=self.out.parent)
+        self.assertIn("accurate 1", summary)
+        summary = self.convert(FakeEngine(fail_accurate={0}), out=trial, only={1}, work_root=self.out.parent)
+        self.assertIn("pages: fast 1;", summary)
 
     def test_keep_work(self):
         self.convert(FakeEngine(), keep_work=True)

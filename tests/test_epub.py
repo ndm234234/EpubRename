@@ -133,6 +133,31 @@ class MainTest(unittest.TestCase):
             self.assertIn("Page 2 text", text)
             self.assertNotIn("Page 3 text", text)
 
+    def test_chosen_pages_go_to_preview(self):
+        from test_hybrid import make_pdf
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf = make_pdf(Path(tmp) / "book.pdf", y=400)
+            out_dir = Path(tmp) / "In"
+            stdout = io.StringIO()
+            with mock.patch("pdf2epub_parts.engine.ensure_engine", return_value=None), \
+                    mock.patch.object(sys, "argv", ["pdf2epub.py", str(pdf), "--out", str(out_dir), "--yes",
+                                                    "--page", "2-3"]), \
+                    contextlib.redirect_stdout(stdout):
+                code = pdf2epub.main()
+            self.assertEqual(code, 0, stdout.getvalue())
+            with zipfile.ZipFile(out_dir / "Preview" / "book.epub") as zf:
+                text = "".join(zf.read(n).decode() for n in zf.namelist() if n.endswith(".xhtml"))
+            self.assertIn("Page 2 text", text)
+            self.assertIn("Page 3 text", text)
+            self.assertNotIn("Page 1 text", text)
+
+    def test_page_list(self):
+        self.assertEqual(pdf2epub.page_list("23"), {23})
+        self.assertEqual(pdf2epub.page_list("20-22, 40"), {20, 21, 22, 40})
+        for bad in ("", "abc", "0", "5-3", "1-"):
+            with self.assertRaises(ValueError, msg=bad):
+                pdf2epub.page_list(bad)
+
     def test_ctrl_c_explains_resume(self):
         from test_hybrid import make_pdf
         with tempfile.TemporaryDirectory() as tmp:
