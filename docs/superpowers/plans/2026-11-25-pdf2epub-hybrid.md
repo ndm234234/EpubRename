@@ -92,7 +92,7 @@
 - [ ] **Step 2: Run** `python3 -m unittest tests.test_engine -v` → new tests FAIL.
 - [ ] **Step 3: Implement** the three functions (`html.parser`-based div tracking for `split_pages`; argument lists only).
 - [ ] **Step 4: Run** the tests → PASS.
-- [ ] **Step 5: Real smoke check:** run `run_marker` for page 5 of the 9-page sample (`pdfseparate`/`pdfunite` of pages 7,8,26,38,39,101,119,133,135 of the book into the scratchpad) in `fast` → dict with key 5 containing `Невербальные`. Afterwards `pgrep -f llama-server` prints nothing.
+- [ ] **Step 5: Real smoke check:** run `run_marker` for page 5 of the 9-page sample (`pdfseparate`/`pdfunite` of pages 7,8,26,38,39,101,119,133,135 of the book into the scratchpad) in `fast` → dict with key 5 containing the page's checklist heading. Afterwards `pgrep -f llama-server` prints nothing.
 - [ ] **Step 6: Commit** `git commit -m "pdf2epub: run Marker per page range and split its pages"`
 
 ### Task 3: Text verification and merging
@@ -109,11 +109,11 @@
   - `needs_retry(result: MergeResult) -> bool` — True when coverage < 0.97 or a missing run ≥ 4 words was spliced.
 
 - [ ] **Step 1: Write failing tests** (all inputs short synthetic strings):
-  - `test_vote_fixes_foreign_word` — acc `<p>поиграете позже, quando он будет</p>`, fast and layer with `когда` → html contains `когда`, not `quando`; `fixed_words == 1`.
+  - `test_vote_fixes_foreign_word` — acc `<p>польете грядки позже, quando солнце сядет</p>`, fast and layer with `когда` → html contains `когда`, not `quando`; `fixed_words == 1`.
   - `test_vote_keeps_accurate_on_tie` — acc `Супер!`, fast `Cnep!`, layer empty → `Супер!` kept.
   - `test_case_vote` — acc `обычно Это делаете`, fast and layer `это` → `это`.
-  - `test_digital_layer_wins` — acc `Главная`, fast `Гпавная`, layer `Глaвная`(other), `digital=True` with layer `Главная мысль` → layer text wins every disagreement.
-  - `test_markup_preserved` — acc `<p><b>ПРОБЛЕМА.</b> Очень трудно</p>` with a fixed word inside → `<b>ПРОБЛЕМА.</b>` still present.
+  - `test_digital_layer_wins` — acc `Главнов`, fast `Гпавное`, layer `Глaвное`(other), `digital=True` with layer `Главное правило` → layer text wins every disagreement.
+  - `test_markup_preserved` — acc `<p><b>СОВЕТ.</b> Заранее трудно</p>` with a fixed word inside → `<b>СОВЕТ.</b>` still present.
   - `test_missing_list_items_spliced` — acc has 3 `<li>` items, fast has 8 → result has all 8 item texts in fast's order, `source == "spliced"`, `inserted_blocks >= 1`.
   - `test_whole_page_from_fast` — acc covers < 50 % → `source == "fast"`, html == fast_html.
   - `test_coverage_uses_layer_too` — fast lacks a sentence that the layer has and acc lacks → coverage < 1.
@@ -138,7 +138,7 @@
   - `join_pages(blocks: list[Block]) -> list[Block]` — a `p` ending without `TERMINAL` followed (across a `page` marker) by a `p` starting lowercase becomes one block; hyphenated end `-` + lowercase → glued without hyphen.
   - `tocs_from_blocks(blocks: list[Block], body_levels) -> list[Toc]` — a `table` whose rows are `[title, number]` with ≥ 4 rows and mostly rising numbers (same rule as `find_tocs`) → `Toc(title=<preceding heading text>, entries=..., pages=[...])`; entry level 1 when the title cell is all `<b>`, otherwise 2; the table block becomes `Block("toc", level=<toc index>)`.
 
-- [ ] **Step 1: Write failing tests:** `test_headings_paragraphs_bold` (chapter_page fixture: `<h1>ПРИНЦИП</h1><h2>1</h2><h1>ИСПОЛЬЗУЙТЕ…</h1><p><b>ПРОБЛЕМА.</b> …</p>` → kinds `h,h,h,p`, bold kept); `test_checkbox_list` → `Block("list")` with items starting `☐ Крепко`; `test_drop_cap` (`В се родители`, `Dсе родители`) → `Все родители`; `test_join_pages` (`…чтобы их` / page / `дети выросли.` → one p; `Каж-` / page / `дый` → `Каждый`); `test_toc_table` (toc_page fixture: bold rows `ПРИМЕЧАНИЕ АВТОРА | 13`, plain `Как пользоваться этой книгой | 17`, …) → one Toc titled `СОДЕРЖАНИЕ` with levels `[1, 1, 1, 2, …]` and numbers `[13, 14, 15, 17, …]`.
+- [ ] **Step 1: Write failing tests:** `test_headings_paragraphs_bold` (chapter_page fixture: `<h1>ШАГ</h1><h2>1</h2><h1>ПОЛИВАЙТЕ…</h1><p><b>СОВЕТ.</b> …</p>` → kinds `h,h,h,p`, bold kept); `test_checkbox_list` → `Block("list")` with items starting `☐ Крепкие`; `test_drop_cap` (`В се садовники`, `Dсе садовники`) → `Все садовники`; `test_join_pages` (`…чтобы их` / page / `яблони выросли.` → one p; `Каж-` / page / `дый` → `Каждый`); `test_toc_table` (toc_page fixture: bold rows `ОТ СОСТАВИТЕЛЯ | 13`, plain `Как читать этот справочник | 17`, …) → one Toc titled `СОДЕРЖАНИЕ` with levels `[1, 1, 1, 2, …]` and numbers `[13, 14, 15, 17, …]`.
 - [ ] **Step 2: Run** `python3 -m unittest tests.test_html -v` → FAIL.
 - [ ] **Step 3: Implement** with `html.parser`.
 - [ ] **Step 4: Run** → PASS; also `python3 -m unittest discover -s tests -v` → all PASS.
@@ -153,9 +153,9 @@
 **Interfaces:**
 - Consumes: `Block` kinds from Task 4.
 - Produces: `write_epub(..., tocs, main, generator: str = "pdf2epub quick")` — renders `list` as `<ul class="list"><li>…</li></ul>`, `table` as `<table><tr><td>…</td></tr></table>`, and puts `<meta name="generator" content="{generator}"/>` in the OPF metadata.
-- Also: `merge_heading_runs(blocks) -> list[Block]` in `pdf2epub_html.py` — consecutive heading blocks on one page (`ПРИНЦИП` / `1` / `ИСПОЛЬЗУЙТЕ…`) become one heading with `<br/>`, text `ПРИНЦИП 1. ИСПОЛЬЗУЙТЕ…` (same rule `close_heading` uses today), level = smallest.
+- Also: `merge_heading_runs(blocks) -> list[Block]` in `pdf2epub_html.py` — consecutive heading blocks on one page (`ШАГ` / `1` / `ПОЛИВАЙТЕ…`) become one heading with `<br/>`, text `ШАГ 1. ПОЛИВАЙТЕ…` (same rule `close_heading` uses today), level = smallest.
 
-- [ ] **Step 1: Write failing tests:** `test_list_and_table_render` — build chapters with one list and one table, write to a temp file → `check_epub` passes, XHTML contains `<ul class="list">`, `☐`, `<td>`; `test_generator_meta` → OPF contains `content="pdf2epub hybrid"`; `test_heading_runs` → one heading `ПРИНЦИП 1. ИСПОЛЬЗУЙТЕ КЛЮЧИ К УСПЕХУ`.
+- [ ] **Step 1: Write failing tests:** `test_list_and_table_render` — build chapters with one list and one table, write to a temp file → `check_epub` passes, XHTML contains `<ul class="list">`, `☐`, `<td>`; `test_generator_meta` → OPF contains `content="pdf2epub hybrid"`; `test_heading_runs` → one heading `ШАГ 1. ПОЛИВАЙТЕ САД ПО УТРАМ`.
 - [ ] **Step 2: Run** `python3 -m unittest tests.test_epub -v` → FAIL.
 - [ ] **Step 3: Implement**; CSS: `ul.list { list-style: none; padding-left: 1.2em; }`, `table { border-collapse: collapse; margin: 1em auto; } td { border: 1px solid #999; padding: .2em .4em; }`.
 - [ ] **Step 4: Run** all tests → PASS; quick mode on the synthetic PDFs (`python3 pdf2epub.py --quick <scratchpad>/tp --out <scratchpad>/out2 --yes --force`) still converts both with ✅.
@@ -200,5 +200,5 @@ Flow: fast for all missing pages in one `run` call (cached per page); then accur
 - [ ] **Step 2: Run** → FAIL.
 - [ ] **Step 3: Implement:** without `--quick`, call `ensure_engine(print)` once before the book loop; Engine → `convert_hybrid` per book, else quick `convert` with a one-line explanation. Before the loop print the estimate `⏱️  ~N h for M pages` (2 min/page accurate). Add `--quick` and `--keep-work`. Author/title question stays before the long work starts (all questions for all books asked first, then the night run). README: describe plain run, first-run install (~3 GB, one time), resume, quick fallback, engine location, how to remove it (`rm -rf ~/.local/share/pdf2epub ~/.cache/huggingface/hub/models--datalab-to--*`).
 - [ ] **Step 4: Run** all tests → PASS.
-- [ ] **Step 5: Real check on the 9-page sample:** `python3 pdf2epub.py <scratchpad>/sample/sample.pdf --out <scratchpad>/hyb --yes --keep-work` → ✅; inspect: no `quando`; page with `Крепко прижать` has all 8 nonverbal items with `☐`; chapter page has all 8 list items and the paragraphs `Если вы посмотрите…`, `СДВГ — это не подарок…`; `**ПРОБЛЕМА.**` bold; contents is a linked list with levels; `fix_cover.py --dry-run` → fine. Interrupt once with Ctrl+C mid-run and rerun → finishes without redoing merged pages. Tune the thresholds if a check fails, rerun tests.
+- [ ] **Step 5: Real check on the 9-page sample:** `python3 pdf2epub.py <scratchpad>/sample/sample.pdf --out <scratchpad>/hyb --yes --keep-work` → ✅; inspect: no `quando`; the checklist page has all 8 items with `☐`; the chapter page has all 8 list items and all its paragraphs; the bold lead-in word stays bold; contents is a linked list with levels; `fix_cover.py --dry-run` → fine. Interrupt once with Ctrl+C mid-run and rerun → finishes without redoing merged pages. Tune the thresholds if a check fails, rerun tests.
 - [ ] **Step 6: Commit** `git add pdf2epub.py README.md tests docs && git commit -m "pdf2epub: hybrid recognition by default, quick mode as fallback"`

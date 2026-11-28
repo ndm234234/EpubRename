@@ -739,7 +739,7 @@ def build_blocks(pages: list[Page], body: float, skip_page: int | None, tocs: li
                 text = " ".join(parts)
                 text = re.sub(r"(?<=[^\W\d_]|[?!)»”])\d{1,2}$", "", text)    # footnote mark
                 if len(parts) > 1 and re.fullmatch(r"\S+\s+(\d+|[IVXLC]+)", parts[0]):
-                    text = parts[0] + ". " + " ".join(parts[1:])     # "ПРИНЦИП 1" + "TITLE"
+                    text = parts[0] + ". " + " ".join(parts[1:])     # "ШАГ 1" + "TITLE"
                 rows = []
                 for l in heading:
                     if rows and re.fullmatch(r"\d{1,3}|[IVXLC]{1,6}", l.text):

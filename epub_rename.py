@@ -82,8 +82,8 @@ def read_metadata(epub_path: Path) -> tuple[list[str], str]:
 def normalize_author(raw: str) -> str:
     """Bring an author name to the "First Last" form.
 
-    "Толстой, Лев Николаевич" -> "Лев Николаевич Толстой"
-    "ТОЛСТОЙ ЛЕВ"             -> "Толстой Лев"
+    "Звонарёв, Тимофей Ильич" -> "Тимофей Ильич Звонарёв"
+    "ЗВОНАРЁВ ТИМОФЕЙ"        -> "Звонарёв Тимофей"
     """
     name = re.sub(r"\s+", " ", unicodedata.normalize("NFC", raw or "")).strip()
     # Exactly one comma means "Last, First". With two or more
@@ -101,7 +101,7 @@ def normalize_author(raw: str) -> str:
 def author_key(name: str) -> tuple[str, ...]:
     """Key for comparing authors ignoring word order, case, ё/е and punctuation.
 
-    "Лев Толстой", "Толстой Лев", "толстой, лев" -> ('лев', 'толстой')
+    "Тимофей Звонарёв", "Звонарев Тимофей", "звонарёв, тимофей" -> ('звонарев', 'тимофей')
     """
     words = re.findall(r"\w+", name.lower().replace("ё", "е"))
     return tuple(sorted(words))

@@ -13,9 +13,9 @@ def text(html_text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html_text)).strip()
 
 
-ITEMS = ["Крепко прижать к себе ребенка", "Погладить по голове или плечу", "Ласково погладить по волосам",
-         "Обнять ребенка обеими руками", "Улыбнуться", "Легко поцеловать",
-         "Использовать знак большой палец вверх", "Подмигнуть"]
+ITEMS = ["Крепкие ветки держат тяжелые плоды", "Листья блестят после дождя", "Пчелы летают над цветами",
+         "Кора гладкая и без трещин", "Цветение", "Почва рыхлая",
+         "Яблоки наливаются соком до осени", "Плодоношение"]
 
 
 def ul(items):
@@ -24,75 +24,75 @@ def ul(items):
 
 class VoteTest(unittest.TestCase):
     def test_vote_fixes_foreign_word(self):
-        acc = "<p>Скажите ребенку, что поиграете позже, quando он будет вести себя хорошо.</p>"
-        fast = "<p>Скажите ребенку, что поиграете позже, когда он будет вести себя хорошо.</p>"
-        layer = "Скажите ребенку, что поиграете позже, когда он будет вести себя хорошо."
+        acc = "<p>Обещайте соседу, что польете грядки позже, quando солнце сядет за лес.</p>"
+        fast = "<p>Обещайте соседу, что польете грядки позже, когда солнце сядет за лес.</p>"
+        layer = "Обещайте соседу, что польете грядки позже, когда солнце сядет за лес."
         r = merge_page(acc, fast, layer, digital=False)
         self.assertIn("когда", r.html)
         self.assertNotIn("quando", r.html)
         self.assertEqual(r.fixed_words, 1)
 
     def test_foreign_word_fixed_without_layer(self):
-        acc = "<p>что поиграете с ним позже, quando он будет вести себя хорошо.</p>"
-        fast = "<p>что поиграете с ним позже, когда он будет вести себя хорошо.</p>"
+        acc = "<p>что польете с ним грядки позже, quando солнце сядет за лес.</p>"
+        fast = "<p>что польете с ним грядки позже, когда солнце сядет за лес.</p>"
         r = merge_page(acc, fast, "", digital=False)
         self.assertIn("когда", r.html)
 
     def test_vote_keeps_accurate_on_tie(self):
-        acc = "<ul><li>☐ Отличная работа!</li><li>☐ Супер!</li><li>☐ Фантастика!</li></ul>"
-        fast = "<p>◦ Отличная работа! ◦ Cnep! ◦ Фантастика!</p>"
+        acc = "<ul><li>☐ Крупные яблоки!</li><li>☐ Супер!</li><li>☐ Фантастика!</li></ul>"
+        fast = "<p>◦ Крупные яблоки! ◦ Cnep! ◦ Фантастика!</p>"
         r = merge_page(acc, fast, "", digital=False)
         self.assertIn("Супер!", r.html)
         self.assertNotIn("Cnep", r.html)
 
     def test_case_vote(self):
-        acc = "<p>наказывайте его так, как вы обычно Это делаете.</p>"
-        fast = "<p>наказывайте его так, как вы обычно это делаете.</p>"
-        layer = "наказывайте его так, как вы обычно это делаете."
+        acc = "<p>поливайте куст так, как вы обычно Это делаете.</p>"
+        fast = "<p>поливайте куст так, как вы обычно это делаете.</p>"
+        layer = "поливайте куст так, как вы обычно это делаете."
         r = merge_page(acc, fast, layer, digital=False)
         self.assertIn("обычно это делаете", r.html)
 
     def test_digital_layer_wins(self):
-        acc = "<h3>Главнвя мысль</h3><p>Текст после заголовка идет дальше.</p>"
-        fast = "<h3>Гпавная мысль</h3><p>Текст после заголовка идет дальше.</p>"
-        layer = "Главная мысль Текст после заголовка идет дальше."
+        acc = "<h3>Главнов правило</h3><p>Текст после заголовка идет дальше.</p>"
+        fast = "<h3>Гпавное правило</h3><p>Текст после заголовка идет дальше.</p>"
+        layer = "Главное правило Текст после заголовка идет дальше."
         r = merge_page(acc, fast, layer, digital=True)
-        self.assertIn("Главная мысль", r.html)
+        self.assertIn("Главное правило", r.html)
 
     def test_unrelated_layer_changes_nothing(self):
-        acc = "<h1>Глава 1</h1><p>Первая страница рассказывает о том, как дети растут.</p>"
+        acc = "<h1>Глава 1</h1><p>Первая страница рассказывает о том, как яблони растут.</p>"
         layer = "Page 1 text line for the layer"
         r = merge_page(acc, acc, layer, digital=True)
         self.assertIn("Глава 1", r.html)
         self.assertEqual(r.fixed_words, 0)
 
     def test_dissimilar_word_not_replaced(self):
-        acc = "<p>Родители часто читают детям сказки перед сном.</p>"
-        fast = "<p>Родители часто поют детям сказки перед сном.</p>"
-        layer = "Родители часто поют детям сказки перед сном."
+        acc = "<p>Садовники часто читают яблоням стихи перед сном.</p>"
+        fast = "<p>Садовники часто поют яблоням стихи перед сном.</p>"
+        layer = "Садовники часто поют яблоням стихи перед сном."
         r = merge_page(acc, fast, layer, digital=False)
         self.assertIn("поют", r.html, "two witnesses agree on a whole different word: they win")
 
     def test_markup_preserved(self):
-        acc = "<p><b>ПРОБЛЕМА.</b> Очень трудно предсказать quando результаты</p>"
-        fast = "<p>ПРОБЛЕМА. Очень трудно предсказать когда результаты</p>"
+        acc = "<p><b>СОВЕТ.</b> Заранее трудно предсказать quando урожай</p>"
+        fast = "<p>СОВЕТ. Заранее трудно предсказать когда урожай</p>"
         r = merge_page(acc, fast, "", digital=False)
-        self.assertIn("<b>ПРОБЛЕМА.</b>", r.html)
-        self.assertIn("предсказать когда результаты", r.html)
+        self.assertIn("<b>СОВЕТ.</b>", r.html)
+        self.assertIn("предсказать когда урожай", r.html)
 
 
     def test_latin_word_kept_when_fast_agrees(self):
-        acc = "<p>Синдром ADHD описал Whitmore в своей книге подробно.</p>"
-        layer = "Синдром АDНD описал Whitmоrе в своей книге подробно."
+        acc = "<p>Сорт MELBA описал Whitmore в своей книге подробно.</p>"
+        layer = "Сорт МЕLВА описал Whitmоrе в своей книге подробно."
         r = merge_page(acc, acc, layer, digital=False)
-        self.assertIn("ADHD", r.html)
+        self.assertIn("MELBA", r.html)
         self.assertIn("Whitmore", r.html)
 
 
 class SpliceTest(unittest.TestCase):
     def test_missing_list_items_spliced(self):
-        acc = "<p>Исследования показывают, что результаты связаны с:</p>" + ul(ITEMS[:3])
-        fast = "<p>Исследования показывают, что результаты связаны с:</p>" + \
+        acc = "<p>Опыт садоводов говорит, что урожай связан с:</p>" + ul(ITEMS[:3])
+        fast = "<p>Опыт садоводов говорит, что урожай связан с:</p>" + \
             "<p>" + "<br/>".join("• " + i for i in ITEMS) + "</p>"
         r = merge_page(acc, fast, "", digital=False)
         self.assertEqual(r.source, "spliced")
@@ -112,7 +112,7 @@ class SpliceTest(unittest.TestCase):
         self.assertEqual(r.html.count("<ul"), 1, "a missing item joins the same list")
 
     def test_missing_paragraph_spliced_after_previous(self):
-        p1 = "Первый абзац рассказывает о том, как дети растут и учатся."
+        p1 = "Первый абзац рассказывает о том, как яблони растут и цветут."
         p2 = "Второй абзац пропал у точного режима целиком, хотя он важен."
         p3 = "Третий абзац завершает страницу и подводит итог сказанному."
         r = merge_page(f"<p>{p1}</p><p>{p3}</p>", f"<p>{p1}</p><p>{p2}</p><p>{p3}</p>", "", digital=False)
@@ -122,29 +122,29 @@ class SpliceTest(unittest.TestCase):
 
     def test_whole_page_from_fast(self):
         fast = "<p>" + " ".join(ITEMS * 3) + "</p>"
-        acc = "<p>Крепко прижать к себе</p>"
+        acc = "<p>Крепкие ветки держат</p>"
         r = merge_page(acc, fast, "", digital=False)
         self.assertEqual(r.source, "fast")
         self.assertEqual(r.html, fast)
 
     def test_complete_page_not_retried(self):
-        acc = "<p>Все родители мечтают, чтобы их дети выросли и стали успешными.</p>"
+        acc = "<p>Все садовники мечтают, чтобы их яблони выросли и дали урожай.</p>"
         r = merge_page(acc, acc, "", digital=False)
         self.assertEqual(r.source, "accurate")
         self.assertFalse(needs_retry(r))
 
     def test_misread_line_not_spliced_as_missing(self):
-        acc = ("<ul><li>☐ Отличная работа!</li><li>☐ Здорово!</li><li>☐ Потрясающе!</li>"
+        acc = ("<ul><li>☐ Крупные яблоки!</li><li>☐ Сочные груши!</li><li>☐ Спелые сливы!</li>"
                "<li>☐ Супер!</li><li>☐ Фантастика!</li></ul>")
-        fast = "<p>◦ Отличная работа!<br/>◦ Здорово!<br/>◦ Потрясающе!<br/>• Cnep!</p><h2>О Фантастика!</h2>"
+        fast = "<p>◦ Крупные яблоки!<br/>◦ Сочные груши!<br/>◦ Спелые сливы!<br/>• Cnep!</p><h2>О Фантастика!</h2>"
         r = merge_page(acc, fast, "", digital=False)
         self.assertNotIn("Cnep", r.html)
         self.assertEqual(r.inserted_blocks, 0)
 
     def test_truncated_paragraph_restored(self):
-        words = ("Последний абзац страницы рассказывает о том, как важно хвалить ребенка сразу, "
-                 "а не через час, потому что дети с СДВГ плохо связывают похвалу с поступком, "
-                 "если между ними прошло много времени и случилось что-то еще.")
+        words = ("Последний абзац страницы рассказывает о том, как важно поливать саженцы сразу, "
+                 "а не через час, потому что молодые корни плохо переносят сухую жаркую почву, "
+                 "если между поливами прошло много времени и земля успела высохнуть.")
         cut = " ".join(words.split()[:16])
         acc = f"<p>Первый абзац на месте.</p><p>{cut}</p>"
         fast = f"<p>Первый абзац на месте.</p><p>{words}</p>"
@@ -153,8 +153,8 @@ class SpliceTest(unittest.TestCase):
         self.assertEqual(r.html.count("<p>"), 2, "the words go back into the same paragraph")
 
     def test_moved_block_not_duplicated(self):
-        a = "Первый абзац рассказывает о том, как дети растут и учатся каждый день."
-        b = "Врезка: родителям стоит помнить, что поведение зависит от ситуации и усталости."
+        a = "Первый абзац рассказывает о том, как яблони растут и цветут каждую весну."
+        b = "Врезка: садоводам стоит помнить, что урожай зависит от погоды и от почвы."
         c = "Третий абзац завершает страницу и подводит итог всему сказанному выше."
         r = merge_page(f"<p>{a}</p><p>{c}</p><p>{b}</p>", f"<p>{a}</p><p>{b}</p><p>{c}</p>", "", digital=False)
         self.assertEqual([text(r.html).count(w) for w in ("Первый", "Врезка", "Третий")], [1, 1, 1], r.html)
@@ -163,7 +163,7 @@ class SpliceTest(unittest.TestCase):
         self.assertEqual([text(r.html).count(w) for w in ("Первый", "Врезка", "Третий")], [1, 1, 1], r.html)
 
     def test_extra_text_flagged(self):
-        page = "<p>Обычный текст страницы о воспитании детей и их поведении дома и в школе.</p>"
+        page = "<p>Обычный текст страницы об уходе за садом и о работе в теплице и на грядках.</p>"
         loop = "<p>" + " ".join(["и так далее"] * 40) + "</p>"
         r = merge_page(page + loop, page, "", digital=False)
         self.assertGreaterEqual(r.extra_run, 20)
@@ -172,8 +172,8 @@ class SpliceTest(unittest.TestCase):
         self.assertEqual(r.extra_run, 0)
 
     def test_junk_not_spliced(self):
-        acc = "<p>Хороший родитель должен быть с ребенком и наслаждаться им.</p>"
-        fast = "<p>Хороший родитель должен быть с ребенком и наслаждаться им.</p><p>Ш8Ш</p>"
+        acc = "<p>Хороший садовник должен быть в саду и наслаждаться им.</p>"
+        fast = "<p>Хороший садовник должен быть в саду и наслаждаться им.</p><p>Ш8Ш</p>"
         r = merge_page(acc, fast, "", digital=False)
         self.assertNotIn("Ш8Ш", r.html)
 
@@ -187,14 +187,14 @@ class SpliceTest(unittest.TestCase):
         self.assertIn("только в текстовом слое", r.html)
 
     def test_scan_layer_text_not_spliced(self):
-        acc = ("<p>Это относится не только к попыткам родителей помочь ребенку, но также к терапии и методам "
-               "специального обучения — избегайте тех, кто сосредоточен исключительно на обучении навыкам. "
-               "Вместо этого измените момент исполнения, чтобы показать ребенку, что он знает.</p>")
-        layer = ("Это относится не только кспециальногонапопыткамобучении навыкам и знаниямродителей помочьобучения "
-                 "— избегайте тех)ребенку. Вместо этого,, кто сосредоточен исключительноно такжеизмените момент "
-                 "исполнек терапии и методам- ния, чтобы показать ребенку, что он знает.")
+        acc = ("<p>Это относится не только к попыткам садовника помочь яблоне, но также к подкормке и методам "
+               "специальной обрезки — избегайте тех, кто сосредоточен исключительно на обрезке веток. "
+               "Вместо этого измените время полива, чтобы показать дереву, что оно растет.</p>")
+        layer = ("Это относится не только кспециальнойнапопыткамобрезке веток и корнейсадовника помочьобрезки "
+                 "— избегайте тех)яблоне. Вместо этого,, кто сосредоточен исключительноно такжеизмените время "
+                 "полик подкормке и методам- ва, чтобы показать дереву, что оно растет.")
         r = merge_page(acc, acc, layer, digital=False)
-        self.assertNotIn("исполнек", r.html, "the text layer of a scan is old OCR: its order can't be trusted")
+        self.assertNotIn("полик", r.html, "the text layer of a scan is old OCR: its order can't be trusted")
         self.assertEqual(r.inserted_blocks, 0)
 
 

@@ -33,10 +33,10 @@ def write(blocks, generator="pdf2epub hybrid"):
 class EpubTest(unittest.TestCase):
     def test_list_and_table_render(self):
         blocks = [Block("h", "Глава", "Глава", 1, page=1),
-                  Block("list", items=["☐ Крепко прижать", "☐ <b>Улыбнуться</b>"], page=1),
+                  Block("list", items=["☐ Крепкие ветки", "☐ <b>Цветение</b>"], page=1),
                   Block("table", rows=[["Утро", "<b>Да</b>"], ["Вечер", "Нет"]], page=1)]
         pages, _ = write(blocks)
-        self.assertIn('<ul class="list"><li>☐ Крепко прижать</li><li>☐ <b>Улыбнуться</b></li></ul>', pages)
+        self.assertIn('<ul class="list"><li>☐ Крепкие ветки</li><li>☐ <b>Цветение</b></li></ul>', pages)
         self.assertIn("<td>Утро</td><td><b>Да</b></td>", pages)
 
     def test_justified_text_is_hyphenated(self):
@@ -58,18 +58,18 @@ class EpubTest(unittest.TestCase):
 
 class HeadingRunsTest(unittest.TestCase):
     def test_heading_runs(self):
-        blocks = [Block("h", "ПРИНЦИП", "ПРИНЦИП", 1, page=38), Block("h", "1", "1", 2, page=38),
-                  Block("h", "ИСПОЛЬЗУЙТЕ КЛЮЧИ К УСПЕХУ", "ИСПОЛЬЗУЙТЕ КЛЮЧИ К УСПЕХУ", 1, page=38),
+        blocks = [Block("h", "ШАГ", "ШАГ", 1, page=38), Block("h", "1", "1", 2, page=38),
+                  Block("h", "ПОЛИВАЙТЕ САД ПО УТРАМ", "ПОЛИВАЙТЕ САД ПО УТРАМ", 1, page=38),
                   Block("p", "Текст", "Текст", page=38)]
         out = merge_heading_runs(blocks)
         self.assertEqual([b.kind for b in out], ["h", "p"])
-        self.assertEqual(out[0].text, "ПРИНЦИП 1. ИСПОЛЬЗУЙТЕ КЛЮЧИ К УСПЕХУ")
-        self.assertEqual(out[0].html, "ПРИНЦИП 1<br/>ИСПОЛЬЗУЙТЕ КЛЮЧИ К УСПЕХУ")
+        self.assertEqual(out[0].text, "ШАГ 1. ПОЛИВАЙТЕ САД ПО УТРАМ")
+        self.assertEqual(out[0].html, "ШАГ 1<br/>ПОЛИВАЙТЕ САД ПО УТРАМ")
         self.assertEqual(out[0].level, 1)
 
     def test_separate_headings_stay(self):
         blocks = [Block("h", "ПРЕДИСЛОВИЕ", "ПРЕДИСЛОВИЕ", 1, page=15),
-                  Block("h", "Как пользоваться этой книгой", "Как пользоваться этой книгой", 2, page=15)]
+                  Block("h", "Как читать этот справочник", "Как читать этот справочник", 2, page=15)]
         self.assertEqual(len(merge_heading_runs(blocks)), 2)
 
 

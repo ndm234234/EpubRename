@@ -125,7 +125,7 @@ ONE_LETTER_WORDS = set("аиовкуся") | set("aio")
 
 
 def fix_drop_cap(blocks: list[Block]) -> None:
-    """'В се родители' / 'Dсе родители' after a chapter heading -> 'Все родители'.
+    """'В се садовники' / 'Dсе садовники' after a chapter heading -> 'Все садовники'.
 
     'В' or 'А' can be words themselves, so a space is only closed up when the joined word
     is used elsewhere in the book and the cut-off rest is not a word of the book.
@@ -479,20 +479,20 @@ LABEL_NUMBER = re.compile(r"\d{1,3}|[IVXLC]{1,6}")
 
 
 def merge_heading_runs(blocks: list[Block]) -> list[Block]:
-    """'ПРИНЦИП' + '1' + 'ИСПОЛЬЗУЙТЕ КЛЮЧИ' (headings in a row on one page) -> one heading
-    'ПРИНЦИП 1. ИСПОЛЬЗУЙТЕ КЛЮЧИ'. Only a word followed by a number, and such a label
+    """'ШАГ' + '1' + 'ПОЛИВАЙТЕ САД' (headings in a row on one page) -> one heading
+    'ШАГ 1. ПОЛИВАЙТЕ САД'. Only a word followed by a number, and such a label
     followed by its title, are joined; other headings in a row stay apart."""
     out: list[Block] = []
     for b in blocks:
         prev = out[-1] if out else None
         if b.kind == "h" and prev is not None and prev.kind == "h" and prev.page == b.page:
             words = prev.text.split()
-            if len(words) == 1 and LABEL_NUMBER.fullmatch(b.text):          # "ПРИНЦИП" + "1"
+            if len(words) == 1 and LABEL_NUMBER.fullmatch(b.text):          # "ШАГ" + "1"
                 prev.text, prev.html = f"{prev.text} {b.text}", f"{prev.html} {b.html}"
                 prev.level = min(prev.level, b.level)
                 continue
             if len(words) == 2 and LABEL_NUMBER.fullmatch(words[1]) and b.level <= 2 \
-                    and not LABEL_NUMBER.fullmatch(b.text):                  # "ПРИНЦИП 1" + title
+                    and not LABEL_NUMBER.fullmatch(b.text):                  # "ШАГ 1" + title
                 prev.text, prev.html = f"{prev.text}. {b.text}", f"{prev.html}<br/>{b.html}"
                 prev.level = min(prev.level, b.level)
                 continue
