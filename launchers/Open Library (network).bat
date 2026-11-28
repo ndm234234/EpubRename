@@ -3,7 +3,7 @@ rem Opens the book catalog (index.html in this folder) for this computer AND you
 rem so you can read on a phone or tablet connected to the same Wi-Fi.
 rem Only devices with home-network addresses (192.168.x.x, 10.x.x.x, 172.16-31.x.x) get an answer;
 rem files are only read; signed-in devices save their reading places in the .sync folder (library-sync.ps1,
-rem next to this file). Anyone on your Wi-Fi who knows the address can open it.
+rem next to this file). Other devices get only a sign-in page until they sign in with an account.
 rem The first time, Windows asks whether PowerShell may use the network: allow it for Private networks.
 rem Close this window to stop. Uses PowerShell, which is part of Windows: nothing to install.
 set "LIB_SELF=%~f0"
@@ -114,6 +114,57 @@ function WatchDevices {
     $book = if ($d.book) { ", was reading «$($d.book)»" } else { '' }
     Say "- $($d.label) — $why; was here $(Minutes (($d.last - $d.first).TotalSeconds))$book    [devices: $($devices.Count)]"
   }
+}
+
+# ---- the sign-in gate: from anywhere but this computer, nothing without a sign-in but the
+# sign-in page (the twin of library_sync.gate; the router forwards the internet from a home address)
+$signinPage = [IO.Path]::Combine($root, 'signin.html')
+$openPosts = @('/__sync/login', '/__sync/register', '/__sync/session', '/__sync/logout')
+$shut = @{}
+
+# This computer asking for itself: a loopback client AND a loopback host name (a tunnel or proxy on
+# this computer comes from 127.0.0.1 too, but with its own public host name)
+function IsLocal($addr, $headers) {
+  if ($addr.IsIPv4MappedToIPv6) { $addr = $addr.MapToIPv4() }
+  if (-not [Net.IPAddress]::IsLoopback($addr)) { return $false }
+  $h = ([string]$headers['Host']).Trim().ToLowerInvariant()
+  return (($h -cmatch '^(localhost|127\.0\.0\.1)(:\d+)?\z') -or ($h -cmatch '^\[::1\](:\d+)?\z'))
+}
+
+# $true: the request may go on. $false: answered 401 already (a page asked for gets signin.html,
+# anything else an empty body); logged once per device until it is let in.
+function Gate($rq, $method, $target, $addr, $ip, $ua) {
+  $headers = $rq.Headers
+  # decoded, as the files are served (%5F_library_root is __library_root there)
+  try { $p = '/' + [Uri]::UnescapeDataString($target.Split('?')[0]).TrimStart('/') } catch { $p = $target.Split('?')[0] }
+  $key = "$ip|$(DeviceKind $ua)"
+  $ok = IsLocal $addr $headers
+  if (-not $ok -and $p -cne '/__library_root') {   # only launchers on this computer ask that one
+    if (($method -ceq 'GET' -or $method -ceq 'HEAD') -and $p -ceq '/signin.html') { $ok = $true }
+    elseif ($method -ceq 'POST' -and $openPosts -ccontains $p) { $ok = $true }
+    else {
+      try { if (Test-SyncSignedIn $store $headers) { $ok = $true } } catch {}
+    }
+  }
+  if ($ok) { $shut.Remove($key); return $true }
+  if (-not $shut[$key]) { $shut[$key] = $true; Say "! $ip · $(DeviceKind $ua) — not signed in" }
+  if ($method -ceq 'POST' -or $method -ceq 'PUT') { SkipBody $rq }
+  $accept = [string]$headers['Accept']
+  $asksPage = ([string]$headers['Sec-Fetch-Mode'] -ceq 'navigate') -or $accept.Contains('text/html') -or
+              (($method -ceq 'GET' -or $method -ceq 'HEAD') -and ($p.EndsWith('/') -or $p.EndsWith('.html')))
+  $bytes = New-Object byte[] 0
+  $type = 'text/plain; charset=utf-8'
+  if ($asksPage) {
+    $type = 'text/html; charset=utf-8'
+    try { $bytes = [IO.File]::ReadAllBytes($signinPage) }
+    catch { $bytes = [Text.Encoding]::UTF8.GetBytes('<!doctype html><title>Library</title><p id="signin">Sign in to open the library.</p>') }
+  }
+  $h = "HTTP/1.1 401 Unauthorized`r`nContent-Type: $type`r`nContent-Length: $($bytes.Length)`r`n" +
+       "Cache-Control: no-store`r`nConnection: close`r`n`r`n"
+  $hb = [Text.Encoding]::ASCII.GetBytes($h)
+  $rq.Stream.Write($hb, 0, $hb.Length)
+  if ($bytes.Length -gt 0 -and $method -cne 'HEAD') { $rq.Stream.Write($bytes, 0, $bytes.Length) }
+  return $false
 }
 
 function PlainIp($addr) {
@@ -245,7 +296,9 @@ function ServeSync($rq, $method, $target) {
   $status = [int]$answer.Status
   $h = "HTTP/1.1 $status $($reasons[$status])`r`n"
   if ($status -ne 204) { $h += "Content-Type: $($answer.Type)`r`n" }
-  $h += "Content-Length: $($answer.Body.Length)`r`nCache-Control: no-store`r`nConnection: close`r`n`r`n"
+  $h += "Content-Length: $($answer.Body.Length)`r`nCache-Control: no-store`r`n"
+  if ($answer.Cookie) { $h += "Set-Cookie: $($answer.Cookie)`r`n" }   # the sign-in cookie (library-sync.ps1)
+  $h += "Connection: close`r`n`r`n"
   $bytes = [Text.Encoding]::ASCII.GetBytes($h)
   $stream.Write($bytes, 0, $bytes.Length)
   if ($answer.Body.Length -gt 0) { $stream.Write($answer.Body, 0, $answer.Body.Length) }
@@ -283,6 +336,7 @@ function Serve($client) {
       Plain $stream '403 Forbidden' 'Forbidden' $headOnly; return
     }
     $ip = PlainIp $addr
+    if ($parts.Length -ge 2 -and -not (Gate $rq $method $parts[1] $addr $ip $ua)) { return }
     if ($parts.Length -ge 2 -and $method -eq 'POST' -and $parts[1].Split('?')[0] -eq '/__bye') {   # the page is closing
       SkipBody $rq; Bye $ip $ua; Head $stream '204 No Content' 'text/plain' 0; return
     }
@@ -384,7 +438,7 @@ Write-Host ""
 Write-Host "  Library is open on your home network." -ForegroundColor Green
 Write-Host ""
 if ($addresses.Count) {
-  Write-Host "  On a phone or tablet in the same Wi-Fi open:"
+  Write-Host "  This computer in the home network (forward this port on the router, which does the https):"
   foreach ($a in $addresses) { Write-Host "      http://${a}:$port/" -ForegroundColor Cyan }
   if ($addresses.Count -gt 1) { Write-Host "  (several addresses: this computer has several networks; try the 192.168... one first)" }
 } else {
@@ -396,8 +450,8 @@ Write-Host "  Folder:            $root"
 Write-Host ""
 Write-Host "  The phone can't connect? Allow PowerShell in the Windows Firewall question" -ForegroundColor DarkGray
 Write-Host "  (Private networks), and check that this Wi-Fi is set as a Private network." -ForegroundColor DarkGray
-Write-Host "  Anyone on this Wi-Fi who knows the address can open the library; only reading places are written" -ForegroundColor DarkGray
-Write-Host "  (to the .sync folder), and only by signed-in devices." -ForegroundColor DarkGray
+Write-Host "  Other devices see only a sign-in page until they sign in, on the library's https:// address" -ForegroundColor DarkGray
+Write-Host "  (the router's); a new account needs the library code. Only reading places are written (.sync)." -ForegroundColor DarkGray
 try { $code = Get-SyncCode $store } catch { $code = "(can't read .sync\code.txt: $($_.Exception.Message))" }
 Write-Host "  Library code (to create an account on a new device): $code"
 Write-Host "  Close this window to stop."

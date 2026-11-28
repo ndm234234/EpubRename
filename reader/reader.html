@@ -2491,7 +2491,10 @@ $("acct").addEventListener("keydown", e => {   // typing here never turns pages
   if (e.key === "Escape") { e.preventDefault(); toggleAcct(false); }
 });
 $("acctSync").onclick = () => { acctError(""); syncFromPanel(); };
-$("acctSignOut").onclick = async () => { await Sync.logout(); syncResult = ""; acctError(""); showAcct(); };
+$("acctSignOut").onclick = async () => { await Sync.logout(); syncResult = ""; acctError(""); showAcct();
+  // a library behind the sign-in (the network launcher) is closed now: show its sign-in page
+  try { if ((await fetch(location.href, { cache: "no-store" })).status === 401) location.reload(); } catch {}
+};
 $("acctBtn").onclick = e => { e.stopPropagation(); toggleAcct(); };
 if (Sync.available()) $("acctBtn").classList.remove("hidden");   // secure pages only: a password never crosses the Wi-Fi in the clear
 

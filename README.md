@@ -148,7 +148,7 @@ Scans `FOLDER` (default: `Out` in the current folder) recursively and writes:
 - `FOLDER/.index/reader/` — the reader (copied from `reader/` next to the script);
 - `FOLDER/Open Library.bat`, `FOLDER/Open Library.sh` and their `(network)` versions —
   launchers (from `launchers/`), with `library_sync.py` and `library-sync.ps1`, the code
-  behind accounts and sync (below).
+  behind accounts and sync (below), and `signin.html`, the network library's sign-in page.
 
 EPUB files are only read. Keep `.index/` next to `index.html` when moving the catalog.
 
@@ -308,7 +308,7 @@ account to have them on every device, below). The window shows the library code 
 The Windows launchers share `launchers/library-sync.ps1`, the Linux ones `launchers/library_sync.py`;
 both keep the same files in `.sync/`, so a `.bat` and a `.sh` can serve one library. To try the
 sync store on its own: `python3 launchers/library_sync.py --serve FOLDER --port 8000` (this
-computer only, no browser). The manual check for Windows is `tests/windows-sync-checklist.md`.
+computer only, no browser; `--gate` adds the network launchers' sign-in, below). The manual check for Windows is `tests/windows-sync-checklist.md`.
 
 #### Reading on a phone or tablet (home Wi-Fi)
 
@@ -316,11 +316,21 @@ computer only, no browser). The manual check for Windows is `tests/windows-sync-
 the library can also be opened from other devices in your home network. The window shows the
 address to type on the phone, e.g. `http://192.168.1.64:48865/`.
 
+- **Only for people signed in.** Any device but this computer gets nothing of the library — no
+  catalog, covers, books or list — only a sign-in page, until it signs in with an account (see
+  Accounts, below; a new account needs the library code). This matters when the router forwards a
+  port to the library and does the https itself: then every request from the internet arrives
+  from the router's home address, and the home-network filter below lets it through. One sign-in
+  per device, kept for 400 days; devices already signed in for sync get in without the password;
+  "Sign out" closes the library to that device again (books it already downloaded for offline
+  reading stay on it). The sign-in page asks for a password only on the **https** address (at home
+  too); on a plain `http://` one it says to open the https one. This computer itself
+  (`localhost`) needs no sign-in.
 - Only home-network addresses (`192.168.x.x`, `10.x.x.x`, `172.16–31.x.x`, link-local) get an
-  answer, so even a port forwarded on the router doesn't put the library on the internet.
-  For reading away from home use a VPN to your home network instead.
+  answer, so without a router that forwards the internet the library stays at home.
 - Files are only read; folder listings and uploads are refused.
-- Anyone on the same Wi-Fi who knows the address can open the library.
+- Changing the library code (edit `.sync/code.txt`) only stops new accounts with the old code;
+  accounts made before and devices signed in keep working.
 - Windows asks once whether PowerShell may use the network: allow it for **Private** networks
   (and check the Wi-Fi is set as a Private network). No administrator rights needed.
   On Linux a firewall (`ufw`, `firewalld`) may need to allow the port.
@@ -648,7 +658,10 @@ FULL=1 tests/reader/run.sh "Jane Doe/Jane Doe - A Quiet Harbour.epub"   # every 
   stays after a file is chosen and leads back;
 - `bold-unit.mjs`, `bold.mjs` — *Bold word starts*: which letters get bold, every address the
   same with it as without it (made and resolved), the switch on this device only, the place and
-  bookmarks kept across switching; `nav.mjs` and `scroll.mjs` run again with it on (`BOLD=1`).
+  bookmarks kept across switching; `nav.mjs` and `scroll.mjs` run again with it on (`BOLD=1`);
+- `signin.mjs` — the network library's sign-in page (a second server with `--gate`, reached as
+  `library.test`): no form on plain http, sign-in and a new account open the page asked for, a
+  device signed in before gets in without the form, "Sign out" shows the sign-in page again.
 
 Several books run side by side; the output keeps only failures and each check's verdict.
 `W`/`H` set the screen, `TOUCH=0` a desktop, `SHOTS=dir` saves screenshots.

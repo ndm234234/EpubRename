@@ -1877,7 +1877,10 @@ $("acctPop").addEventListener("keydown", e => {
   if (e.key === "Escape") { e.preventDefault(); toggleAcct(false); $("acctBrand").focus(); }
 });
 $("acctSync").onclick = () => { acctError(""); syncFromPanel(); };
-$("acctSignOut").onclick = async () => { await Sync.logout(); syncResult = ""; acctError(""); showAcct(); };
+$("acctSignOut").onclick = async () => { await Sync.logout(); syncResult = ""; acctError(""); showAcct();
+  // a library behind the sign-in (the network launcher) is closed now: show its sign-in page
+  try { if ((await fetch(location.href, { cache: "no-store" })).status === 401) location.reload(); } catch {}
+};
 $("acctBrand").onclick = e => { e.stopPropagation(); toggleAcct(); };
 document.addEventListener("click", e => {   // a click elsewhere closes the panel
   if (!$("acctPop").hidden && !$("acctPop").contains(e.target) && !$("acctBrand").contains(e.target)) toggleAcct(false);

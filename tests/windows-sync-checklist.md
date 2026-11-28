@@ -39,6 +39,28 @@ with `python3 make_server.py <folder>`), so `library-sync.ps1` sits next to the 
 6. With both `.bat` files running on the same library, run the contract against each port in turn:
    both `all ok`.
 
+## 2a. Sign-in gate (network launcher)
+
+Steps 2-6 above run from this computer or with the library's own address; the gate shuts out only
+requests that are neither. Here `<ip>` is the Windows computer's home address and `<port>` its port.
+
+1. From another computer: `curl -i http://<ip>:<port>/` → `401 Unauthorized`, the body is the
+   sign-in page (`id="signin"`); `curl -i http://<ip>:<port>/.index/library.json` → `401`, empty body;
+   the same for a book's address and `/__library_root`. The window shows one
+   `! <ip> · unknown browser — not signed in` line, not one per request.
+2. On this computer: `http://localhost:<port>/` opens the catalog without a sign-in.
+3. `curl -i -X POST -H "Content-Type: application/json" -d '{"login":"jane.doe@example.com","password":"<pw>"}' http://<ip>:<port>/__sync/login`
+   → `200` with `Set-Cookie: libsess=<64 hex>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=34560000`.
+   `curl -i -H "Cookie: libsess=<that>" http://<ip>:<port>/index.html` → `200`, the catalog.
+4. `curl -i -X POST -H "Authorization: Bearer <that>" http://<ip>:<port>/__sync/session` → `204` with the
+   same `Set-Cookie`; with a made-up 64-hex token → `401`, no `Set-Cookie`.
+5. `curl -i -X POST -H "Authorization: Bearer <that>" http://<ip>:<port>/__sync/logout` → `204` with
+   `Set-Cookie: libsess=; ... Max-Age=0`; the cookie then gets `401` again (at most a minute later:
+   sign-ins are remembered for 60 s, sign-out forgets them at once). The same logout again → `401`,
+   still with `Max-Age=0`.
+6. A phone through the router's https address: the sign-in page; sign in → the catalog; books open;
+   "Sign out" → the sign-in page.
+
 ## 3. Short-name check (only the `.bat` servers need it)
 
 1. In `cmd`: `dir /x <library>` shows the short name of `.sync` (for example `SYNC~1`), if the

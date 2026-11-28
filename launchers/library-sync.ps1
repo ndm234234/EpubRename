@@ -8,7 +8,10 @@
 #
 # Interface (the .bat files dot-source this file):
 #   New-SyncStore $root                                   -> store
-#   Invoke-SyncRequest $store $method $path $headers $body -> @{ Status; Type; Body = [byte[]] }
+#   Invoke-SyncRequest $store $method $path $headers $body -> @{ Status; Type; Body = [byte[]]; Cookie }
+#                                                            (Cookie: a Set-Cookie value, or absent)
+#   Test-SyncSignedIn $store $headers                     -> the login of the device token the request
+#                                                            carries (libsess cookie or Bearer), or $null
 #   Test-SyncPrivate $urlPath                             -> $true for a path with a `.sync` segment
 #   Test-SyncPrivateFile $root $fullPath                  -> $true if an existing file lies in .sync
 #   Get-SyncCode $store                                   -> the library code (made on first call)
@@ -36,6 +39,11 @@ $global:SyncReserved = @('con', 'prn', 'aux', 'nul', 'com1', 'com2', 'com3', 'co
 # the account's email (lower-case): the same pattern string as EMAIL_PATTERN in library_sync.py
 $global:SyncEmailPattern = '(?=[^@]{1,64}@)[a-z0-9_+-]+(?:\.[a-z0-9_+-]+)*@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+'
 $global:SyncEmailMax = 128
+# The sign-in cookie of the network library (library_sync.py: COOKIE, COOKIE_ATTRS, COOKIE_AGE)
+$global:SyncCookie = 'libsess'
+$global:SyncCookieAttrs = 'HttpOnly; Secure; SameSite=Lax; Path=/'
+$global:SyncCookieAge = 34560000
+$global:SyncSignedFor = 60   # seconds a token found valid is taken as valid without a lookup
 # One JSON token (after optional whitespace) per match; \G makes the matches back to back, so the
 # text is valid only if they reach its end. NaN/Infinity are accepted, as Python's json does.
 $global:SyncJsonRe = [regex]::new(
@@ -497,6 +505,7 @@ function New-SyncStore([string]$root) {
     Dir = [IO.Path]::Combine([IO.Path]::GetFullPath($root), '.sync')
     CodeThrottle = @{}   # throttle state lives in memory only
     PwThrottle = @{}
+    Signed = @{}         # token -> @{ Login; Until }: the sign-in gate asks on every request
   }
 }
 
@@ -597,8 +606,8 @@ function Write-SyncData($store, [string]$login, $version, [string]$rawDoc) {
   Write-SyncFile (Get-SyncDataPath $store $login) ('{"version": ' + $v + ', "doc": ' + $rawDoc + '}')
 }
 
-# @{ Login; Token } of the account holding the bearer token, or $null
-function Get-SyncAuth($store, [hashtable]$headers) {
+# The lower-case token of an `Authorization: Bearer` header, or $null
+function Get-SyncBearer([hashtable]$headers) {
   $auth = ''
   if ($null -ne $headers) {
     foreach ($k in @($headers.Keys)) {
@@ -609,6 +618,52 @@ function Get-SyncAuth($store, [hashtable]$headers) {
   if (-not $m.Success -or $m.Groups[1].Value.ToLowerInvariant() -cne 'bearer') { return $null }
   $token = $m.Groups[2].Value.Trim().ToLowerInvariant()
   if ($token -cnotmatch '^[0-9a-f]{64}\z') { return $null }
+  return $token
+}
+
+# The token in the libsess cookie, or $null
+function Get-SyncCookieToken([hashtable]$headers) {
+  if ($null -eq $headers) { return $null }
+  foreach ($k in @($headers.Keys)) {
+    if (([string]$k).ToLowerInvariant() -cne 'cookie') { continue }
+    foreach ($part in ([string]$headers[$k]).Split(';')) {
+      $i = $part.IndexOf('=')
+      if ($i -lt 0) { continue }
+      if ($part.Substring(0, $i).Trim() -cne $global:SyncCookie) { continue }
+      $v = $part.Substring($i + 1).Trim().ToLowerInvariant()
+      if ($v -cmatch '^[0-9a-f]{64}\z') { return $v }
+    }
+  }
+  return $null
+}
+
+# @{ Login; Token } of the account holding the bearer token, or $null
+function Get-SyncAuth($store, [hashtable]$headers) {
+  $token = Get-SyncBearer $headers
+  if ($null -eq $token) { return $null }
+  $login = Find-SyncTokenLogin $store $token
+  if ($null -eq $login) { return $null }
+  return @{ Login = $login; Token = $token }
+}
+
+# The login whose device token the request carries (Bearer header or libsess cookie), or $null
+function Test-SyncSignedIn($store, [hashtable]$headers) {
+  $now = [DateTime]::UtcNow
+  foreach ($token in @((Get-SyncBearer $headers), (Get-SyncCookieToken $headers))) {
+    if ($null -eq $token) { continue }
+    $hit = $store.Signed[$token]
+    if ($null -ne $hit -and $hit.Until -gt $now) { return $hit.Login }
+    $login = Find-SyncTokenLogin $store $token
+    if ($null -ne $login) {
+      $store.Signed[$token] = @{ Login = $login; Until = $now.AddSeconds($global:SyncSignedFor) }
+      return $login
+    }
+  }
+  return $null
+}
+
+# The account holding this device token, or $null
+function Find-SyncTokenLogin($store, [string]$token) {
   $want = Get-SyncTokenHash $token
   $dir = [IO.Path]::Combine($store.Dir, 'accounts')
   if (-not [IO.Directory]::Exists($dir)) { return $null }
@@ -627,7 +682,7 @@ function Get-SyncAuth($store, [hashtable]$headers) {
       if ($t.K -cne 's') { continue }
       $tv = ConvertFrom-SyncJsonString $t.R
       if ((Test-SyncAscii $tv) -and (Test-SyncEqual $want $tv.ToLowerInvariant())) {
-        return @{ Login = [IO.Path]::GetFileNameWithoutExtension($f); Token = $token }
+        return [IO.Path]::GetFileNameWithoutExtension($f)
       }
     }
   }
@@ -796,11 +851,18 @@ function Invoke-SyncLogin($store, [hashtable]$headers, [byte[]]$body) {
   return (New-SyncAnswer 200 ('{"token": "' + $token + '"}'))
 }
 
+# A device signed in before the gate: its Bearer token becomes the cookie (Invoke-SyncRequest)
+function Invoke-SyncSession($store, [hashtable]$headers, [byte[]]$body) {
+  if ($null -eq (Get-SyncAuth $store $headers)) { return (New-SyncError 401 'unauthorized') }
+  return (New-SyncAnswer 204 '')
+}
+
 function Invoke-SyncLogout($store, [hashtable]$headers, [byte[]]$body) {
   $lock = Enter-SyncLock $store
   try {
     $auth = Get-SyncAuth $store $headers
     if ($null -eq $auth) { return (New-SyncError 401 'unauthorized') }
+    $store.Signed.Remove($auth.Token)   # this key is no sign-in any more, at once
     $path = Get-SyncAccountPath $store $auth.Login
     $j = Read-SyncJson $path ($auth.Login + '.json')
     $tokens = Get-SyncMember $j.Node 'tokens'
@@ -883,11 +945,31 @@ function Invoke-SyncPlace($store, [hashtable]$headers, [byte[]]$body) {
   return (New-SyncAnswer 204 '')
 }
 
-# One /__sync/ request -> @{ Status; Type; Body }. $headers: name -> value; $body: the request body.
+# One /__sync/ request -> @{ Status; Type; Body; Cookie }. $headers: name -> value; $body: the request
+# body. Cookie: the libsess cookie sign-in, registration and session set, and sign-out clears.
 function Invoke-SyncRequest($store, [string]$method, [string]$path, [hashtable]$headers, [byte[]]$body) {
+  $answer = Invoke-SyncRoute $store $method $path $headers $body
+  $p = ($path -split '[?#]', 2)[0]
+  $token = $null
+  if (($p -ceq '/__sync/login' -or $p -ceq '/__sync/register') -and $answer.Status -eq 200) {
+    $m = [regex]::Match([Text.Encoding]::ASCII.GetString($answer.Body), '"token":\s*"([0-9a-f]{64})"')
+    if ($m.Success) { $token = $m.Groups[1].Value }
+  } elseif ($p -ceq '/__sync/session' -and $answer.Status -eq 204) {
+    $token = Get-SyncBearer $headers
+  } elseif ($p -ceq '/__sync/logout') {   # always: the page can't clear an HttpOnly cookie itself
+    $answer.Cookie = $global:SyncCookie + '=; ' + $global:SyncCookieAttrs + '; Max-Age=0'
+  }
+  if ($null -ne $token) {
+    $answer.Cookie = $global:SyncCookie + '=' + $token + '; ' + $global:SyncCookieAttrs + '; Max-Age=' + $global:SyncCookieAge
+  }
+  return $answer
+}
+
+function Invoke-SyncRoute($store, [string]$method, [string]$path, [hashtable]$headers, [byte[]]$body) {
   $ErrorActionPreference = 'Stop'
   $p = ($path -split '[?#]', 2)[0]
-  if ($p -ceq '/__sync/register' -or $p -ceq '/__sync/login' -or $p -ceq '/__sync/logout' -or $p -ceq '/__sync/place') {
+  if ($p -ceq '/__sync/register' -or $p -ceq '/__sync/login' -or $p -ceq '/__sync/logout' -or
+      $p -ceq '/__sync/session' -or $p -ceq '/__sync/place') {
     $allowed = @('POST')
   } elseif ($p -ceq '/__sync/data') {
     $allowed = @('GET', 'PUT')
@@ -901,6 +983,7 @@ function Invoke-SyncRequest($store, [string]$method, [string]$path, [hashtable]$
     if ($p -ceq '/__sync/register') { return (Invoke-SyncRegister $store $headers $body) }
     if ($p -ceq '/__sync/login') { return (Invoke-SyncLogin $store $headers $body) }
     if ($p -ceq '/__sync/logout') { return (Invoke-SyncLogout $store $headers $body) }
+    if ($p -ceq '/__sync/session') { return (Invoke-SyncSession $store $headers $body) }
     if ($p -ceq '/__sync/place') { return (Invoke-SyncPlace $store $headers $body) }
     return (Invoke-SyncData $store $method $headers $body)
   } catch {
